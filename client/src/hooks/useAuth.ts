@@ -41,22 +41,7 @@ export function useAuth() {
     const checkAuth = async () => {
       const currentToken = localStorage.getItem(TOKEN_KEY);
       if (!currentToken) {
-        // Automatically create a seamless guest session if none exists
-        try {
-          const res = await fetch('/api/auth/guest', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({}),
-          });
-          const data = await res.json();
-          if (data.success && data.user && data.token) {
-            saveAuth(data.user, data.token);
-          }
-        } catch {
-          // Ignore network errors in initial guest fallback
-        } finally {
-          setIsLoading(false);
-        }
+        setIsLoading(false);
         return;
       }
 
@@ -69,17 +54,8 @@ export function useAuth() {
           setUser(data.user);
           localStorage.setItem(USER_KEY, JSON.stringify(data.user));
         } else {
-          // Token expired or invalid, renew with guest
+          // Token expired or invalid
           clearAuth();
-          const guestRes = await fetch('/api/auth/guest', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({}),
-          });
-          const guestData = await guestRes.json();
-          if (guestData.success) {
-            saveAuth(guestData.user, guestData.token);
-          }
         }
       } catch (err) {
         console.warn('Failed to verify token:', err);
@@ -89,17 +65,19 @@ export function useAuth() {
     };
 
     checkAuth();
-  }, [saveAuth, clearAuth]);
+  }, [clearAuth]);
 
   // Global window message listener for OAuth popups
   useEffect(() => {
     const handleOAuthMessage = (event: MessageEvent) => {
-      const origin = event.origin;
-      if (
-        !origin.endsWith('.run.app') &&
-        !origin.includes('localhost') &&
-        origin !== window.location.origin
-      ) {
+      const allowedOrigins = [
+        window.location.origin,
+        'http://localhost:5173',
+        'http://localhost:3000',
+        'http://127.0.0.1:5173',
+        'http://127.0.0.1:3000',
+      ];
+      if (!allowedOrigins.includes(event.origin)) {
         return;
       }
 
@@ -267,26 +245,10 @@ export function useAuth() {
           window.addEventListener('message', handleMsg);
         });
       } else {
-        // When client credentials are not configured yet, authenticate with Google demo profile
-        const demoRes = await fetch('/api/auth/google/demo', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            email: options?.email || 'parasmanikhunte@gmail.com',
-            name: options?.name || 'Paras Mani Khunte',
-          }),
-        });
-        const demoData = await demoRes.json();
-        if (demoData.success && demoData.user && demoData.token) {
-          saveAuth(demoData.user, demoData.token);
-          fetchMyRooms();
-          return {
-            success: true,
-            isDemo: true,
-            message: 'Signed in with Google (Sandbox demo mode).',
-          };
-        }
-        return { success: false, error: demoData.error || 'Google sign-in failed' };
+        return {
+          success: false,
+          error: urlData.message || 'Google OAuth is not configured on the server. Please verify GOOGLE_CLIENT_ID in server/.env.',
+        };
       }
     } catch (err: any) {
       return { success: false, error: err.message || 'Network error during Google sign-in' };

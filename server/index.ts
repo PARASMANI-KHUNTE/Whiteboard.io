@@ -1,8 +1,9 @@
+import dotenv from "dotenv";
 import express from "express";
 import http from "http";
 import path from "path";
+import fs from "fs";
 import { Server as SocketIOServer, Socket } from "socket.io";
-import { createServer as createViteServer } from "vite";
 import {
   registerUser,
   loginUser,
@@ -15,7 +16,17 @@ import {
   generateRoomCode,
   loadRoomElements,
   saveRoomElements,
-} from "./server/auth";
+  saveRoomElementsDebounced,
+} from "./auth";
+import { connectDb } from "./db";
+import { fileURLToPath } from "url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Load environment variables from server/.env
+dotenv.config({ path: path.resolve(__dirname, ".env") });
+dotenv.config();
 
 interface CanvasElement {
   id: string;
@@ -68,11 +79,11 @@ interface RoomData {
 const PORT = 3000;
 const rooms = new Map<string, RoomData>();
 
-function getOrCreateRoom(roomId: string): RoomData {
+async function getOrCreateRoom(roomId: string): Promise<RoomData> {
   let room = rooms.get(roomId);
   if (!room) {
-    const meta = getRoomMeta(roomId);
-    const persistedElements = loadRoomElements(roomId);
+    const meta = await getRoomMeta(roomId);
+    const persistedElements = await loadRoomElements(roomId);
     room = {
       id: roomId,
       name: meta?.name || `Room ${roomId}`,
@@ -93,6 +104,7 @@ function getOrCreateRoom(roomId: string): RoomData {
 }
 
 async function startServer() {
+  await connectDb();
   const app = express();
   const server = http.createServer(app);
   const io = new SocketIOServer(server, {
@@ -104,6 +116,13 @@ async function startServer() {
   });
 
   app.use(express.json());
+  app.use((err: any, _req: express.Request, res: express.Response, next: express.NextFunction) => {
+    if (err instanceof SyntaxError && 'status' in err && (err as any).status === 400) {
+      res.status(400).json({ success: false, error: 'Malformed JSON payload' });
+      return;
+    }
+    next(err);
+  });
 
   // Health check
   app.get("/api/health", (_req, res) => {
@@ -115,44 +134,44 @@ async function startServer() {
   });
 
   // Authentication Routes
-  app.post("/api/auth/register", (req, res) => {
+  app.post("/api/auth/register", async (req, res) => {
     try {
       const { username, email, password, name, color } = req.body;
-      const result = registerUser({ username, email, password, name, color });
+      const result = await registerUser({ username, email, password, name, color });
       res.json({ success: true, ...result });
     } catch (err: any) {
       res.status(400).json({ success: false, error: err.message || "Registration failed" });
     }
   });
 
-  app.post("/api/auth/login", (req, res) => {
+  app.post("/api/auth/login", async (req, res) => {
     try {
       const { identifier, password } = req.body;
-      const result = loginUser(identifier, password);
+      const result = await loginUser(identifier, password);
       res.json({ success: true, ...result });
     } catch (err: any) {
       res.status(400).json({ success: false, error: err.message || "Login failed" });
     }
   });
 
-  app.post("/api/auth/guest", (req, res) => {
+  app.post("/api/auth/guest", async (req, res) => {
     try {
       const { name, color } = req.body;
-      const result = createGuestUser(name, color);
+      const result = await createGuestUser(name, color);
       res.json({ success: true, ...result });
     } catch (err: any) {
       res.status(400).json({ success: false, error: err.message || "Guest session failed" });
     }
   });
 
-  app.get("/api/auth/me", (req, res) => {
+  app.get("/api/auth/me", async (req, res) => {
     const authHeader = req.headers.authorization;
     const token = authHeader?.replace("Bearer ", "")?.trim();
     if (!token) {
       res.status(401).json({ success: false, error: "Not authenticated" });
       return;
     }
-    const user = getUserByToken(token);
+    const user = await getUserByToken(token);
     if (!user) {
       res.status(401).json({ success: false, error: "Invalid session token" });
       return;
@@ -162,8 +181,9 @@ async function startServer() {
 
   // Google OAuth URL generator
   app.get("/api/auth/google/url", (req, res) => {
-    const origin = (req.query.origin as string) || req.get("origin") || "";
-    const baseUrl = (process.env.APP_URL || origin || "http://localhost:3000").replace(/\/$/, "");
+    const originParam = (req.query.origin as string)?.trim();
+    const reqOrigin = originParam || req.get("origin") || "";
+    const baseUrl = (process.env.APP_URL || reqOrigin || "http://localhost:5173").replace(/\/$/, "");
     const redirectUri = `${baseUrl}/auth/google/callback`;
     const clientId = process.env.GOOGLE_CLIENT_ID?.trim();
 
@@ -171,10 +191,12 @@ async function startServer() {
       res.json({
         configured: false,
         redirectUri,
-        message: "GOOGLE_CLIENT_ID not configured in environment variables",
+        message: "GOOGLE_CLIENT_ID not configured in server/.env",
       });
       return;
     }
+
+    const state = Buffer.from(JSON.stringify({ redirectUri, origin: reqOrigin })).toString("base64url");
 
     const params = new URLSearchParams({
       client_id: clientId,
@@ -183,6 +205,7 @@ async function startServer() {
       scope: "openid email profile",
       access_type: "offline",
       prompt: "select_account",
+      state,
     });
 
     const googleAuthUrl = `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`;
@@ -195,7 +218,7 @@ async function startServer() {
 
   // Google OAuth Callback Handler (Popup Window)
   app.get(["/auth/google/callback", "/auth/google/callback/"], async (req, res) => {
-    const { code, error } = req.query;
+    const { code, error, state } = req.query;
 
     if (error || !code) {
       const errMsg = (error as string) || "Authorization was cancelled or code was not returned";
@@ -204,7 +227,7 @@ async function startServer() {
         <html>
           <head><title>Authentication Failed</title></head>
           <body style="font-family:sans-serif;padding:30px;text-align:center;background:#fff1f2;color:#9f1239;">
-            <h3>Google Sign-In Failed</h3>
+            <h3>Google Sign-In Cancelled or Failed</h3>
             <p>${errMsg}</p>
             <script>
               if (window.opener) {
@@ -221,14 +244,22 @@ async function startServer() {
     }
 
     try {
-      const origin = req.get("origin") || "";
-      const baseUrl = (process.env.APP_URL || origin || "http://localhost:3000").replace(/\/$/, "");
-      const redirectUri = `${baseUrl}/auth/google/callback`;
+      // Decode state to retrieve the exact redirectUri used during the authorization request
+      let redirectUri = `${(process.env.APP_URL || 'http://localhost:5173').replace(/\/$/, '')}/auth/google/callback`;
+      if (state && typeof state === 'string') {
+        try {
+          const decoded = JSON.parse(Buffer.from(state, 'base64url').toString('utf-8'));
+          if (decoded.redirectUri) {
+            redirectUri = decoded.redirectUri;
+          }
+        } catch {}
+      }
+
       const clientId = process.env.GOOGLE_CLIENT_ID?.trim();
       const clientSecret = process.env.GOOGLE_CLIENT_SECRET?.trim();
 
       if (!clientId || !clientSecret) {
-        throw new Error("Google OAuth credentials are not fully configured on server.");
+        throw new Error("Google OAuth credentials are not fully configured in server/.env");
       }
 
       // Exchange code for Google access token
@@ -259,7 +290,7 @@ async function startServer() {
         throw new Error("Unable to retrieve profile from Google");
       }
 
-      const result = findOrCreateGoogleUser({
+      const result = await findOrCreateGoogleUser({
         id: profile.id,
         email: profile.email,
         name: profile.name,
@@ -310,27 +341,12 @@ async function startServer() {
     }
   });
 
-  // Google OAuth Demo / Direct Sign-In (seamless sandbox fallback)
-  app.post("/api/auth/google/demo", (req, res) => {
-    try {
-      const { email = "parasmanikhunte@gmail.com", name = "Paras Mani Khunte" } = req.body || {};
-      const result = findOrCreateGoogleUser({
-        id: "demo_" + Math.random().toString(36).substring(2, 9),
-        email: String(email).trim(),
-        name: String(name).trim() || "Google User",
-      });
-      res.json({ success: true, ...result });
-    } catch (err: any) {
-      res.status(400).json({ success: false, error: err.message || "Google demo login failed" });
-    }
-  });
-
   // Session Room Creation & Management Routes
-  app.post("/api/rooms/create", (req, res) => {
+  app.post("/api/rooms/create", async (req, res) => {
     try {
       const authHeader = req.headers.authorization;
       const token = authHeader?.replace("Bearer ", "")?.trim();
-      const user = token ? getUserByToken(token) : null;
+      const user = token ? await getUserByToken(token) : null;
 
       const { name, customCode, isLocked } = req.body;
       let roomId = customCode ? customCode.trim().toUpperCase().replace(/[^A-Z0-9_-]/g, "-") : generateRoomCode();
@@ -348,9 +364,9 @@ async function startServer() {
         isLocked: !!isLocked,
       };
 
-      saveRoomMeta(roomMeta);
+      await saveRoomMeta(roomMeta);
 
-      const room = getOrCreateRoom(roomId);
+      const room = await getOrCreateRoom(roomId);
       room.name = roomMeta.name;
       room.creatorId = creatorId;
       room.creatorName = creatorName;
@@ -362,23 +378,23 @@ async function startServer() {
     }
   });
 
-  app.get("/api/rooms/my-rooms", (req, res) => {
+  app.get("/api/rooms/my-rooms", async (req, res) => {
     const authHeader = req.headers.authorization;
     const token = authHeader?.replace("Bearer ", "")?.trim();
-    const user = token ? getUserByToken(token) : null;
+    const user = token ? await getUserByToken(token) : null;
     if (!user) {
       res.json({ success: true, rooms: [] });
       return;
     }
-    const userRooms = getRoomsForUser(user.id);
+    const userRooms = await getRoomsForUser(user.id);
     res.json({ success: true, rooms: userRooms });
   });
 
   // Room status check
-  app.get("/api/room/:roomId", (req, res) => {
+  app.get("/api/room/:roomId", async (req, res) => {
     const roomId = req.params.roomId;
     const room = rooms.get(roomId);
-    const meta = getRoomMeta(roomId);
+    const meta = await getRoomMeta(roomId);
     if (!room && !meta) {
       res.json({ exists: false, userCount: 0 });
       return;
@@ -414,9 +430,9 @@ async function startServer() {
     };
 
     // Join room
-    socket.on("join-room", (data: { roomId: string; user: { id: string; name: string; color: string; username?: string }; token?: string }) => {
+    socket.on("join-room", async (data: { roomId: string; user: { id: string; name: string; color: string; username?: string }; token?: string }) => {
       const { roomId, user, token } = data;
-      const room = getOrCreateRoom(roomId);
+      const room = await getOrCreateRoom(roomId);
 
       // Verify if user was kicked by the host
       if (room.kickedUserIds.has(user.id)) {
@@ -430,7 +446,7 @@ async function startServer() {
       socket.join(roomId);
 
       // Authenticated user resolution
-      const authenticatedUser = token ? getUserByToken(token) : null;
+      const authenticatedUser = token ? await getUserByToken(token) : null;
       const actualUserId = user.id || socket.id;
       const actualName = authenticatedUser ? authenticatedUser.name : user.name;
       const actualColor = authenticatedUser ? authenticatedUser.color : user.color;
@@ -507,7 +523,8 @@ async function startServer() {
     // Admin: Set User Writing Permissions (Revoke / Grant)
     socket.on("admin-set-permission", (payload: { targetUserId: string; canWrite: boolean }) => {
       if (!currentRoomId || !currentUser || !currentUser.isHost) return;
-      const room = getOrCreateRoom(currentRoomId);
+      const room = rooms.get(currentRoomId);
+      if (!room) return;
       const { targetUserId, canWrite } = payload;
       if (targetUserId === currentUser.id) return; // Host cannot revoke self
 
@@ -542,7 +559,8 @@ async function startServer() {
     // Admin: Kick / Remove User from Room
     socket.on("admin-kick-user", (payload: { targetUserId: string; reason?: string }) => {
       if (!currentRoomId || !currentUser || !currentUser.isHost) return;
-      const room = getOrCreateRoom(currentRoomId);
+      const room = rooms.get(currentRoomId);
+      if (!room) return;
       const { targetUserId, reason } = payload;
       if (targetUserId === currentUser.id) return; // Cannot kick host
 
@@ -572,7 +590,8 @@ async function startServer() {
     // Admin: Toggle Lock Whiteboard
     socket.on("admin-toggle-lock", (payload: { isLocked: boolean }) => {
       if (!currentRoomId || !currentUser || !currentUser.isHost) return;
-      const room = getOrCreateRoom(currentRoomId);
+      const room = rooms.get(currentRoomId);
+      if (!room) return;
       room.isLocked = payload.isLocked;
 
       // Update non-host users
@@ -607,42 +626,60 @@ async function startServer() {
     // Final element creation (persisted, Guarded)
     socket.on("element-create", (element: CanvasElement) => {
       if (!currentRoomId || !checkCanWrite()) return;
-      const room = getOrCreateRoom(currentRoomId);
+      const room = rooms.get(currentRoomId);
+      if (!room) return;
       room.elements[element.id] = element;
-      saveRoomElements(currentRoomId, room.elements);
+      saveRoomElementsDebounced(currentRoomId, room.elements, 400);
       socket.to(currentRoomId).emit("element-created", element);
+    });
+
+    // Batch element creation (e.g. converting solo canvas to multiplayer room, Guarded)
+    socket.on("elements-batch-create", (elementsList: CanvasElement[]) => {
+      if (!currentRoomId || !checkCanWrite()) return;
+      const room = rooms.get(currentRoomId);
+      if (!room || !Array.isArray(elementsList)) return;
+      elementsList.forEach((el) => {
+        if (el && el.id) {
+          room.elements[el.id] = el;
+        }
+      });
+      saveRoomElementsDebounced(currentRoomId, room.elements, 400);
+      socket.to(currentRoomId).emit("elements-batch-created", elementsList);
     });
 
     // Element update (e.g. moving sticky note or updating text, Guarded)
     socket.on("element-update", (element: CanvasElement) => {
       if (!currentRoomId || !checkCanWrite()) return;
-      const room = getOrCreateRoom(currentRoomId);
+      const room = rooms.get(currentRoomId);
+      if (!room) return;
       if (room.elements[element.id]) {
         room.elements[element.id] = { ...room.elements[element.id], ...element };
       } else {
         room.elements[element.id] = element;
       }
-      saveRoomElements(currentRoomId, room.elements);
+      saveRoomElementsDebounced(currentRoomId, room.elements, 800);
       socket.to(currentRoomId).emit("element-updated", element);
     });
 
     // Element delete (Guarded)
     socket.on("element-delete", (payload: { elementId: string }) => {
       if (!currentRoomId || !checkCanWrite()) return;
-      const room = getOrCreateRoom(currentRoomId);
+      const room = rooms.get(currentRoomId);
+      if (!room) return;
       delete room.elements[payload.elementId];
-      saveRoomElements(currentRoomId, room.elements);
+      saveRoomElementsDebounced(currentRoomId, room.elements, 400);
       socket.to(currentRoomId).emit("element-deleted", payload);
     });
 
     // Batch elements delete (e.g. eraser dragged across multiple strokes, Guarded)
     socket.on("elements-batch-delete", (payload: { elementIds: string[] }) => {
       if (!currentRoomId || !checkCanWrite()) return;
-      const room = getOrCreateRoom(currentRoomId);
+      const room = rooms.get(currentRoomId);
+      if (!room) return;
       payload.elementIds.forEach((id) => {
         delete room.elements[id];
       });
-      saveRoomElements(currentRoomId, room.elements);
+      saveRoomElementsDebounced(currentRoomId, room.elements, 400);
       socket.to(currentRoomId).emit("elements-batch-deleted", payload);
     });
 
@@ -686,7 +723,8 @@ async function startServer() {
     // WebRTC Voice Signaling Mesh
     socket.on("voice-offer", (payload: { toUserId: string; offer: any }) => {
       if (!currentRoomId || !currentUser) return;
-      const room = getOrCreateRoom(currentRoomId);
+      const room = rooms.get(currentRoomId);
+      if (!room) return;
       const targetUser = room.users[payload.toUserId];
       if (targetUser && targetUser.socketId) {
         io.to(targetUser.socketId).emit("voice-offer", {
@@ -698,7 +736,8 @@ async function startServer() {
 
     socket.on("voice-answer", (payload: { toUserId: string; answer: any }) => {
       if (!currentRoomId || !currentUser) return;
-      const room = getOrCreateRoom(currentRoomId);
+      const room = rooms.get(currentRoomId);
+      if (!room) return;
       const targetUser = room.users[payload.toUserId];
       if (targetUser && targetUser.socketId) {
         io.to(targetUser.socketId).emit("voice-answer", {
@@ -710,7 +749,8 @@ async function startServer() {
 
     socket.on("voice-ice-candidate", (payload: { toUserId: string; candidate: any }) => {
       if (!currentRoomId || !currentUser) return;
-      const room = getOrCreateRoom(currentRoomId);
+      const room = rooms.get(currentRoomId);
+      if (!room) return;
       const targetUser = room.users[payload.toUserId];
       if (targetUser && targetUser.socketId) {
         io.to(targetUser.socketId).emit("voice-ice-candidate", {
@@ -736,13 +776,16 @@ async function startServer() {
     // Vote to Clear Feature
     socket.on("vote-clear-start", () => {
       if (!currentRoomId || !currentUser || !checkCanWrite()) return;
-      const room = getOrCreateRoom(currentRoomId);
+      const targetRoomId = currentRoomId;
+      const room = rooms.get(targetRoomId);
+      if (!room) return;
       const userIds = Object.keys(room.users);
 
       // If only 1 user, clear immediately
       if (userIds.length <= 1) {
         room.elements = {};
-        io.to(currentRoomId).emit("board-cleared", {
+        saveRoomElements(targetRoomId, {});
+        io.to(targetRoomId).emit("board-cleared", {
           initiatorName: currentUser.name,
           wasVoted: false,
         });
@@ -767,13 +810,13 @@ async function startServer() {
 
       room.voteToClear = newVote;
 
-      io.to(currentRoomId).emit("vote-clear-started", newVote);
+      io.to(targetRoomId).emit("vote-clear-started", newVote);
 
       // Clear any previous timer
       if (room.voteTimer) clearTimeout(room.voteTimer);
 
       room.voteTimer = setTimeout(() => {
-        const currentRoom = rooms.get(roomId);
+        const currentRoom = rooms.get(targetRoomId);
         if (!currentRoom || !currentRoom.voteToClear) return;
 
         // Check votes at expiration
@@ -783,14 +826,14 @@ async function startServer() {
 
         if (passed) {
           currentRoom.elements = {};
-          saveRoomElements(roomId, {});
-          io.to(roomId).emit("board-cleared", {
+          saveRoomElements(targetRoomId, {});
+          io.to(targetRoomId).emit("board-cleared", {
             initiatorName: currentRoom.voteToClear.initiatorName,
             wasVoted: true,
           });
         }
 
-        io.to(roomId).emit("vote-clear-ended", {
+        io.to(targetRoomId).emit("vote-clear-ended", {
           passed,
           yesCount,
           totalEligible: total,
@@ -802,12 +845,10 @@ async function startServer() {
       }, durationMs);
     });
 
-    const roomId = currentRoomId || "";
-
     socket.on("vote-clear-cast", (data: { vote: boolean }) => {
       if (!currentRoomId || !currentUser) return;
-      const room = getOrCreateRoom(currentRoomId);
-      if (!room.voteToClear || !room.voteToClear.active) return;
+      const room = rooms.get(currentRoomId);
+      if (!room || !room.voteToClear || !room.voteToClear.active) return;
 
       room.voteToClear.votes[currentUser.id] = data.vote;
 
@@ -855,8 +896,8 @@ async function startServer() {
 
     socket.on("vote-clear-cancel", () => {
       if (!currentRoomId || !currentUser) return;
-      const room = getOrCreateRoom(currentRoomId);
-      if (!room.voteToClear || !room.voteToClear.active) return;
+      const room = rooms.get(currentRoomId);
+      if (!room || !room.voteToClear || !room.voteToClear.active) return;
       if (room.voteToClear.initiatorId !== currentUser.id) return;
 
       if (room.voteTimer) clearTimeout(room.voteTimer);
@@ -874,7 +915,8 @@ async function startServer() {
     // Direct clear (if user confirms solo or forced)
     socket.on("clear-board-direct", () => {
       if (!currentRoomId || !currentUser || !checkCanWrite()) return;
-      const room = getOrCreateRoom(currentRoomId);
+      const room = rooms.get(currentRoomId);
+      if (!room) return;
       room.elements = {};
       saveRoomElements(currentRoomId, {});
       io.to(currentRoomId).emit("board-cleared", {
@@ -889,6 +931,7 @@ async function startServer() {
       const room = rooms.get(currentRoomId);
       if (!room) return;
 
+      const wasHost = !!currentUser.isHost;
       delete room.users[currentUser.id];
       socket.to(currentRoomId).emit("user-left", { userId: currentUser.id });
 
@@ -899,8 +942,43 @@ async function startServer() {
         io.to(currentRoomId).emit("vote-clear-updated", room.voteToClear);
       }
 
+      // Host Migration: If the host left and other participants remain, promote next active user
+      const remainingUserIds = Object.keys(room.users);
+      if (wasHost && remainingUserIds.length > 0) {
+        const nextHostId = remainingUserIds[0];
+        const nextHost = room.users[nextHostId];
+        if (nextHost) {
+          nextHost.isHost = true;
+          nextHost.role = 'admin';
+          nextHost.canWrite = true;
+          room.creatorId = nextHost.id;
+          room.creatorName = nextHost.name;
+          room.userPermissions[nextHost.id] = { canWrite: true, role: 'admin' };
+
+          io.to(currentRoomId).emit("room-host-migrated", {
+            newHostId: nextHost.id,
+            newHostName: nextHost.name,
+            message: `${nextHost.name} is now the host of this room.`,
+          });
+
+          io.to(currentRoomId).emit("user-permission-changed", {
+            userId: nextHost.id,
+            canWrite: true,
+            role: 'admin',
+          });
+
+          if (nextHost.socketId) {
+            io.to(nextHost.socketId).emit("permission-updated", {
+              canWrite: true,
+              role: 'admin',
+              message: "You have been promoted to Host/Admin of this room.",
+            });
+          }
+        }
+      }
+
       // Clean up empty rooms after 1 hour if no one is in them
-      if (Object.keys(room.users).length === 0) {
+      if (remainingUserIds.length === 0) {
         setTimeout(() => {
           const r = rooms.get(currentRoomId!);
           if (r && Object.keys(r.users).length === 0) {
@@ -911,18 +989,12 @@ async function startServer() {
     });
   });
 
-  // Vite middleware for development
-  if (process.env.NODE_ENV !== "production" && process.env.SKIP_VITE !== "true") {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: "spa",
-    });
-    app.use(vite.middlewares);
-  } else if (process.env.NODE_ENV === "production") {
-    const distPath = path.join(process.cwd(), "dist");
-    app.use(express.static(distPath));
+  // Serve production client bundle if available
+  const clientDist = path.resolve(__dirname, "../client/dist");
+  if (fs.existsSync(clientDist)) {
+    app.use(express.static(clientDist));
     app.get("*", (_req, res) => {
-      res.sendFile(path.join(distPath, "index.html"));
+      res.sendFile(path.join(clientDist, "index.html"));
     });
   }
 

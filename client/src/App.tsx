@@ -11,6 +11,7 @@ import { AuthModal } from './components/AuthModal';
 import { CreateRoomModal } from './components/CreateRoomModal';
 import { ShareRoomModal } from './components/ShareRoomModal';
 import { AdminPanelModal } from './components/AdminPanelModal';
+import { SessionLauncherModal } from './components/SessionLauncherModal';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { Info, Sparkles, AlertCircle, CheckCircle2, UserX } from 'lucide-react';
 
@@ -20,6 +21,7 @@ export default function App() {
   const [currentSize, setCurrentSize] = useState<number>(3); // Fine default
   const [myCreatedElementIds, setMyCreatedElementIds] = useState<string[]>([]);
   const [showWelcomeHint, setShowWelcomeHint] = useState<boolean>(true);
+  const [hasChosenSessionMode, setHasChosenSessionMode] = useState<boolean>(false);
 
   // Modals state
   const [showAuthModal, setShowAuthModal] = useState<boolean>(false);
@@ -31,6 +33,7 @@ export default function App() {
   const {
     authUser,
     token,
+    isLoading: isAuthLoading,
     myRooms,
     login,
     register,
@@ -44,6 +47,8 @@ export default function App() {
   // Real-time WebSocket connection hook
   const {
     roomId,
+    isSoloMode,
+    convertToMultiplayerRoom,
     roomName,
     creatorName,
     isLocked,
@@ -80,6 +85,13 @@ export default function App() {
     addNotification,
     socket,
   } = useSocket(undefined, authUser, token);
+
+  // Convert current solo canvas to a collaborative multiplayer room
+  const handleShareAndGoLive = useCallback(() => {
+    const newRoomCode = convertToMultiplayerRoom();
+    setShowShareModal(true);
+    addNotification(`Canvas converted to multiplayer room ${newRoomCode}!`, 'success');
+  }, [convertToMultiplayerRoom, addNotification]);
 
   // Real-time Collaborative Voice Chat Engine
   const {
@@ -269,11 +281,23 @@ export default function App() {
 
   const isMultiplayer = Object.keys(users).length > 1;
 
+  if (isAuthLoading) {
+    return (
+      <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-slate-900 text-white font-sans">
+        <div className="w-14 h-14 rounded-2xl bg-blue-600 flex items-center justify-center font-bold text-2xl mb-4 shadow-xl shadow-blue-500/20 animate-pulse">
+          W
+        </div>
+        <p className="text-sm font-medium text-slate-300">Checking authentication...</p>
+      </div>
+    );
+  }
+
   return (
     <div id="collaborative-whiteboard-app" className="relative w-screen h-screen overflow-hidden font-sans select-none">
       {/* Top Header */}
       <Header
         roomId={roomId}
+        isSoloMode={isSoloMode}
         roomName={roomName}
         creatorName={creatorName}
         currentUser={currentUser}
@@ -286,6 +310,7 @@ export default function App() {
         onOpenAuthModal={() => setShowAuthModal(true)}
         onOpenCreateRoomModal={() => setShowCreateRoomModal(true)}
         onOpenShareModal={() => setShowShareModal(true)}
+        onShareAndGoLive={handleShareAndGoLive}
         onOpenAdminModal={() => setShowAdminModal(true)}
         onUpdateUserName={updateUserName}
         onUpdateUserColor={updateUserColor}
@@ -335,6 +360,7 @@ export default function App() {
         }}
         onStrokeLiveStart={emitStrokeLiveStart}
         onStrokeLivePoint={emitStrokeLivePoint}
+        onSelectTool={setCurrentTool}
       />
 
       {/* Bottom Floating Toolbar */}
@@ -366,8 +392,10 @@ export default function App() {
       {/* Authentication Modal */}
       <ErrorBoundary fallbackTitle="Authentication Dialog">
         <AuthModal
-          isOpen={showAuthModal}
-          onClose={() => setShowAuthModal(false)}
+          isOpen={!authUser || showAuthModal}
+          onClose={() => {
+            if (authUser) setShowAuthModal(false);
+          }}
           currentUser={authUser}
           onLogin={login}
           onRegister={register}
@@ -398,9 +426,33 @@ export default function App() {
       <ShareRoomModal
         isOpen={showShareModal}
         onClose={() => setShowShareModal(false)}
-        roomCode={roomId}
+        roomCode={roomId || ''}
         roomName={roomName}
         isHost={isHost}
+      />
+
+      {/* Session Launcher Modal: Choose Solo vs Multiplayer room */}
+      <SessionLauncherModal
+        isOpen={Boolean(authUser && !roomId && !hasChosenSessionMode)}
+        onClose={() => setHasChosenSessionMode(true)}
+        authUser={authUser}
+        myRooms={myRooms}
+        onStartSolo={() => {
+          setHasChosenSessionMode(true);
+          addNotification('Started personal canvas. Click "Share & Go Live" anytime to invite friends!', 'info');
+        }}
+        onOpenCreateRoom={() => {
+          setHasChosenSessionMode(true);
+          setShowCreateRoomModal(true);
+        }}
+        onJoinRoomByCode={(code) => {
+          setHasChosenSessionMode(true);
+          switchRoom(code);
+        }}
+        onSelectSavedRoom={(id) => {
+          setHasChosenSessionMode(true);
+          switchRoom(id);
+        }}
       />
 
       {/* Admin Panel & User Permissions Modal */}
@@ -510,18 +562,18 @@ export default function App() {
         <div className="flex items-center gap-4 font-mono">
           <span>X: {cursorCoords.x.toFixed(0)}</span>
           <span>Y: {cursorCoords.y.toFixed(0)}</span>
-          <span>Room: {roomId}</span>
-          {isHost && <span className="text-amber-600 font-semibold font-sans">★ Host</span>}
-          {!canWrite && <span className="text-rose-500 font-semibold font-sans">🔒 View-Only</span>}
+          <span>{isSoloMode ? 'Mode: Solo (Personal)' : `Room: ${roomId}`}</span>
+          {!isSoloMode && isHost && <span className="text-amber-600 font-semibold font-sans">★ Host</span>}
+          {!isSoloMode && !canWrite && <span className="text-rose-500 font-semibold font-sans">🔒 View-Only</span>}
         </div>
         <div className="flex items-center gap-2">
           <div
             className={`w-2 h-2 rounded-full ${
-              isConnected ? 'bg-emerald-500' : 'bg-rose-400'
+              isSoloMode ? 'bg-blue-400' : (isConnected ? 'bg-emerald-500' : 'bg-rose-400')
             }`}
           />
           <span className="text-[10px] text-slate-500 font-semibold uppercase tracking-wider font-sans">
-            Socket.io {isConnected ? 'Connected' : 'Offline'}
+            {isSoloMode ? 'Solo Mode' : (isConnected ? 'Socket.io Connected' : 'Socket.io Offline')}
           </span>
         </div>
       </footer>

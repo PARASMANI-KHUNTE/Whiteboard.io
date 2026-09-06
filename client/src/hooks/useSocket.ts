@@ -39,8 +39,19 @@ function getInitialUser() {
   return { id: tabId, name, color };
 }
 
-export function getRoomIdFromUrl(): string {
-  if (typeof window === 'undefined') return 'main-board';
+export function generateRandomRoomCode(): string {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let p1 = '';
+  let p2 = '';
+  for (let i = 0; i < 3; i++) {
+    p1 += chars.charAt(Math.floor(Math.random() * chars.length));
+    p2 += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return `${p1}-${p2}`;
+}
+
+export function getRoomIdFromUrl(): string | null {
+  if (typeof window === 'undefined') return null;
   const params = new URLSearchParams(window.location.search);
   const roomParam = params.get('room');
   if (roomParam && roomParam.trim()) {
@@ -50,18 +61,25 @@ export function getRoomIdFromUrl(): string {
   if (window.location.hash && window.location.hash.length > 1) {
     return window.location.hash.replace('#', '').toUpperCase();
   }
-  return 'collab-room';
+  return null;
 }
 
-export function setRoomIdInUrl(roomId: string) {
+export function setRoomIdInUrl(roomId: string | null) {
   if (typeof window === 'undefined') return;
   const url = new URL(window.location.href);
-  url.searchParams.set('room', roomId);
+  if (roomId) {
+    url.searchParams.set('room', roomId);
+  } else {
+    url.searchParams.delete('room');
+  }
   window.history.replaceState({}, '', url.toString());
 }
 
-export function useSocket(initialRoomId?: string, authUser?: AuthUser | null, authToken?: string | null) {
-  const [roomId, setRoomId] = useState<string>(() => initialRoomId || getRoomIdFromUrl());
+export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | null, authToken?: string | null) {
+  const [roomId, setRoomId] = useState<string | null>(() => {
+    if (initialRoomId !== undefined) return initialRoomId;
+    return getRoomIdFromUrl();
+  });
   const [currentUser, setCurrentUser] = useState<RemoteUser>(() => {
     if (authUser) {
       return {
@@ -131,8 +149,25 @@ export function useSocket(initialRoomId?: string, authUser?: AuthUser | null, au
     }, 4000);
   }, []);
 
+  const elementsRef = useRef<Record<string, CanvasElement>>(elements);
+  elementsRef.current = elements;
+
   // Connect socket
   useEffect(() => {
+    if (!roomId) {
+      setIsConnected(false);
+      setIsHost(true);
+      setRole('admin');
+      setCanWrite(true);
+      setIsLocked(false);
+      setIsKicked(false);
+      setKickedReason(null);
+      setUsers({});
+      setLiveStrokes({});
+      setVoteToClear(null);
+      return;
+    }
+
     setRoomIdInUrl(roomId);
     setIsKicked(false);
     setKickedReason(null);
@@ -189,7 +224,11 @@ export function useSocket(initialRoomId?: string, authUser?: AuthUser | null, au
         canWrite: boolean;
         isHost: boolean;
       }) => {
-        setElements(data.elements || {});
+        const serverElements = data.elements || {};
+        const localElements = elementsRef.current || {};
+        // Merge so any drawings created in solo mode are kept!
+        const merged = { ...serverElements, ...localElements };
+        setElements(merged);
         setUsers(data.users || {});
         setVoteToClear(data.voteToClear);
         setIsHost(data.isHost);
@@ -199,6 +238,12 @@ export function useSocket(initialRoomId?: string, authUser?: AuthUser | null, au
         if (data.creatorId) setCreatorId(data.creatorId);
         if (data.creatorName) setCreatorName(data.creatorName);
         if (typeof data.isLocked === 'boolean') setIsLocked(data.isLocked);
+
+        // If we brought local elements from solo mode, batch-sync them to MongoDB!
+        const localItems = Object.values(localElements);
+        if (localItems.length > 0) {
+          socket.emit('elements-batch-create', localItems);
+        }
       }
     );
 
@@ -246,6 +291,30 @@ export function useSocket(initialRoomId?: string, authUser?: AuthUser | null, au
 
     socket.on('user-kicked', (data: { userId: string; userName: string; reason: string }) => {
       addNotification(`${data.userName} was removed by room host`, 'info');
+    });
+
+    socket.on('room-host-migrated', (data: { newHostId: string; newHostName: string; message: string }) => {
+      setCreatorId(data.newHostId);
+      setCreatorName(data.newHostName);
+      if (currentUserRef.current.id === data.newHostId) {
+        setIsHost(true);
+        setRole('admin');
+        setCanWrite(true);
+        addNotification('You are now the host of this room.', 'success');
+      } else {
+        addNotification(data.message || `${data.newHostName} is now the host.`, 'info');
+      }
+      setUsers((prev) => {
+        const next = { ...prev };
+        Object.keys(next).forEach((id) => {
+          if (id === data.newHostId) {
+            next[id] = { ...next[id], isHost: true, role: 'admin', canWrite: true };
+          } else if (next[id].isHost) {
+            next[id] = { ...next[id], isHost: false };
+          }
+        });
+        return next;
+      });
     });
 
     socket.on('kicked', (data: { reason: string }) => {
@@ -422,26 +491,34 @@ export function useSocket(initialRoomId?: string, authUser?: AuthUser | null, au
 
   // Emitters
   const emitStrokeLiveStart = useCallback((strokeId: string, point: Point, color: string, size: number, isHighlighter?: boolean) => {
-    socketRef.current?.emit('stroke-live-start', { strokeId, point, color, size, isHighlighter });
-  }, []);
+    if (socketRef.current?.connected && roomId) {
+      socketRef.current.emit('stroke-live-start', { strokeId, point, color, size, isHighlighter });
+    }
+  }, [roomId]);
 
   const emitStrokeLivePoint = useCallback((strokeId: string, point: Point) => {
-    socketRef.current?.emit('stroke-live-point', { strokeId, point });
-  }, []);
+    if (socketRef.current?.connected && roomId) {
+      socketRef.current.emit('stroke-live-point', { strokeId, point });
+    }
+  }, [roomId]);
 
   const emitElementCreate = useCallback((element: CanvasElement) => {
     // Optimistic local update
     setElements((prev) => ({ ...prev, [element.id]: element }));
-    socketRef.current?.emit('element-create', element);
-  }, []);
+    if (socketRef.current?.connected && roomId) {
+      socketRef.current.emit('element-create', element);
+    }
+  }, [roomId]);
 
   const emitElementUpdate = useCallback((element: CanvasElement) => {
     setElements((prev) => ({
       ...prev,
       [element.id]: { ...(prev[element.id] || {}), ...element },
     }));
-    socketRef.current?.emit('element-update', element);
-  }, []);
+    if (socketRef.current?.connected && roomId) {
+      socketRef.current.emit('element-update', element);
+    }
+  }, [roomId]);
 
   const emitElementDelete = useCallback((elementId: string) => {
     setElements((prev) => {
@@ -449,8 +526,10 @@ export function useSocket(initialRoomId?: string, authUser?: AuthUser | null, au
       delete next[elementId];
       return next;
     });
-    socketRef.current?.emit('element-delete', { elementId });
-  }, []);
+    if (socketRef.current?.connected && roomId) {
+      socketRef.current.emit('element-delete', { elementId });
+    }
+  }, [roomId]);
 
   const emitElementsBatchDelete = useCallback((elementIds: string[]) => {
     setElements((prev) => {
@@ -458,33 +537,48 @@ export function useSocket(initialRoomId?: string, authUser?: AuthUser | null, au
       elementIds.forEach((id) => delete next[id]);
       return next;
     });
-    socketRef.current?.emit('elements-batch-delete', { elementIds });
-  }, []);
+    if (socketRef.current?.connected && roomId) {
+      socketRef.current.emit('elements-batch-delete', { elementIds });
+    }
+  }, [roomId]);
 
   const emitCursorMove = useCallback((cursor: { x: number; y: number; tool?: ToolType; isDrawing?: boolean }) => {
-    socketRef.current?.emit('cursor-move', cursor);
-  }, []);
+    if (socketRef.current?.connected && roomId) {
+      socketRef.current.emit('cursor-move', cursor);
+    }
+  }, [roomId]);
 
   const emitAudioLevel = useCallback((level: number, isSpeaking: boolean) => {
-    socketRef.current?.emit('audio-level', { level, isSpeaking });
-  }, []);
+    if (socketRef.current?.connected && roomId) {
+      socketRef.current.emit('audio-level', { level, isSpeaking });
+    }
+  }, [roomId]);
 
   const emitVoteClearStart = useCallback(() => {
-    socketRef.current?.emit('vote-clear-start');
-  }, []);
+    if (socketRef.current?.connected && roomId) {
+      socketRef.current.emit('vote-clear-start');
+    }
+  }, [roomId]);
 
   const emitVoteClearCast = useCallback((vote: boolean) => {
-    socketRef.current?.emit('vote-clear-cast', { vote });
-  }, []);
+    if (socketRef.current?.connected && roomId) {
+      socketRef.current.emit('vote-clear-cast', { vote });
+    }
+  }, [roomId]);
 
   const emitVoteClearCancel = useCallback(() => {
-    socketRef.current?.emit('vote-clear-cancel');
-  }, []);
+    if (socketRef.current?.connected && roomId) {
+      socketRef.current.emit('vote-clear-cancel');
+    }
+  }, [roomId]);
 
   const emitClearBoardDirect = useCallback(() => {
     setElements({});
-    socketRef.current?.emit('clear-board-direct');
-  }, []);
+    setLiveStrokes({});
+    if (socketRef.current?.connected && roomId) {
+      socketRef.current.emit('clear-board-direct');
+    }
+  }, [roomId]);
 
   const updateUserName = useCallback((name: string) => {
     const trimmed = name.trim();
@@ -492,7 +586,7 @@ export function useSocket(initialRoomId?: string, authUser?: AuthUser | null, au
     sessionStorage.setItem('collab_user_name', trimmed);
     setCurrentUser((prev) => ({ ...prev, name: trimmed }));
     // Re-join with updated identity
-    if (socketRef.current?.connected) {
+    if (socketRef.current?.connected && roomId) {
       socketRef.current.emit('join-room', {
         roomId,
         user: { ...currentUser, name: trimmed },
@@ -503,7 +597,7 @@ export function useSocket(initialRoomId?: string, authUser?: AuthUser | null, au
   const updateUserColor = useCallback((color: string) => {
     sessionStorage.setItem('collab_user_color', color);
     setCurrentUser((prev) => ({ ...prev, color }));
-    if (socketRef.current?.connected) {
+    if (socketRef.current?.connected && roomId) {
       socketRef.current.emit('join-room', {
         roomId,
         user: { ...currentUser, color },
@@ -511,44 +605,73 @@ export function useSocket(initialRoomId?: string, authUser?: AuthUser | null, au
     }
   }, [currentUser, roomId]);
 
-  const switchRoom = useCallback((newRoomId: string) => {
-    const cleaned = newRoomId.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '-');
+  const switchRoom = useCallback((newRoomId: string | null) => {
+    if (!newRoomId) {
+      setRoomId(null);
+      setRoomIdInUrl(null);
+      return;
+    }
+    const cleaned = newRoomId.trim().toUpperCase().replace(/[^A-Z0-9_-]/g, '-');
     if (!cleaned || cleaned === roomId) return;
     setRoomId(cleaned);
+    setRoomIdInUrl(cleaned);
   }, [roomId]);
 
-  const emitVoiceStatus = useCallback((data: { isMuted?: boolean; isDeafened?: boolean; voiceConnected?: boolean }) => {
-    socketRef.current?.emit('voice-status-update', data);
+  const convertToMultiplayerRoom = useCallback((customCode?: string): string => {
+    const code = customCode ? customCode.trim().toUpperCase().replace(/[^A-Z0-9_-]/g, '-') : generateRandomRoomCode();
+    setRoomId(code);
+    setRoomIdInUrl(code);
+    return code;
   }, []);
+
+  const emitVoiceStatus = useCallback((data: { isMuted?: boolean; isDeafened?: boolean; voiceConnected?: boolean }) => {
+    if (socketRef.current?.connected && roomId) {
+      socketRef.current.emit('voice-status-update', data);
+    }
+  }, [roomId]);
 
   const emitVoiceOffer = useCallback((toUserId: string, offer: any) => {
-    socketRef.current?.emit('voice-offer', { toUserId, offer });
-  }, []);
+    if (socketRef.current?.connected && roomId) {
+      socketRef.current.emit('voice-offer', { toUserId, offer });
+    }
+  }, [roomId]);
 
   const emitVoiceAnswer = useCallback((toUserId: string, answer: any) => {
-    socketRef.current?.emit('voice-answer', { toUserId, answer });
-  }, []);
+    if (socketRef.current?.connected && roomId) {
+      socketRef.current.emit('voice-answer', { toUserId, answer });
+    }
+  }, [roomId]);
 
   const emitVoiceIceCandidate = useCallback((toUserId: string, candidate: any) => {
-    socketRef.current?.emit('voice-ice-candidate', { toUserId, candidate });
-  }, []);
+    if (socketRef.current?.connected && roomId) {
+      socketRef.current.emit('voice-ice-candidate', { toUserId, candidate });
+    }
+  }, [roomId]);
 
   const emitVoiceAudioChunk = useCallback((chunk: string, mimeType?: string) => {
-    socketRef.current?.emit('voice-audio-chunk', { chunk, mimeType, timestamp: Date.now() });
-  }, []);
+    if (socketRef.current?.connected && roomId) {
+      socketRef.current.emit('voice-audio-chunk', { chunk, mimeType, timestamp: Date.now() });
+    }
+  }, [roomId]);
 
   // Admin Privileges Emitters
   const setParticipantPermission = useCallback((targetUserId: string, targetCanWrite: boolean) => {
-    socketRef.current?.emit('admin-set-permission', { targetUserId, canWrite: targetCanWrite });
-  }, []);
+    if (socketRef.current?.connected && roomId) {
+      socketRef.current.emit('admin-set-permission', { targetUserId, canWrite: targetCanWrite });
+    }
+  }, [roomId]);
 
   const kickParticipant = useCallback((targetUserId: string, reason?: string) => {
-    socketRef.current?.emit('admin-kick-user', { targetUserId, reason });
-  }, []);
+    if (socketRef.current?.connected && roomId) {
+      socketRef.current.emit('admin-kick-user', { targetUserId, reason });
+    }
+  }, [roomId]);
 
   const toggleLockBoard = useCallback((targetIsLocked: boolean) => {
-    socketRef.current?.emit('admin-toggle-lock', { isLocked: targetIsLocked });
-  }, []);
+    if (socketRef.current?.connected && roomId) {
+      socketRef.current.emit('admin-toggle-lock', { isLocked: targetIsLocked });
+    }
+  }, [roomId]);
 
   const resetKickedState = useCallback(() => {
     setIsKicked(false);
@@ -557,6 +680,8 @@ export function useSocket(initialRoomId?: string, authUser?: AuthUser | null, au
 
   return {
     roomId,
+    isSoloMode: !roomId,
+    convertToMultiplayerRoom,
     roomName,
     creatorId,
     creatorName,

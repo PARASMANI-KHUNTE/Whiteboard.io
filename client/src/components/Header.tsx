@@ -21,7 +21,8 @@ import {
 } from 'lucide-react';
 
 interface HeaderProps {
-  roomId: string;
+  roomId: string | null;
+  isSoloMode?: boolean;
   roomName?: string;
   creatorName?: string;
   currentUser: { id: string; name: string; color: string };
@@ -34,10 +35,11 @@ interface HeaderProps {
   onOpenAuthModal: () => void;
   onOpenCreateRoomModal: () => void;
   onOpenShareModal: () => void;
+  onShareAndGoLive?: () => void;
   onOpenAdminModal: () => void;
   onUpdateUserName: (name: string) => void;
   onUpdateUserColor: (color: string) => void;
-  onSwitchRoom: (newRoomId: string) => void;
+  onSwitchRoom: (newRoomId: string | null) => void;
   // Voice Chat
   isVoiceConnected: boolean;
   isMuted: boolean;
@@ -64,6 +66,7 @@ const PALETTE = ['#ef4444', '#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899
 
 export const Header: React.FC<HeaderProps> = ({
   roomId,
+  isSoloMode = false,
   roomName,
   creatorName,
   currentUser,
@@ -76,6 +79,7 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenAuthModal,
   onOpenCreateRoomModal,
   onOpenShareModal,
+  onShareAndGoLive,
   onOpenAdminModal,
   onUpdateUserName,
   onUpdateUserColor,
@@ -127,55 +131,61 @@ export const Header: React.FC<HeaderProps> = ({
             id="room-selector-btn"
             onClick={onOpenCreateRoomModal}
             className="text-xs font-semibold px-2.5 py-1 sm:px-3 sm:py-1.5 bg-slate-100 hover:bg-slate-200/80 rounded-xl text-slate-700 flex items-center gap-1.5 transition-colors cursor-pointer border border-slate-200/70 max-w-[130px] sm:max-w-[190px]"
-            title="Click to view sessions or create a new room"
+            title={isSoloMode ? "Personal Canvas (Private). Click to browse sessions or create a room" : "Click to view sessions or create a new room"}
           >
-            <span className="truncate">{roomName ? roomName : `room/${roomId}`}</span>
+            <span className="truncate">{isSoloMode ? 'Solo Canvas' : (roomName ? roomName : `room/${roomId}`)}</span>
             <Plus className="w-3 h-3 text-slate-400 shrink-0" />
           </button>
 
           {/* Connection status indicator */}
           <div
-            title={isConnected ? 'Connected to real-time sync' : 'Reconnecting...'}
+            title={isSoloMode ? 'Personal canvas (Private)' : (isConnected ? 'Connected to real-time sync' : 'Reconnecting...')}
             className="flex items-center gap-1 text-xs text-slate-500 font-medium"
           >
             <span
               className={`w-2 h-2 rounded-full ${
-                isConnected ? 'bg-emerald-500 ring-2 ring-emerald-100' : 'bg-rose-400 ring-2 ring-rose-100'
+                isSoloMode
+                  ? 'bg-blue-400 ring-2 ring-blue-100'
+                  : isConnected
+                  ? 'bg-emerald-500 ring-2 ring-emerald-100'
+                  : 'bg-rose-400 ring-2 ring-rose-100'
               }`}
             />
           </div>
         </div>
       </div>
 
-      {/* Audio Visualizer Center */}
-      <div className="flex items-center shrink-0">
-        <AudioVisualizerBar
-          isVoiceConnected={isVoiceConnected}
-          isMuted={isMuted}
-          isDeafened={isDeafened}
-          volume={volume}
-          onSetVolume={onSetVolume}
-          audioLevel={audioLevel}
-          isSpeaking={isSpeaking}
-          frequencyData={frequencyData}
-          isSimulated={isSimulated}
-          error={error}
-          isIframeRestricted={isIframeRestricted}
-          activeSpeakers={activeSpeakers}
-          onJoinVoice={onJoinVoice}
-          onLeaveVoice={onLeaveVoice}
-          onToggleMute={onToggleMute}
-          onToggleDeafen={onToggleDeafen}
-          onToggleSimulated={onToggleSimulated}
-          onOpenInNewTab={onOpenInNewTab}
-          onAudioLevelChange={onAudioLevelChange}
-        />
-      </div>
+      {/* Audio Visualizer Center (Multiplayer only) */}
+      {!isSoloMode && (
+        <div className="flex items-center shrink-0">
+          <AudioVisualizerBar
+            isVoiceConnected={isVoiceConnected}
+            isMuted={isMuted}
+            isDeafened={isDeafened}
+            volume={volume}
+            onSetVolume={onSetVolume}
+            audioLevel={audioLevel}
+            isSpeaking={isSpeaking}
+            frequencyData={frequencyData}
+            isSimulated={isSimulated}
+            error={error}
+            isIframeRestricted={isIframeRestricted}
+            activeSpeakers={activeSpeakers}
+            onJoinVoice={onJoinVoice}
+            onLeaveVoice={onLeaveVoice}
+            onToggleMute={onToggleMute}
+            onToggleDeafen={onToggleDeafen}
+            onToggleSimulated={onToggleSimulated}
+            onOpenInNewTab={onOpenInNewTab}
+            onAudioLevelChange={onAudioLevelChange}
+          />
+        </div>
+      )}
 
       {/* Actions: Admin Panel, Collaborators, Profile & Share */}
       <div className="flex items-center gap-1.5 sm:gap-3 shrink-0">
-        {/* Admin Controls Button (Visible for host or when room has lock) */}
-        {isHost ? (
+        {/* Admin Controls Button (Visible for host in multiplayer, or when room has lock) */}
+        {!isSoloMode && (isHost ? (
           <button
             id="admin-panel-btn"
             onClick={onOpenAdminModal}
@@ -194,46 +204,48 @@ export const Header: React.FC<HeaderProps> = ({
             <Lock className="w-3.5 h-3.5 text-slate-500" />
             <span className="hidden md:inline">View-Only</span>
           </button>
-        ) : null}
+        ) : null)}
 
-        {/* Collaborators Avatar Stack */}
-        <div
-          onClick={onOpenAdminModal}
-          className="hidden sm:flex items-center -space-x-1.5 cursor-pointer"
-          title="Click to view participants"
-        >
-          {activeUserList.slice(0, 3).map((u) => {
-            const isMe = u.id === currentUser.id;
-            const speaking = isMe ? isSpeaking : u.isSpeaking;
-            const userMuted = isMe ? isMuted : u.isMuted;
+        {/* Collaborators Avatar Stack (Multiplayer only) */}
+        {!isSoloMode && (
+          <div
+            onClick={onOpenAdminModal}
+            className="hidden sm:flex items-center -space-x-1.5 cursor-pointer"
+            title="Click to view participants"
+          >
+            {activeUserList.slice(0, 3).map((u) => {
+              const isMe = u.id === currentUser.id;
+              const speaking = isMe ? isSpeaking : u.isSpeaking;
+              const userMuted = isMe ? isMuted : u.isMuted;
 
-            return (
-              <div
-                key={u.id}
-                title={`${u.name}${isMe ? ' (You)' : ''}${u.isHost ? ' • Host' : ''}`}
-                style={{ backgroundColor: u.color }}
-                className={`w-7 h-7 sm:w-8 sm:h-8 rounded-full text-white text-[10px] sm:text-[11px] font-bold flex items-center justify-center border-2 border-white shadow-2xs relative ${
-                  speaking ? 'ring-2 ring-blue-500 scale-105 z-10' : ''
-                }`}
-              >
-                {u.name.slice(0, 2).toUpperCase()}
-                {u.isHost && (
-                  <Crown className="w-2.5 h-2.5 text-amber-300 absolute -top-1 -right-1 fill-amber-300 drop-shadow" />
-                )}
-                {userMuted && (
-                  <div className="w-2.5 h-2.5 rounded-full bg-rose-500 border border-white flex items-center justify-center absolute -bottom-0.5 -right-0.5 z-20">
-                    <MicOff className="w-1.5 h-1.5 text-white" />
-                  </div>
-                )}
+              return (
+                <div
+                  key={u.id}
+                  title={`${u.name}${isMe ? ' (You)' : ''}${u.isHost ? ' • Host' : ''}`}
+                  style={{ backgroundColor: u.color }}
+                  className={`w-7 h-7 sm:w-8 sm:h-8 rounded-full text-white text-[10px] sm:text-[11px] font-bold flex items-center justify-center border-2 border-white shadow-2xs relative ${
+                    speaking ? 'ring-2 ring-blue-500 scale-105 z-10' : ''
+                  }`}
+                >
+                  {u.name.slice(0, 2).toUpperCase()}
+                  {u.isHost && (
+                    <Crown className="w-2.5 h-2.5 text-amber-300 absolute -top-1 -right-1 fill-amber-300 drop-shadow" />
+                  )}
+                  {userMuted && (
+                    <div className="w-2.5 h-2.5 rounded-full bg-rose-500 border border-white flex items-center justify-center absolute -bottom-0.5 -right-0.5 z-20">
+                      <MicOff className="w-1.5 h-1.5 text-white" />
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+            {activeUserList.length > 3 && (
+              <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-slate-100 text-slate-600 text-[10px] font-bold flex items-center justify-center border-2 border-white shadow-2xs">
+                +{activeUserList.length - 3}
               </div>
-            );
-          })}
-          {activeUserList.length > 3 && (
-            <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-slate-100 text-slate-600 text-[10px] font-bold flex items-center justify-center border-2 border-white shadow-2xs">
-              +{activeUserList.length - 3}
-            </div>
-          )}
-        </div>
+            )}
+          </div>
+        )}
 
         {/* Auth / Account Profile Button */}
         {authUser ? (
@@ -273,16 +285,28 @@ export const Header: React.FC<HeaderProps> = ({
           <User className="w-4 h-4" />
         </button>
 
-        {/* Share Room Button */}
-        <button
-          id="share-room-modal-btn"
-          onClick={onOpenShareModal}
-          className="flex items-center gap-1.5 px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all shadow-xs cursor-pointer active:scale-95 bg-slate-900 text-white hover:bg-slate-800"
-          title="Share room code or invite link"
-        >
-          <Share2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-          <span className="hidden sm:inline">Share</span>
-        </button>
+        {/* Share Button / Share & Go Live */}
+        {isSoloMode ? (
+          <button
+            id="share-go-live-btn"
+            onClick={onShareAndGoLive}
+            className="flex items-center gap-1.5 px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all shadow-md cursor-pointer active:scale-95 bg-gradient-to-r from-blue-600 via-indigo-600 to-violet-600 hover:from-blue-700 hover:to-violet-700 text-white shadow-blue-500/20"
+            title="Convert this solo canvas to a collaborative room and invite friends"
+          >
+            <Radio className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-emerald-300 animate-pulse shrink-0" />
+            <span className="font-bold">Share & Go Live</span>
+          </button>
+        ) : (
+          <button
+            id="share-room-modal-btn"
+            onClick={onOpenShareModal}
+            className="flex items-center gap-1.5 px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all shadow-xs cursor-pointer active:scale-95 bg-slate-900 text-white hover:bg-slate-800"
+            title="Share room code or invite link"
+          >
+            <Share2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+            <span className="hidden sm:inline">Share</span>
+          </button>
+        )}
       </div>
 
       {/* User Profile Customizer Modal */}

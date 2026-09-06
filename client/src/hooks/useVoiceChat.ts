@@ -146,6 +146,13 @@ export function useVoiceChat({
       audioCtxRef.current = null;
     }
 
+    if (remoteAudioContextRef.current && remoteAudioContextRef.current.state !== 'closed') {
+      try {
+        remoteAudioContextRef.current.close();
+      } catch (_) {}
+      remoteAudioContextRef.current = null;
+    }
+
     setIsVoiceConnected(false);
     setIsSimulated(false);
     setAudioLevel(0);
@@ -207,6 +214,15 @@ export function useVoiceChat({
         if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed' || pc.connectionState === 'closed') {
           delete peerConnectionsRef.current[targetUserId];
           setActiveSpeakers((prev) => prev.filter((id) => id !== targetUserId));
+          const el = remoteAudioElementsRef.current[targetUserId];
+          if (el) {
+            try {
+              el.pause();
+              el.srcObject = null;
+              el.remove();
+            } catch (_) {}
+            delete remoteAudioElementsRef.current[targetUserId];
+          }
         }
       };
 

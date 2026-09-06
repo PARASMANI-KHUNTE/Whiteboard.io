@@ -130,7 +130,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       id="auth-modal-overlay"
       className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-xs animate-in fade-in duration-150"
       onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
+        if (e.target === e.currentTarget && currentUser) onClose();
       }}
     >
       <div
@@ -150,16 +150,18 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               <p className="text-xs text-slate-500">
                 {currentUser && !currentUser.isGuest
                   ? `Signed in as @${currentUser.username}`
-                  : 'Sign in to create persistent session rooms & save admin privileges'}
+                  : 'Sign in to access your whiteboard rooms and collaborative canvas'}
               </p>
             </div>
           </div>
-          <button
-            onClick={onClose}
-            className="p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors cursor-pointer"
-          >
-            <X className="w-4 h-4" />
-          </button>
+          {currentUser && (
+            <button
+              onClick={onClose}
+              className="p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors cursor-pointer"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          )}
         </div>
 
         {/* If already signed in with full account */}

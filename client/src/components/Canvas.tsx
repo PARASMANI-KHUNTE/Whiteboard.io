@@ -32,6 +32,7 @@ interface CanvasProps {
   onCursorMove: (cursor: { x: number; y: number; tool?: ToolType; isDrawing?: boolean }) => void;
   onStrokeLiveStart: (strokeId: string, point: Point, color: string, size: number, isHighlighter?: boolean) => void;
   onStrokeLivePoint: (strokeId: string, point: Point) => void;
+  onSelectTool?: (tool: ToolType) => void;
 }
 
 // Distance from point to line segment
@@ -61,6 +62,7 @@ export const Canvas: React.FC<CanvasProps> = ({
   onCursorMove,
   onStrokeLiveStart,
   onStrokeLivePoint,
+  onSelectTool,
 }) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -246,10 +248,10 @@ export const Canvas: React.FC<CanvasProps> = ({
       const newSticky: StickyNote = {
         id: 'sticky_' + Math.random().toString(36).substring(2, 9),
         type: 'sticky',
-        x: coords.x - 20,
-        y: coords.y - 20,
-        width: 200,
-        height: 140,
+        x: Math.max(10, coords.x - 20),
+        y: Math.max(10, coords.y - 20),
+        width: 224,
+        height: 150,
         text: '',
         color: '#fef08a', // Default pastel yellow
         userId: currentUserId,
@@ -257,6 +259,7 @@ export const Canvas: React.FC<CanvasProps> = ({
         updatedAt: Date.now(),
       };
       onElementCreate(newSticky);
+      onSelectTool?.('pen'); // Return to pen tool so subsequent canvas interactions don't drop duplicate notes
       return;
     }
 
@@ -275,6 +278,7 @@ export const Canvas: React.FC<CanvasProps> = ({
         updatedAt: Date.now(),
       };
       onElementCreate(newText);
+      onSelectTool?.('pen'); // Return to pen tool
       return;
     }
 
@@ -332,6 +336,13 @@ export const Canvas: React.FC<CanvasProps> = ({
     }
 
     if (!isDrawing || !currentStroke) return;
+
+    // Point distance thresholding (filters micro-jitter & reduces payload size significantly)
+    const lastPoint = currentStroke.points[currentStroke.points.length - 1];
+    if (lastPoint) {
+      const dist = Math.hypot(coords.x - lastPoint.x, coords.y - lastPoint.y);
+      if (dist < 2.5) return;
+    }
 
     // Add point to stroke
     const updatedPoints = [...currentStroke.points, coords];
