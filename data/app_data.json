@@ -1,0 +1,25 @@
+{
+  "users": [
+    {
+      "id": "guest_4b12234578",
+      "username": "guest_4578",
+      "email": "guest_4b12234578@guest.local",
+      "passwordHash": "",
+      "salt": "",
+      "name": "Tester",
+      "color": "#3b82f6",
+      "createdAt": 1788725124656,
+      "createdRooms": [],
+      "isGuest": true
+    }
+  ],
+  "tokens": [
+    {
+      "token": "458af3ad7583022b399fcd8bab9538656a21a65f3ddcb40788ef70bce933fa51",
+      "userId": "guest_4b12234578",
+      "createdAt": 1788725124656,
+      "updatedAt": 1788725124656
+    }
+  ],
+  "rooms": []
+}

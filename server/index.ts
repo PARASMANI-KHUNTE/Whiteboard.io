@@ -183,7 +183,7 @@ async function startServer() {
   app.get("/api/auth/google/url", (req, res) => {
     const originParam = (req.query.origin as string)?.trim();
     const reqOrigin = originParam || req.get("origin") || "";
-    const baseUrl = (process.env.APP_URL || reqOrigin || "http://localhost:5173").replace(/\/$/, "");
+    const baseUrl = (process.env.APP_URL || reqOrigin || "http://localhost:3000").replace(/\/$/, "");
     const redirectUri = `${baseUrl}/auth/google/callback`;
     const clientId = process.env.GOOGLE_CLIENT_ID?.trim();
 
@@ -245,7 +245,7 @@ async function startServer() {
 
     try {
       // Decode state to retrieve the exact redirectUri used during the authorization request
-      let redirectUri = `${(process.env.APP_URL || 'http://localhost:5173').replace(/\/$/, '')}/auth/google/callback`;
+      let redirectUri = `${(process.env.APP_URL || 'http://localhost:3000').replace(/\/$/, '')}/auth/google/callback`;
       if (state && typeof state === 'string') {
         try {
           const decoded = JSON.parse(Buffer.from(state, 'base64url').toString('utf-8'));
@@ -989,13 +989,48 @@ async function startServer() {
     });
   });
 
-  // Serve production client bundle if available
-  const clientDist = path.resolve(__dirname, "../client/dist");
-  if (fs.existsSync(clientDist)) {
-    app.use(express.static(clientDist));
-    app.get("*", (_req, res) => {
-      res.sendFile(path.join(clientDist, "index.html"));
-    });
+  // Serve client application
+  if (process.env.NODE_ENV !== "production" && process.env.SKIP_VITE !== "true") {
+    try {
+      const { createServer: createViteServer } = await import("vite");
+      const vite = await createViteServer({
+        configFile: path.resolve(__dirname, "../client/vite.config.ts"),
+        server: { middlewareMode: true },
+        appType: "spa",
+      });
+      app.use(vite.middlewares);
+
+      app.use("*", async (req, res, next) => {
+        const url = req.originalUrl;
+        if (url.startsWith("/api") || url.startsWith("/socket.io") || url.startsWith("/auth")) {
+          return next();
+        }
+        try {
+          const indexPath = path.resolve(__dirname, "../client/index.html");
+          if (fs.existsSync(indexPath)) {
+            let template = fs.readFileSync(indexPath, "utf-8");
+            template = await vite.transformIndexHtml(url, template);
+            res.status(200).set({ "Content-Type": "text/html" }).end(template);
+          } else {
+            next();
+          }
+        } catch (e) {
+          vite.ssrFixStacktrace(e as Error);
+          next(e);
+        }
+      });
+    } catch (viteErr) {
+      console.warn("Could not start Vite dev middleware:", viteErr);
+    }
+  } else {
+    // Serve production client bundle if available
+    const clientDist = path.resolve(__dirname, "../client/dist");
+    if (fs.existsSync(clientDist)) {
+      app.use(express.static(clientDist));
+      app.get("*", (_req, res) => {
+        res.sendFile(path.join(clientDist, "index.html"));
+      });
+    }
   }
 
   server.listen(PORT, "0.0.0.0", () => {
