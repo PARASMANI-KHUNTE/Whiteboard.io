@@ -103,19 +103,87 @@ async function getOrCreateRoom(roomId: string): Promise<RoomData> {
   return room;
 }
 
+const ALLOWED_ORIGIN_SET = new Set([
+  "http://localhost:5173",
+  "http://localhost:3000",
+  "http://127.0.0.1:5173",
+  "http://127.0.0.1:3000",
+]);
+if (process.env.APP_URL) {
+  try {
+    const parsed = new URL(process.env.APP_URL);
+    ALLOWED_ORIGIN_SET.add(parsed.origin);
+  } catch {}
+}
+
+function resolveTrustedOrigin(rawOrigin?: string): string {
+  if (!rawOrigin) return (process.env.APP_URL || "http://localhost:5173").replace(/\/$/, "");
+  try {
+    const originUrl = new URL(rawOrigin).origin;
+    if (ALLOWED_ORIGIN_SET.has(originUrl)) {
+      return originUrl;
+    }
+  } catch {}
+  return (process.env.APP_URL || "http://localhost:5173").replace(/\/$/, "");
+}
+
+// In-memory rate limiter to protect against credential stuffing / brute-force
+const authRateLimitMap = new Map<string, { count: number; resetTime: number }>();
+function authRateLimiter(maxRequests = 30, windowMs = 60000) {
+  return (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    const ip = req.ip || req.socket.remoteAddress || "unknown_ip";
+    const now = Date.now();
+    const record = authRateLimitMap.get(ip);
+
+    if (!record || now > record.resetTime) {
+      authRateLimitMap.set(ip, { count: 1, resetTime: now + windowMs });
+      return next();
+    }
+
+    record.count++;
+    if (record.count > maxRequests) {
+      res.status(429).json({
+        success: false,
+        error: "Too many requests. Please slow down and try again shortly.",
+      });
+      return;
+    }
+    next();
+  };
+}
+
 async function startServer() {
   await connectDb();
   const app = express();
   const server = http.createServer(app);
   const io = new SocketIOServer(server, {
     cors: {
-      origin: "*",
+      origin: (requestOrigin, callback) => {
+        if (!requestOrigin) return callback(null, true);
+        try {
+          const originUrl = new URL(requestOrigin).origin;
+          if (ALLOWED_ORIGIN_SET.has(originUrl)) {
+            return callback(null, true);
+          }
+        } catch {}
+        return callback(new Error("CORS origin not permitted"));
+      },
       methods: ["GET", "POST"],
+      credentials: true,
     },
     maxHttpBufferSize: 5e6, // 5MB for dense drawing batches
   });
 
-  app.use(express.json());
+  // Security Headers Middleware
+  app.use((_req, res, next) => {
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("X-Frame-Options", "SAMEORIGIN");
+    res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+    res.setHeader("X-XSS-Protection", "1; mode=block");
+    next();
+  });
+
+  app.use(express.json({ limit: "2mb" }));
   app.use((err: any, _req: express.Request, res: express.Response, next: express.NextFunction) => {
     if (err instanceof SyntaxError && 'status' in err && (err as any).status === 400) {
       res.status(400).json({ success: false, error: 'Malformed JSON payload' });
@@ -133,8 +201,8 @@ async function startServer() {
     });
   });
 
-  // Authentication Routes
-  app.post("/api/auth/register", async (req, res) => {
+  // Authentication Routes with Rate Limiting
+  app.post("/api/auth/register", authRateLimiter(15, 60000), async (req, res) => {
     try {
       const { username, email, password, name, color } = req.body;
       const result = await registerUser({ username, email, password, name, color });
@@ -144,7 +212,7 @@ async function startServer() {
     }
   });
 
-  app.post("/api/auth/login", async (req, res) => {
+  app.post("/api/auth/login", authRateLimiter(15, 60000), async (req, res) => {
     try {
       const { identifier, password } = req.body;
       const result = await loginUser(identifier, password);
@@ -154,7 +222,7 @@ async function startServer() {
     }
   });
 
-  app.post("/api/auth/guest", async (req, res) => {
+  app.post("/api/auth/guest", authRateLimiter(30, 60000), async (req, res) => {
     try {
       const { name, color } = req.body;
       const result = await createGuestUser(name, color);
@@ -183,8 +251,8 @@ async function startServer() {
   app.get("/api/auth/google/url", (req, res) => {
     const originParam = (req.query.origin as string)?.trim();
     const reqOrigin = originParam || req.get("origin") || "";
-    const baseUrl = (process.env.APP_URL || reqOrigin || "http://localhost:5173").replace(/\/$/, "");
-    const redirectUri = `${baseUrl}/auth/google/callback`;
+    const trustedOrigin = resolveTrustedOrigin(reqOrigin);
+    const redirectUri = `${trustedOrigin}/auth/google/callback`;
     const clientId = process.env.GOOGLE_CLIENT_ID?.trim();
 
     if (!clientId) {
@@ -196,7 +264,7 @@ async function startServer() {
       return;
     }
 
-    const state = Buffer.from(JSON.stringify({ redirectUri, origin: reqOrigin })).toString("base64url");
+    const state = Buffer.from(JSON.stringify({ redirectUri, origin: trustedOrigin })).toString("base64url");
 
     const params = new URLSearchParams({
       client_id: clientId,
@@ -220,6 +288,16 @@ async function startServer() {
   app.get(["/auth/google/callback", "/auth/google/callback/"], async (req, res) => {
     const { code, error, state } = req.query;
 
+    let targetOrigin = resolveTrustedOrigin();
+    if (state && typeof state === 'string') {
+      try {
+        const decoded = JSON.parse(Buffer.from(state, 'base64url').toString('utf-8'));
+        if (decoded.origin) {
+          targetOrigin = resolveTrustedOrigin(decoded.origin);
+        }
+      } catch {}
+    }
+
     if (error || !code) {
       const errMsg = (error as string) || "Authorization was cancelled or code was not returned";
       res.send(`
@@ -231,7 +309,7 @@ async function startServer() {
             <p>${errMsg}</p>
             <script>
               if (window.opener) {
-                window.opener.postMessage({ type: 'GOOGLE_OAUTH_ERROR', error: ${JSON.stringify(errMsg)} }, '*');
+                window.opener.postMessage({ type: 'GOOGLE_OAUTH_ERROR', error: ${JSON.stringify(errMsg)} }, ${JSON.stringify(targetOrigin)});
                 setTimeout(() => window.close(), 1500);
               } else {
                 setTimeout(() => { window.location.href = '/'; }, 2000);
@@ -245,7 +323,7 @@ async function startServer() {
 
     try {
       // Decode state to retrieve the exact redirectUri used during the authorization request
-      let redirectUri = `${(process.env.APP_URL || 'http://localhost:5173').replace(/\/$/, '')}/auth/google/callback`;
+      let redirectUri = `${targetOrigin}/auth/google/callback`;
       if (state && typeof state === 'string') {
         try {
           const decoded = JSON.parse(Buffer.from(state, 'base64url').toString('utf-8'));
@@ -297,7 +375,7 @@ async function startServer() {
         picture: profile.picture,
       });
 
-      // Send postMessage to main window and close popup
+      // Send postMessage to main window with validated targetOrigin and close popup
       res.send(`
         <!DOCTYPE html>
         <html>
@@ -311,7 +389,7 @@ async function startServer() {
                   type: 'GOOGLE_OAUTH_SUCCESS',
                   token: ${JSON.stringify(result.token)},
                   user: ${JSON.stringify(result.user)}
-                }, '*');
+                }, ${JSON.stringify(targetOrigin)});
                 setTimeout(() => window.close(), 300);
               } else {
                 window.location.href = '/';
@@ -331,7 +409,7 @@ async function startServer() {
             <p>${errMsg}</p>
             <script>
               if (window.opener) {
-                window.opener.postMessage({ type: 'GOOGLE_OAUTH_ERROR', error: ${JSON.stringify(errMsg)} }, '*');
+                window.opener.postMessage({ type: 'GOOGLE_OAUTH_ERROR', error: ${JSON.stringify(errMsg)} }, ${JSON.stringify(targetOrigin)});
                 setTimeout(() => window.close(), 2500);
               }
             </script>

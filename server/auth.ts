@@ -77,6 +77,11 @@ export function sanitizeUser(u: StoredUserDoc | StoredUser): SanitizedUser {
   };
 }
 
+function sanitizeString(val: any): string {
+  if (typeof val !== 'string') return '';
+  return val.trim();
+}
+
 export async function registerUser(params: {
   username: string;
   email: string;
@@ -84,8 +89,9 @@ export async function registerUser(params: {
   name?: string;
   color?: string;
 }): Promise<{ token: string; user: SanitizedUser }> {
-  const username = params.username.trim().toLowerCase();
-  const email = params.email.trim().toLowerCase();
+  const username = sanitizeString(params.username).toLowerCase();
+  const email = sanitizeString(params.email).toLowerCase();
+  const password = typeof params.password === 'string' ? params.password : '';
 
   if (username.length < 3) {
     throw new Error('Username must be at least 3 characters.');
@@ -93,7 +99,7 @@ export async function registerUser(params: {
   if (!email.includes('@') || email.length < 5) {
     throw new Error('Please provide a valid email address.');
   }
-  if (params.password.length < 5) {
+  if (password.length < 5) {
     throw new Error('Password must be at least 5 characters.');
   }
 
@@ -111,10 +117,10 @@ export async function registerUser(params: {
     throw new Error('An account with this email already exists.');
   }
 
-  const { salt, hash } = hashPassword(params.password);
+  const { salt, hash } = hashPassword(password);
   const id = 'user_' + crypto.randomBytes(6).toString('hex');
-  const name = (params.name && params.name.trim()) || params.username;
-  const color = params.color || '#3b82f6';
+  const name = sanitizeString(params.name) || username;
+  const color = sanitizeString(params.color) || '#3b82f6';
 
   const newUser: StoredUserDoc = {
     id,
@@ -143,7 +149,13 @@ export async function registerUser(params: {
 }
 
 export async function loginUser(identifier: string, password: string): Promise<{ token: string; user: SanitizedUser }> {
-  const cleaned = identifier.trim().toLowerCase();
+  const cleaned = sanitizeString(identifier).toLowerCase();
+  const pass = typeof password === 'string' ? password : '';
+
+  if (!cleaned || !pass) {
+    throw new Error('Please provide both username/email and password.');
+  }
+
   const users = getUsersCollection();
   const tokens = getTokensCollection();
 
@@ -155,7 +167,7 @@ export async function loginUser(identifier: string, password: string): Promise<{
     throw new Error('Account not found. Please check your username/email or register.');
   }
 
-  const isValid = verifyPassword(password, user.salt, user.passwordHash);
+  const isValid = verifyPassword(pass, user.salt, user.passwordHash);
   if (!isValid) {
     throw new Error('Incorrect password. Please try again.');
   }
@@ -285,9 +297,10 @@ export async function findOrCreateGoogleUser(googleProfile: {
 }
 
 export async function getUserByToken(token: string): Promise<SanitizedUser | null> {
-  if (!token) return null;
+  const cleanToken = sanitizeString(token);
+  if (!cleanToken) return null;
   const tokens = getTokensCollection();
-  const tokenDoc = await tokens.findOne({ token });
+  const tokenDoc = await tokens.findOne({ token: cleanToken });
   if (!tokenDoc) return null;
 
   const users = getUsersCollection();
@@ -298,26 +311,40 @@ export async function getUserByToken(token: string): Promise<SanitizedUser | nul
 }
 
 export async function saveRoomMeta(room: SessionRoomMeta) {
+  const cleanId = sanitizeString(room.id);
+  if (!cleanId) return;
+
   const rooms = getRoomsCollection();
   const users = getUsersCollection();
 
+  const sanitizedRoom: SessionRoomMeta = {
+    ...room,
+    id: cleanId,
+    name: sanitizeString(room.name) || `Room ${cleanId}`,
+    creatorId: sanitizeString(room.creatorId),
+    creatorName: sanitizeString(room.creatorName),
+  };
+
   await rooms.updateOne(
-    { id: room.id },
-    { $set: room },
+    { id: cleanId },
+    { $set: sanitizedRoom },
     { upsert: true }
   );
 
-  if (room.creatorId) {
+  if (sanitizedRoom.creatorId) {
     await users.updateOne(
-      { id: room.creatorId },
-      { $addToSet: { createdRooms: room.id } }
+      { id: sanitizedRoom.creatorId },
+      { $addToSet: { createdRooms: cleanId } }
     );
   }
 }
 
 export async function getRoomMeta(roomId: string): Promise<SessionRoomMeta | null> {
+  const cleanRoomId = sanitizeString(roomId);
+  if (!cleanRoomId) return null;
+
   const rooms = getRoomsCollection();
-  const doc = await rooms.findOne({ id: roomId });
+  const doc = await rooms.findOne({ id: cleanRoomId });
   if (!doc) return null;
   return {
     id: doc.id,
@@ -330,8 +357,11 @@ export async function getRoomMeta(roomId: string): Promise<SessionRoomMeta | nul
 }
 
 export async function getRoomsForUser(userId: string): Promise<SessionRoomMeta[]> {
+  const cleanUserId = sanitizeString(userId);
+  if (!cleanUserId) return [];
+
   const rooms = getRoomsCollection();
-  const list = await rooms.find({ creatorId: userId }).sort({ createdAt: -1 }).toArray();
+  const list = await rooms.find({ creatorId: cleanUserId }).sort({ createdAt: -1 }).toArray();
   return list.map((doc) => ({
     id: doc.id,
     name: doc.name,
@@ -356,14 +386,17 @@ export function generateRoomCode(): string {
 }
 
 export async function loadRoomElements(roomId: string): Promise<Record<string, any>> {
+  const cleanRoomId = sanitizeString(roomId);
+  if (!cleanRoomId) return {};
+
   try {
     const elementsCol = getElementsCollection();
-    const doc = await elementsCol.findOne({ roomId });
+    const doc = await elementsCol.findOne({ roomId: cleanRoomId });
     if (doc && doc.elements) {
       return doc.elements;
     }
   } catch (err) {
-    console.warn(`Could not load elements from MongoDB for room ${roomId}:`, err);
+    console.warn(`Could not load elements from MongoDB for room ${cleanRoomId}:`, err);
   }
   return {};
 }
