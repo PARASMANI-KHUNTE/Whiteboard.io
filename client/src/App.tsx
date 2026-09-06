@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useRef } from 'react';
-import { ToolType, CanvasElement, DrawingStroke, StickyNote, TextElement } from './types';
+import { ToolType, ShapeType, CanvasElement, DrawingStroke, StickyNote, TextElement, ShapeElement, IconElement } from './types';
 import { useAuth } from './hooks/useAuth';
 import { useSocket } from './hooks/useSocket';
 import { useVoiceChat } from './hooks/useVoiceChat';
@@ -19,6 +19,8 @@ export default function App() {
   const [currentTool, setCurrentTool] = useState<ToolType>('pen');
   const [currentColor, setCurrentColor] = useState<string>('#0f172a'); // Ink charcoal
   const [currentSize, setCurrentSize] = useState<number>(3); // Fine default
+  const [selectedShapeType, setSelectedShapeType] = useState<ShapeType>('rectangle');
+  const [selectedIconName, setSelectedIconName] = useState<string>('star');
   const [myCreatedElementIds, setMyCreatedElementIds] = useState<string[]>([]);
   const [showWelcomeHint, setShowWelcomeHint] = useState<boolean>(true);
   const [hasChosenSessionMode, setHasChosenSessionMode] = useState<boolean>(false);
@@ -272,6 +274,88 @@ export default function App() {
       }
     });
 
+    // Draw shapes
+    (Object.values(elements) as CanvasElement[]).forEach((el) => {
+      if (el.type === 'shape') {
+        const s = el as ShapeElement;
+        ctx.save();
+        ctx.strokeStyle = s.color || '#0f172a';
+        ctx.fillStyle = s.fillColor && s.fillColor !== 'transparent' ? s.fillColor : 'transparent';
+        ctx.lineWidth = s.strokeWidth || 3;
+        ctx.lineJoin = 'round';
+        ctx.beginPath();
+
+        if (s.shapeType === 'rectangle') {
+          ctx.roundRect(s.x, s.y, s.width, s.height, 8);
+        } else if (s.shapeType === 'circle') {
+          ctx.ellipse(s.x + s.width / 2, s.y + s.height / 2, s.width / 2, s.height / 2, 0, 0, Math.PI * 2);
+        } else if (s.shapeType === 'diamond') {
+          ctx.moveTo(s.x + s.width / 2, s.y);
+          ctx.lineTo(s.x + s.width, s.y + s.height / 2);
+          ctx.lineTo(s.x + s.width / 2, s.y + s.height);
+          ctx.lineTo(s.x, s.y + s.height / 2);
+          ctx.closePath();
+        } else if (s.shapeType === 'triangle') {
+          ctx.moveTo(s.x + s.width / 2, s.y);
+          ctx.lineTo(s.x + s.width, s.y + s.height);
+          ctx.lineTo(s.x, s.y + s.height);
+          ctx.closePath();
+        } else if (s.shapeType === 'arrow') {
+          const arrowH = s.height * 0.4;
+          const headW = Math.min(s.width * 0.4, s.height * 0.8);
+          const yCenter = s.y + s.height / 2;
+          ctx.moveTo(s.x, yCenter - arrowH / 2);
+          ctx.lineTo(s.x + s.width - headW, yCenter - arrowH / 2);
+          ctx.lineTo(s.x + s.width - headW, s.y);
+          ctx.lineTo(s.x + s.width, yCenter);
+          ctx.lineTo(s.x + s.width - headW, s.y + s.height);
+          ctx.lineTo(s.x + s.width - headW, yCenter + arrowH / 2);
+          ctx.lineTo(s.x, yCenter + arrowH / 2);
+          ctx.closePath();
+        } else {
+          ctx.rect(s.x, s.y, s.width, s.height);
+        }
+
+        if (s.fillColor && s.fillColor !== 'transparent') ctx.fill();
+        ctx.stroke();
+        ctx.restore();
+      }
+    });
+
+    // Draw icons
+    (Object.values(elements) as CanvasElement[]).forEach((el) => {
+      if (el.type === 'icon') {
+        const ic = el as IconElement;
+        ctx.save();
+        ctx.fillStyle = ic.color || '#3b82f6';
+        ctx.font = `bold ${Math.max(16, ic.size * 0.65)}px sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        const emojiMap: Record<string, string> = {
+          star: '⭐',
+          heart: '❤️',
+          sparkles: '✨',
+          flame: '🔥',
+          lightbulb: '💡',
+          user: '👤',
+          cloud: '☁️',
+          database: '🗄️',
+          code: '💻',
+          shield: '🛡️',
+          message: '💬',
+          'thumbs-up': '👍',
+          alert: '⚠️',
+          rocket: '🚀',
+          smile: '😊',
+          compass: '🧭',
+          check: '✅',
+        };
+        const symbol = emojiMap[ic.iconName] || '★';
+        ctx.fillText(symbol, ic.x + (ic.size + 16) / 2, ic.y + (ic.size + 16) / 2);
+        ctx.restore();
+      }
+    });
+
     const link = document.createElement('a');
     link.download = `whiteboard-${roomId}.png`;
     link.href = canvas.toDataURL('image/png');
@@ -361,6 +445,8 @@ export default function App() {
         onStrokeLiveStart={emitStrokeLiveStart}
         onStrokeLivePoint={emitStrokeLivePoint}
         onSelectTool={setCurrentTool}
+        selectedShapeType={selectedShapeType}
+        selectedIconName={selectedIconName}
       />
 
       {/* Bottom Floating Toolbar */}
@@ -370,9 +456,13 @@ export default function App() {
         currentSize={currentSize}
         canUndo={myCreatedElementIds.length > 0}
         canWrite={canWrite}
+        selectedShapeType={selectedShapeType}
+        selectedIconName={selectedIconName}
         onSelectTool={setCurrentTool}
         onSelectColor={setCurrentColor}
         onSelectSize={setCurrentSize}
+        onSelectShape={setSelectedShapeType}
+        onSelectIcon={setSelectedIconName}
         onUndo={handleUndo}
         onRequestClear={handleRequestClear}
         onExport={handleExport}

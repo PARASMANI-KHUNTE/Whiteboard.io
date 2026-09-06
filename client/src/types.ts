@@ -1,4 +1,6 @@
-export type ToolType = 'pen' | 'highlighter' | 'eraser' | 'sticky' | 'text';
+export type ToolType = 'pen' | 'highlighter' | 'eraser' | 'sticky' | 'text' | 'shape' | 'icon' | 'hand';
+
+export type ShapeType = 'rectangle' | 'circle' | 'diamond' | 'triangle' | 'star' | 'arrow';
 
 export interface Point {
   x: number;
@@ -43,7 +45,36 @@ export interface TextElement {
   updatedAt: number;
 }
 
-export type CanvasElement = DrawingStroke | StickyNote | TextElement;
+export interface ShapeElement {
+  id: string;
+  type: 'shape';
+  shapeType: ShapeType;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  color: string;
+  fillColor?: string;
+  strokeWidth: number;
+  userId: string;
+  userName?: string;
+  updatedAt: number;
+}
+
+export interface IconElement {
+  id: string;
+  type: 'icon';
+  iconName: string;
+  x: number;
+  y: number;
+  size: number;
+  color: string;
+  userId: string;
+  userName?: string;
+  updatedAt: number;
+}
+
+export type CanvasElement = DrawingStroke | StickyNote | TextElement | ShapeElement | IconElement;
 
 export interface AuthUser {
   id: string;

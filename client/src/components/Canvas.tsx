@@ -5,11 +5,17 @@ import {
   DrawingStroke,
   StickyNote,
   TextElement,
+  ShapeElement,
+  IconElement,
+  ShapeType,
   RemoteUser,
   Point,
 } from '../types';
 import { StickyNoteItem } from './StickyNoteItem';
 import { TextItem } from './TextItem';
+import { ShapeItem } from './ShapeItem';
+import { IconItem } from './IconItem';
+import { ZoomControls } from './ZoomControls';
 
 interface CanvasProps {
   currentTool: ToolType;
@@ -18,6 +24,8 @@ interface CanvasProps {
   currentUserId: string;
   currentUserName: string;
   canWrite?: boolean;
+  selectedShapeType?: ShapeType;
+  selectedIconName?: string;
   onRestrictedAttempt?: () => void;
   elements: Record<string, CanvasElement>;
   liveStrokes: Record<
@@ -51,6 +59,8 @@ export const Canvas: React.FC<CanvasProps> = ({
   currentUserId,
   currentUserName,
   canWrite = true,
+  selectedShapeType = 'rectangle',
+  selectedIconName = 'star',
   onRestrictedAttempt,
   elements,
   liveStrokes,
@@ -67,6 +77,22 @@ export const Canvas: React.FC<CanvasProps> = ({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
+  // Pan, Zoom & Viewport state
+  const [pan, setPan] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [zoom, setZoom] = useState<number>(1.0);
+  const [isPanning, setIsPanning] = useState(false);
+  const [spacePressed, setSpacePressed] = useState(false);
+
+  // Active object selection state (keeps controls pinned open)
+  const [selectedElementId, setSelectedElementId] = useState<string | null>(null);
+
+  const panStartRef = useRef<{ mouseX: number; mouseY: number; panX: number; panY: number }>({
+    mouseX: 0,
+    mouseY: 0,
+    panX: 0,
+    panY: 0,
+  });
+
   const [isDrawing, setIsDrawing] = useState(false);
   const [currentStroke, setCurrentStroke] = useState<DrawingStroke | null>(null);
   const [eraserCursor, setEraserCursor] = useState<{ x: number; y: number } | null>(null);
@@ -74,7 +100,82 @@ export const Canvas: React.FC<CanvasProps> = ({
   // Throttled cursor emission
   const lastCursorEmitRef = useRef<number>(0);
 
-  // Draw helper for a single stroke
+  // Spacebar pan listener and Escape deselect
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.code === 'Space' && !['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement).tagName)) {
+        setSpacePressed(true);
+      }
+      if (e.code === 'Escape') {
+        setSelectedElementId(null);
+      }
+    };
+
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (e.code === 'Space') {
+        setSpacePressed(false);
+      }
+    };
+
+    const handleAuxClick = (e: MouseEvent) => {
+      // Prevent default autoscroll on middle click
+      if (e.button === 1) e.preventDefault();
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    window.addEventListener('auxclick', handleAuxClick, { passive: false });
+
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+      window.removeEventListener('auxclick', handleAuxClick);
+    };
+  }, []);
+
+  // Native Wheel listener for Zooming (Ctrl+Wheel / Pinch) and Panning
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const handleWheel = (e: WheelEvent) => {
+      e.preventDefault();
+
+      if (e.ctrlKey || e.metaKey) {
+        // Zoom centered at cursor position
+        const rect = container.getBoundingClientRect();
+        const mouseX = e.clientX - rect.left;
+        const mouseY = e.clientY - rect.top;
+
+        const zoomFactor = e.deltaY < 0 ? 1.08 : 0.92;
+        setZoom((prevZoom) => {
+          const nextZoom = Math.max(0.2, Math.min(3.0, prevZoom * zoomFactor));
+          setPan((prevPan) => {
+            const worldX = (mouseX - prevPan.x) / prevZoom;
+            const worldY = (mouseY - prevPan.y) / prevZoom;
+            return {
+              x: mouseX - worldX * nextZoom,
+              y: mouseY - worldY * nextZoom,
+            };
+          });
+          return nextZoom;
+        });
+      } else {
+        // Two-finger trackpad or standard wheel scroll pans the canvas
+        setPan((prevPan) => ({
+          x: prevPan.x - e.deltaX,
+          y: prevPan.y - e.deltaY,
+        }));
+      }
+    };
+
+    container.addEventListener('wheel', handleWheel, { passive: false });
+    return () => {
+      container.removeEventListener('wheel', handleWheel);
+    };
+  }, []);
+
+  // Draw helper for a single stroke in world coords
   const drawSingleStroke = useCallback(
     (ctx: CanvasRenderingContext2D, stroke: { points: Point[]; color: string; size: number; isHighlighter?: boolean }) => {
       const points = stroke.points;
@@ -116,7 +217,7 @@ export const Canvas: React.FC<CanvasProps> = ({
     []
   );
 
-  // Redraw all elements on canvas
+  // Redraw all elements on canvas with Pan and Zoom transformation
   const renderCanvas = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -127,8 +228,12 @@ export const Canvas: React.FC<CanvasProps> = ({
     ctx.save();
     ctx.scale(dpr, dpr);
 
-    // Clear background for crisp transparent rendering over the clean dot grid
+    // Clear entire screen
     ctx.clearRect(0, 0, canvas.width / dpr, canvas.height / dpr);
+
+    // Apply Pan and Zoom to the drawing context!
+    ctx.translate(pan.x, pan.y);
+    ctx.scale(zoom, zoom);
 
     // Render all persistent strokes
     const elementList = Object.values(elements) as CanvasElement[];
@@ -150,7 +255,7 @@ export const Canvas: React.FC<CanvasProps> = ({
     }
 
     ctx.restore();
-  }, [elements, liveStrokes, currentStroke, drawSingleStroke]);
+  }, [elements, liveStrokes, currentStroke, drawSingleStroke, pan, zoom]);
 
   // Handle canvas sizing and DPI scaling
   useEffect(() => {
@@ -179,15 +284,15 @@ export const Canvas: React.FC<CanvasProps> = ({
     };
   }, [renderCanvas]);
 
-  // Re-render whenever strokes or elements change
+  // Re-render whenever strokes, pan, or zoom change
   useEffect(() => {
     renderCanvas();
   }, [renderCanvas]);
 
-  // Eraser collision check
+  // Eraser collision check in world coordinates
   const checkAndEraseAtPoint = useCallback(
     (point: Point) => {
-      const eraserRadius = currentSize * 2.5 + 8;
+      const eraserRadius = (currentSize * 2.5 + 8) / zoom;
       const elementsToDelete: string[] = [];
 
       (Object.values(elements) as CanvasElement[]).forEach((el) => {
@@ -207,10 +312,10 @@ export const Canvas: React.FC<CanvasProps> = ({
         onElementsBatchDelete(elementsToDelete);
       }
     },
-    [elements, currentSize, onElementsBatchDelete]
+    [elements, currentSize, zoom, onElementsBatchDelete]
   );
 
-  // Mouse & Touch coordinate helper
+  // Convert screen mouse coordinates into world coordinates
   const getCanvasCoords = (e: React.MouseEvent | React.TouchEvent): Point | null => {
     const canvas = canvasRef.current;
     if (!canvas) return null;
@@ -228,13 +333,38 @@ export const Canvas: React.FC<CanvasProps> = ({
       clientY = e.clientY;
     }
 
+    const screenX = clientX - rect.left;
+    const screenY = clientY - rect.top;
+
     return {
-      x: clientX - rect.left,
-      y: clientY - rect.top,
+      x: (screenX - pan.x) / zoom,
+      y: (screenY - pan.y) / zoom,
     };
   };
 
   const handlePointerDown = (e: React.MouseEvent | React.TouchEvent) => {
+    // Check if Middle Mouse Button (button === 1), Hand Tool, or Spacebar Pan
+    const isMiddleClick = 'button' in e && e.button === 1;
+    const isHandTool = currentTool === 'hand';
+    const isSpacePan = spacePressed;
+
+    if (isMiddleClick || isHandTool || isSpacePan) {
+      e.preventDefault();
+      setIsPanning(true);
+      const clientX = 'clientX' in e ? e.clientX : e.touches[0].clientX;
+      const clientY = 'clientY' in e ? e.clientY : e.touches[0].clientY;
+      panStartRef.current = {
+        mouseX: clientX,
+        mouseY: clientY,
+        panX: pan.x,
+        panY: pan.y,
+      };
+      return;
+    }
+
+    // Deselect any active element when clicking canvas background
+    setSelectedElementId(null);
+
     const coords = getCanvasCoords(e);
     if (!coords) return;
 
@@ -259,7 +389,7 @@ export const Canvas: React.FC<CanvasProps> = ({
         updatedAt: Date.now(),
       };
       onElementCreate(newSticky);
-      onSelectTool?.('pen'); // Return to pen tool so subsequent canvas interactions don't drop duplicate notes
+      onSelectTool?.('pen'); // Return to pen tool
       return;
     }
 
@@ -278,6 +408,52 @@ export const Canvas: React.FC<CanvasProps> = ({
         updatedAt: Date.now(),
       };
       onElementCreate(newText);
+      onSelectTool?.('pen'); // Return to pen tool
+      return;
+    }
+
+    // Handle Shape placement
+    if (currentTool === 'shape') {
+      const shapeW = 160;
+      const shapeH = 120;
+      const newShape: ShapeElement = {
+        id: 'shape_' + Math.random().toString(36).substring(2, 9),
+        type: 'shape',
+        shapeType: selectedShapeType || 'rectangle',
+        x: Math.max(10, coords.x - shapeW / 2),
+        y: Math.max(10, coords.y - shapeH / 2),
+        width: shapeW,
+        height: shapeH,
+        color: currentColor,
+        fillColor: `${currentColor}15`,
+        strokeWidth: currentSize,
+        userId: currentUserId,
+        userName: currentUserName,
+        updatedAt: Date.now(),
+      };
+      onElementCreate(newShape);
+      setSelectedElementId(newShape.id);
+      onSelectTool?.('pen'); // Return to pen tool
+      return;
+    }
+
+    // Handle Icon placement
+    if (currentTool === 'icon') {
+      const iconSize = 48;
+      const newIcon: IconElement = {
+        id: 'icon_' + Math.random().toString(36).substring(2, 9),
+        type: 'icon',
+        iconName: selectedIconName || 'star',
+        x: Math.max(10, coords.x - iconSize / 2),
+        y: Math.max(10, coords.y - iconSize / 2),
+        size: iconSize,
+        color: currentColor,
+        userId: currentUserId,
+        userName: currentUserName,
+        updatedAt: Date.now(),
+      };
+      onElementCreate(newIcon);
+      setSelectedElementId(newIcon.id);
       onSelectTool?.('pen'); // Return to pen tool
       return;
     }
@@ -310,39 +486,52 @@ export const Canvas: React.FC<CanvasProps> = ({
   };
 
   const handlePointerMove = (e: React.MouseEvent | React.TouchEvent) => {
+    // Handle Panning / Canvas Movement
+    if (isPanning) {
+      const clientX = 'clientX' in e ? e.clientX : e.touches[0].clientX;
+      const clientY = 'clientY' in e ? e.clientY : e.touches[0].clientY;
+      const deltaX = clientX - panStartRef.current.mouseX;
+      const deltaY = clientY - panStartRef.current.mouseY;
+      setPan({
+        x: panStartRef.current.panX + deltaX,
+        y: panStartRef.current.panY + deltaY,
+      });
+      return;
+    }
+
     const coords = getCanvasCoords(e);
     if (!coords) return;
 
-    // Broadcast cursor position (throttled ~30fps)
+    // Track cursor on screen for eraser
+    if (currentTool === 'eraser') {
+      const clientX = 'clientX' in e ? e.clientX : e.touches[0].clientX;
+      const clientY = 'clientY' in e ? e.clientY : e.touches[0].clientY;
+      const rect = canvasRef.current?.getBoundingClientRect();
+      if (rect) {
+        setEraserCursor({ x: clientX - rect.left, y: clientY - rect.top });
+      }
+    }
+
+    // Emit live cursor coordinates in world space (throttled)
     const now = Date.now();
-    if (now - lastCursorEmitRef.current > 33) {
+    if (now - lastCursorEmitRef.current > 40) {
       lastCursorEmitRef.current = now;
       onCursorMove({
         x: coords.x,
         y: coords.y,
         tool: currentTool,
-        isDrawing,
+        isDrawing: isDrawing && (currentTool === 'pen' || currentTool === 'highlighter'),
       });
     }
 
+    if (!isDrawing) return;
+
     if (currentTool === 'eraser') {
-      setEraserCursor(coords);
-      if (isDrawing) {
-        checkAndEraseAtPoint(coords);
-      }
+      checkAndEraseAtPoint(coords);
       return;
-    } else {
-      setEraserCursor(null);
     }
 
-    if (!isDrawing || !currentStroke) return;
-
-    // Point distance thresholding (filters micro-jitter & reduces payload size significantly)
-    const lastPoint = currentStroke.points[currentStroke.points.length - 1];
-    if (lastPoint) {
-      const dist = Math.hypot(coords.x - lastPoint.x, coords.y - lastPoint.y);
-      if (dist < 2.5) return;
-    }
+    if (!currentStroke) return;
 
     // Add point to stroke
     const updatedPoints = [...currentStroke.points, coords];
@@ -355,6 +544,11 @@ export const Canvas: React.FC<CanvasProps> = ({
   };
 
   const handlePointerUp = () => {
+    if (isPanning) {
+      setIsPanning(false);
+      return;
+    }
+
     if (isDrawing && currentStroke && currentStroke.points.length > 0) {
       onElementCreate(currentStroke);
     }
@@ -362,23 +556,32 @@ export const Canvas: React.FC<CanvasProps> = ({
     setCurrentStroke(null);
   };
 
-  // Sticky and Text items
+  // Sticky, Text, Shape, and Icon items
   const allElements = Object.values(elements) as CanvasElement[];
   const stickyNotes = allElements.filter((el) => el.type === 'sticky') as StickyNote[];
   const textElements = allElements.filter((el) => el.type === 'text') as TextElement[];
+  const shapeElements = allElements.filter((el) => el.type === 'shape') as ShapeElement[];
+  const iconElements = allElements.filter((el) => el.type === 'icon') as IconElement[];
   const userList = Object.values(remoteUsers) as RemoteUser[];
+
+  const getCursorClass = () => {
+    if (isPanning) return 'cursor-grabbing';
+    if (currentTool === 'hand' || spacePressed) return 'cursor-grab';
+    if (!canWrite) return 'cursor-default';
+    if (currentTool === 'eraser') return 'cursor-none';
+    return 'cursor-crosshair';
+  };
 
   return (
     <div
       ref={containerRef}
       id="whiteboard-canvas-container"
       style={{
-        backgroundImage: 'radial-gradient(#e2e8f0 1.25px, transparent 1.25px)',
-        backgroundSize: '24px 24px',
+        backgroundImage: 'radial-gradient(#cbd5e1 1.3px, transparent 1.3px)',
+        backgroundSize: `${24 * zoom}px ${24 * zoom}px`,
+        backgroundPosition: `${pan.x}px ${pan.y}px`,
       }}
-      className={`relative w-full h-screen overflow-hidden bg-white select-none ${
-        canWrite ? 'cursor-crosshair' : 'cursor-default'
-      }`}
+      className={`relative w-full h-screen overflow-hidden bg-white select-none ${getCursorClass()}`}
       onMouseDown={handlePointerDown}
       onMouseMove={handlePointerMove}
       onMouseUp={handlePointerUp}
@@ -405,74 +608,121 @@ export const Canvas: React.FC<CanvasProps> = ({
         />
       )}
 
-      {/* Sticky Notes Layer */}
-      {stickyNotes.map((note) => (
-        <StickyNoteItem
-          key={note.id}
-          note={note}
-          currentUserId={currentUserId}
-          canWrite={canWrite}
-          onUpdate={onElementUpdate}
-          onDelete={onElementDelete}
-        />
-      ))}
+      {/* Interactive World Elements Layer (Pan & Zoom Transformed) */}
+      <div
+        id="whiteboard-world-layer"
+        style={{
+          transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
+          transformOrigin: '0 0',
+        }}
+        className="absolute inset-0 pointer-events-none"
+      >
+        {/* Sticky Notes Layer */}
+        {stickyNotes.map((note) => (
+          <StickyNoteItem
+            key={note.id}
+            note={note}
+            currentUserId={currentUserId}
+            canWrite={canWrite}
+            onUpdate={onElementUpdate}
+            onDelete={onElementDelete}
+          />
+        ))}
 
-      {/* Text Elements Layer */}
-      {textElements.map((el) => (
-        <TextItem
-          key={el.id}
-          element={el}
-          currentUserId={currentUserId}
-          canWrite={canWrite}
-          onUpdate={onElementUpdate}
-          onDelete={onElementDelete}
-        />
-      ))}
+        {/* Text Elements Layer */}
+        {textElements.map((el) => (
+          <TextItem
+            key={el.id}
+            element={el}
+            currentUserId={currentUserId}
+            canWrite={canWrite}
+            onUpdate={onElementUpdate}
+            onDelete={onElementDelete}
+          />
+        ))}
 
-      {/* Remote Multiplayer Live Cursors */}
-      {userList.map((user) => {
-        if (!user.cursor || user.id === currentUserId) return null;
-        const speaking = user.isSpeaking;
+        {/* Shapes Layer with Persistent Selection */}
+        {shapeElements.map((shape) => (
+          <ShapeItem
+            key={shape.id}
+            element={shape}
+            currentUserId={currentUserId}
+            canWrite={canWrite}
+            isSelected={selectedElementId === shape.id}
+            onSelect={() => setSelectedElementId(shape.id)}
+            onUpdate={onElementUpdate}
+            onDelete={onElementDelete}
+          />
+        ))}
 
-        return (
-          <div
-            key={user.id}
-            id={`remote-cursor-${user.id}`}
-            style={{
-              transform: `translate(${user.cursor.x}px, ${user.cursor.y}px)`,
-              transition: 'transform 0.08s ease-out',
-            }}
-            className="pointer-events-none absolute top-0 left-0 z-30 flex flex-col items-start"
-          >
-            {/* SVG Cursor Pointer */}
-            <svg
-              className="w-5 h-5 drop-shadow-sm"
-              viewBox="0 0 24 24"
-              fill={user.color || '#3b82f6'}
-              stroke="#ffffff"
-              strokeWidth="1.5"
-            >
-              <path d="M5.5 3.21V20.8c0 .45.54.67.85.35l4.86-4.86a.5.5 0 0 1 .35-.15h6.87a.5.5 0 0 0 .35-.85L6.35 2.86a.5.5 0 0 0-.85.35z" />
-            </svg>
+        {/* Icons / Stickers Layer with Persistent Selection */}
+        {iconElements.map((icon) => (
+          <IconItem
+            key={icon.id}
+            element={icon}
+            currentUserId={currentUserId}
+            canWrite={canWrite}
+            isSelected={selectedElementId === icon.id}
+            onSelect={() => setSelectedElementId(icon.id)}
+            onUpdate={onElementUpdate}
+            onDelete={onElementDelete}
+          />
+        ))}
 
-            {/* Remote User Name & Activity Tag */}
+        {/* Remote Multiplayer Live Cursors (projected in world space) */}
+        {userList.map((user) => {
+          if (!user.cursor || user.id === currentUserId) return null;
+          const speaking = user.isSpeaking;
+
+          return (
             <div
-              style={{ backgroundColor: user.color || '#3b82f6' }}
-              className={`-mt-1 ml-3 px-2 py-0.5 rounded-full text-white text-[10px] font-semibold whitespace-nowrap shadow-sm flex items-center gap-1.5 transition-all ${
-                speaking ? 'ring-2 ring-blue-400 scale-105' : ''
-              }`}
+              key={user.id}
+              id={`remote-cursor-${user.id}`}
+              style={{
+                transform: `translate(${user.cursor.x}px, ${user.cursor.y}px)`,
+                transition: 'transform 0.08s ease-out',
+              }}
+              className="pointer-events-none absolute top-0 left-0 z-30 flex flex-col items-start"
             >
-              {speaking && (
-                <span className="w-1.5 h-1.5 rounded-full bg-white animate-ping" />
-              )}
-              <span>{user.name}</span>
-              {user.cursor.isDrawing && (
-                <span className="text-[9px] opacity-80 font-normal">✍️</span>
-              )}
+              <svg
+                className="w-5 h-5 drop-shadow-sm"
+                viewBox="0 0 24 24"
+                fill={user.color || '#3b82f6'}
+                stroke="#ffffff"
+                strokeWidth="1.5"
+              >
+                <path d="M5.5 3.21V20.8c0 .45.54.67.85.35l4.86-4.86a.5.5 0 0 1 .35-.15h6.87a.5.5 0 0 0 .35-.85L6.35 2.86a.5.5 0 0 0-.85.35z" />
+              </svg>
+
+              <div
+                style={{ backgroundColor: user.color || '#3b82f6' }}
+                className={`-mt-1 ml-3 px-2 py-0.5 rounded-full text-white text-[10px] font-semibold whitespace-nowrap shadow-sm flex items-center gap-1.5 transition-all ${
+                  speaking ? 'ring-2 ring-blue-400 scale-105' : ''
+                }`}
+              >
+                {speaking && (
+                  <span className="w-1.5 h-1.5 rounded-full bg-white animate-ping" />
+                )}
+                <span>{user.name}</span>
+                {user.cursor.isDrawing && (
+                  <span className="text-[9px] opacity-80 font-normal">✍️</span>
+                )}
+              </div>
             </div>
-          </div>
-        );
-      })}
+          );
+        })}
+      </div>
+
+      {/* Floating Zoom & Pan Navigation Controls */}
+      <ZoomControls
+        zoom={zoom}
+        onZoomIn={() => setZoom((z) => Math.min(3.0, Number((z + 0.2).toFixed(2))))}
+        onZoomOut={() => setZoom((z) => Math.max(0.25, Number((z - 0.2).toFixed(2))))}
+        onResetZoom={() => {
+          setZoom(1.0);
+          setPan({ x: 0, y: 0 });
+        }}
+      />
     </div>
   );
 };
