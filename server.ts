@@ -13,6 +13,8 @@ import {
   getRoomMeta,
   getRoomsForUser,
   generateRoomCode,
+  loadRoomElements,
+  saveRoomElements,
 } from "./server/auth";
 
 interface CanvasElement {
@@ -70,6 +72,7 @@ function getOrCreateRoom(roomId: string): RoomData {
   let room = rooms.get(roomId);
   if (!room) {
     const meta = getRoomMeta(roomId);
+    const persistedElements = loadRoomElements(roomId);
     room = {
       id: roomId,
       name: meta?.name || `Room ${roomId}`,
@@ -79,7 +82,7 @@ function getOrCreateRoom(roomId: string): RoomData {
       isLocked: meta?.isLocked || false,
       kickedUserIds: new Set<string>(),
       userPermissions: {},
-      elements: {},
+      elements: persistedElements || {},
       users: {},
       voteToClear: null,
       voteTimer: null,
@@ -428,16 +431,23 @@ async function startServer() {
 
       // Authenticated user resolution
       const authenticatedUser = token ? getUserByToken(token) : null;
-      const actualUserId = authenticatedUser ? authenticatedUser.id : user.id;
+      const actualUserId = user.id || socket.id;
       const actualName = authenticatedUser ? authenticatedUser.name : user.name;
       const actualColor = authenticatedUser ? authenticatedUser.color : user.color;
+      const accountId = authenticatedUser ? authenticatedUser.id : null;
 
       // Determine Host / Admin status
-      const isRoomCreator = room.creatorId && room.creatorId === actualUserId;
+      const isRoomCreator = Boolean(
+        room.creatorId && (
+          (accountId && room.creatorId === accountId) ||
+          room.creatorId === actualUserId ||
+          room.creatorId === user.id
+        )
+      );
       const isFirstUser = !room.creatorId && Object.keys(room.users).length === 0;
 
       if (isFirstUser && !room.creatorId) {
-        room.creatorId = actualUserId;
+        room.creatorId = accountId || actualUserId;
         room.creatorName = actualName;
       }
 
@@ -449,9 +459,10 @@ async function startServer() {
         role = 'admin';
         canWrite = true;
       } else {
-        if (room.userPermissions[actualUserId]) {
-          canWrite = room.userPermissions[actualUserId].canWrite;
-          role = room.userPermissions[actualUserId].role;
+        const userPerm = room.userPermissions[actualUserId] || (accountId ? room.userPermissions[accountId] : undefined);
+        if (userPerm) {
+          canWrite = userPerm.canWrite;
+          role = userPerm.role;
         } else {
           canWrite = !room.isLocked;
           role = room.isLocked ? 'viewer' : 'editor';
@@ -598,6 +609,7 @@ async function startServer() {
       if (!currentRoomId || !checkCanWrite()) return;
       const room = getOrCreateRoom(currentRoomId);
       room.elements[element.id] = element;
+      saveRoomElements(currentRoomId, room.elements);
       socket.to(currentRoomId).emit("element-created", element);
     });
 
@@ -610,6 +622,7 @@ async function startServer() {
       } else {
         room.elements[element.id] = element;
       }
+      saveRoomElements(currentRoomId, room.elements);
       socket.to(currentRoomId).emit("element-updated", element);
     });
 
@@ -618,6 +631,7 @@ async function startServer() {
       if (!currentRoomId || !checkCanWrite()) return;
       const room = getOrCreateRoom(currentRoomId);
       delete room.elements[payload.elementId];
+      saveRoomElements(currentRoomId, room.elements);
       socket.to(currentRoomId).emit("element-deleted", payload);
     });
 
@@ -628,6 +642,7 @@ async function startServer() {
       payload.elementIds.forEach((id) => {
         delete room.elements[id];
       });
+      saveRoomElements(currentRoomId, room.elements);
       socket.to(currentRoomId).emit("elements-batch-deleted", payload);
     });
 
@@ -768,6 +783,7 @@ async function startServer() {
 
         if (passed) {
           currentRoom.elements = {};
+          saveRoomElements(roomId, {});
           io.to(roomId).emit("board-cleared", {
             initiatorName: currentRoom.voteToClear.initiatorName,
             wasVoted: true,
@@ -807,6 +823,7 @@ async function startServer() {
       if (yesCount > totalEligible / 2) {
         if (room.voteTimer) clearTimeout(room.voteTimer);
         room.elements = {};
+        saveRoomElements(currentRoomId, {});
         io.to(currentRoomId).emit("board-cleared", {
           initiatorName: room.voteToClear.initiatorName,
           wasVoted: true,
@@ -859,6 +876,7 @@ async function startServer() {
       if (!currentRoomId || !currentUser || !checkCanWrite()) return;
       const room = getOrCreateRoom(currentRoomId);
       room.elements = {};
+      saveRoomElements(currentRoomId, {});
       io.to(currentRoomId).emit("board-cleared", {
         initiatorName: currentUser.name,
         wasVoted: false,

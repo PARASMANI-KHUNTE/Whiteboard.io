@@ -15,20 +15,28 @@ const USER_COLORS = [
 const ANIMAL_NAMES = ['Fox', 'Panda', 'Otter', 'Falcon', 'Lynx', 'Koala', 'Owl', 'Badger', 'Dolphin'];
 
 function getInitialUser() {
-  const storedId = sessionStorage.getItem('collab_user_id');
+  if (typeof window === 'undefined') {
+    return { id: 'user_ssr', name: 'Artist Guest', color: '#3b82f6' };
+  }
+
+  // Generate a distinct tab session ID to ensure seamless collaboration across multiple tabs/windows
+  let tabId = (window as any).__collab_tab_session_id;
+  if (!tabId) {
+    tabId = 'u_' + Math.random().toString(36).substring(2, 9);
+    (window as any).__collab_tab_session_id = tabId;
+  }
+
   const storedName = sessionStorage.getItem('collab_user_name');
   const storedColor = sessionStorage.getItem('collab_user_color');
 
-  const id = storedId || 'user_' + Math.random().toString(36).substring(2, 9);
   const animal = ANIMAL_NAMES[Math.floor(Math.random() * ANIMAL_NAMES.length)];
   const name = storedName || `Artist ${animal}`;
   const color = storedColor || USER_COLORS[Math.floor(Math.random() * USER_COLORS.length)];
 
-  sessionStorage.setItem('collab_user_id', id);
   sessionStorage.setItem('collab_user_name', name);
   sessionStorage.setItem('collab_user_color', color);
 
-  return { id, name, color };
+  return { id: tabId, name, color };
 }
 
 export function getRoomIdFromUrl(): string {
@@ -97,13 +105,16 @@ export function useSocket(initialRoomId?: string, authUser?: AuthUser | null, au
   const [notifications, setNotifications] = useState<{ id: string; text: string; type: 'info' | 'success' | 'warning' }[]>([]);
 
   const socketRef = useRef<Socket | null>(null);
+  const currentUserRef = useRef<RemoteUser>(currentUser);
+  currentUserRef.current = currentUser;
+  const authTokenRef = useRef<string | null | undefined>(authToken);
+  authTokenRef.current = authToken;
 
   // Sync currentUser with authUser if provided
   useEffect(() => {
     if (authUser) {
       setCurrentUser((prev) => ({
         ...prev,
-        id: authUser.id,
         name: authUser.name,
         color: authUser.color,
         username: authUser.username,
@@ -127,9 +138,13 @@ export function useSocket(initialRoomId?: string, authUser?: AuthUser | null, au
     setKickedReason(null);
 
     const socket = io({
-      transports: ['websocket', 'polling'],
-      reconnectionAttempts: 10,
-      reconnectionDelay: 1000,
+      transports: ['polling', 'websocket'],
+      upgrade: true,
+      rememberUpgrade: true,
+      reconnection: true,
+      reconnectionAttempts: Infinity,
+      reconnectionDelay: 500,
+      timeout: 20000,
     });
     socketRef.current = socket;
 
@@ -137,8 +152,21 @@ export function useSocket(initialRoomId?: string, authUser?: AuthUser | null, au
       setIsConnected(true);
       socket.emit('join-room', {
         roomId,
-        user: currentUser,
-        token: authToken || undefined,
+        user: currentUserRef.current,
+        token: authTokenRef.current || undefined,
+      });
+    });
+
+    socket.on('connect_error', (err) => {
+      console.warn('Realtime connection issue (reconnecting):', err.message);
+    });
+
+    socket.on('reconnect', () => {
+      setIsConnected(true);
+      socket.emit('join-room', {
+        roomId,
+        user: currentUserRef.current,
+        token: authTokenRef.current || undefined,
       });
     });
 
@@ -390,7 +418,7 @@ export function useSocket(initialRoomId?: string, authUser?: AuthUser | null, au
       socket.disconnect();
       socketRef.current = null;
     };
-  }, [roomId, currentUser.id, addNotification]);
+  }, [roomId, addNotification]);
 
   // Emitters
   const emitStrokeLiveStart = useCallback((strokeId: string, point: Point, color: string, size: number, isHighlighter?: boolean) => {

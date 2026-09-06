@@ -319,3 +319,30 @@ export function generateRoomCode(): string {
   }
   return code;
 }
+
+const ELEMENTS_DIR = path.join(DATA_DIR, 'elements');
+
+export function loadRoomElements(roomId: string): Record<string, any> {
+  try {
+    const filePath = path.join(ELEMENTS_DIR, `${encodeURIComponent(roomId)}.json`);
+    if (fs.existsSync(filePath)) {
+      const raw = fs.readFileSync(filePath, 'utf-8');
+      return JSON.parse(raw);
+    }
+  } catch (err) {
+    console.warn(`Could not load elements for room ${roomId}:`, err);
+  }
+  return {};
+}
+
+export function saveRoomElements(roomId: string, elements: Record<string, any>) {
+  try {
+    if (!fs.existsSync(ELEMENTS_DIR)) {
+      fs.mkdirSync(ELEMENTS_DIR, { recursive: true });
+    }
+    const filePath = path.join(ELEMENTS_DIR, `${encodeURIComponent(roomId)}.json`);
+    fs.writeFileSync(filePath, JSON.stringify(elements), 'utf-8');
+  } catch (err) {
+    console.warn(`Could not persist elements for room ${roomId}:`, err);
+  }
+}
