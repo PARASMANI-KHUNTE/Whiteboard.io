@@ -3,6 +3,17 @@ import http from "http";
 import path from "path";
 import { Server as SocketIOServer, Socket } from "socket.io";
 import { createServer as createViteServer } from "vite";
+import {
+  registerUser,
+  loginUser,
+  createGuestUser,
+  findOrCreateGoogleUser,
+  getUserByToken,
+  saveRoomMeta,
+  getRoomMeta,
+  getRoomsForUser,
+  generateRoomCode,
+} from "./server/auth";
 
 interface CanvasElement {
   id: string;
@@ -20,6 +31,11 @@ interface UserSession {
   isSpeaking?: boolean;
   audioLevel?: number;
   isHost?: boolean;
+  role?: 'admin' | 'editor' | 'viewer';
+  canWrite?: boolean;
+  isMuted?: boolean;
+  isDeafened?: boolean;
+  voiceConnected?: boolean;
 }
 
 interface VoteState {
@@ -34,6 +50,13 @@ interface VoteState {
 
 interface RoomData {
   id: string;
+  name: string;
+  creatorId: string;
+  creatorName: string;
+  createdAt: number;
+  isLocked: boolean;
+  kickedUserIds: Set<string>;
+  userPermissions: Record<string, { canWrite: boolean; role: 'admin' | 'editor' | 'viewer' }>;
   elements: Record<string, CanvasElement>;
   users: Record<string, UserSession>;
   voteToClear: VoteState | null;
@@ -46,8 +69,16 @@ const rooms = new Map<string, RoomData>();
 function getOrCreateRoom(roomId: string): RoomData {
   let room = rooms.get(roomId);
   if (!room) {
+    const meta = getRoomMeta(roomId);
     room = {
       id: roomId,
+      name: meta?.name || `Room ${roomId}`,
+      creatorId: meta?.creatorId || '',
+      creatorName: meta?.creatorName || '',
+      createdAt: meta?.createdAt || Date.now(),
+      isLocked: meta?.isLocked || false,
+      kickedUserIds: new Set<string>(),
+      userPermissions: {},
       elements: {},
       users: {},
       voteToClear: null,
@@ -80,18 +111,286 @@ async function startServer() {
     });
   });
 
+  // Authentication Routes
+  app.post("/api/auth/register", (req, res) => {
+    try {
+      const { username, email, password, name, color } = req.body;
+      const result = registerUser({ username, email, password, name, color });
+      res.json({ success: true, ...result });
+    } catch (err: any) {
+      res.status(400).json({ success: false, error: err.message || "Registration failed" });
+    }
+  });
+
+  app.post("/api/auth/login", (req, res) => {
+    try {
+      const { identifier, password } = req.body;
+      const result = loginUser(identifier, password);
+      res.json({ success: true, ...result });
+    } catch (err: any) {
+      res.status(400).json({ success: false, error: err.message || "Login failed" });
+    }
+  });
+
+  app.post("/api/auth/guest", (req, res) => {
+    try {
+      const { name, color } = req.body;
+      const result = createGuestUser(name, color);
+      res.json({ success: true, ...result });
+    } catch (err: any) {
+      res.status(400).json({ success: false, error: err.message || "Guest session failed" });
+    }
+  });
+
+  app.get("/api/auth/me", (req, res) => {
+    const authHeader = req.headers.authorization;
+    const token = authHeader?.replace("Bearer ", "")?.trim();
+    if (!token) {
+      res.status(401).json({ success: false, error: "Not authenticated" });
+      return;
+    }
+    const user = getUserByToken(token);
+    if (!user) {
+      res.status(401).json({ success: false, error: "Invalid session token" });
+      return;
+    }
+    res.json({ success: true, user });
+  });
+
+  // Google OAuth URL generator
+  app.get("/api/auth/google/url", (req, res) => {
+    const origin = (req.query.origin as string) || req.get("origin") || "";
+    const baseUrl = (process.env.APP_URL || origin || "http://localhost:3000").replace(/\/$/, "");
+    const redirectUri = `${baseUrl}/auth/google/callback`;
+    const clientId = process.env.GOOGLE_CLIENT_ID?.trim();
+
+    if (!clientId) {
+      res.json({
+        configured: false,
+        redirectUri,
+        message: "GOOGLE_CLIENT_ID not configured in environment variables",
+      });
+      return;
+    }
+
+    const params = new URLSearchParams({
+      client_id: clientId,
+      redirect_uri: redirectUri,
+      response_type: "code",
+      scope: "openid email profile",
+      access_type: "offline",
+      prompt: "select_account",
+    });
+
+    const googleAuthUrl = `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`;
+    res.json({
+      configured: true,
+      url: googleAuthUrl,
+      redirectUri,
+    });
+  });
+
+  // Google OAuth Callback Handler (Popup Window)
+  app.get(["/auth/google/callback", "/auth/google/callback/"], async (req, res) => {
+    const { code, error } = req.query;
+
+    if (error || !code) {
+      const errMsg = (error as string) || "Authorization was cancelled or code was not returned";
+      res.send(`
+        <!DOCTYPE html>
+        <html>
+          <head><title>Authentication Failed</title></head>
+          <body style="font-family:sans-serif;padding:30px;text-align:center;background:#fff1f2;color:#9f1239;">
+            <h3>Google Sign-In Failed</h3>
+            <p>${errMsg}</p>
+            <script>
+              if (window.opener) {
+                window.opener.postMessage({ type: 'GOOGLE_OAUTH_ERROR', error: ${JSON.stringify(errMsg)} }, '*');
+                setTimeout(() => window.close(), 1500);
+              } else {
+                setTimeout(() => { window.location.href = '/'; }, 2000);
+              }
+            </script>
+          </body>
+        </html>
+      `);
+      return;
+    }
+
+    try {
+      const origin = req.get("origin") || "";
+      const baseUrl = (process.env.APP_URL || origin || "http://localhost:3000").replace(/\/$/, "");
+      const redirectUri = `${baseUrl}/auth/google/callback`;
+      const clientId = process.env.GOOGLE_CLIENT_ID?.trim();
+      const clientSecret = process.env.GOOGLE_CLIENT_SECRET?.trim();
+
+      if (!clientId || !clientSecret) {
+        throw new Error("Google OAuth credentials are not fully configured on server.");
+      }
+
+      // Exchange code for Google access token
+      const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          code: code as string,
+          client_id: clientId,
+          client_secret: clientSecret,
+          redirect_uri: redirectUri,
+          grant_type: "authorization_code",
+        }),
+      });
+
+      const tokenData = await tokenResponse.json();
+      if (!tokenResponse.ok || !tokenData.access_token) {
+        throw new Error(tokenData.error_description || tokenData.error || "Failed to exchange Google authorization code");
+      }
+
+      // Fetch user profile from Google UserInfo endpoint
+      const userinfoResponse = await fetch("https://www.googleapis.com/oauth2/v2/userinfo", {
+        headers: { Authorization: `Bearer ${tokenData.access_token}` },
+      });
+      const profile = await userinfoResponse.json();
+
+      if (!userinfoResponse.ok || !profile.email) {
+        throw new Error("Unable to retrieve profile from Google");
+      }
+
+      const result = findOrCreateGoogleUser({
+        id: profile.id,
+        email: profile.email,
+        name: profile.name,
+        picture: profile.picture,
+      });
+
+      // Send postMessage to main window and close popup
+      res.send(`
+        <!DOCTYPE html>
+        <html>
+          <head><title>Authentication Succeeded</title></head>
+          <body style="font-family:sans-serif;padding:30px;text-align:center;background:#f0fdf4;color:#166534;">
+            <h3>Connected with Google</h3>
+            <p>Closing popup window...</p>
+            <script>
+              if (window.opener) {
+                window.opener.postMessage({
+                  type: 'GOOGLE_OAUTH_SUCCESS',
+                  token: ${JSON.stringify(result.token)},
+                  user: ${JSON.stringify(result.user)}
+                }, '*');
+                setTimeout(() => window.close(), 300);
+              } else {
+                window.location.href = '/';
+              }
+            </script>
+          </body>
+        </html>
+      `);
+    } catch (err: any) {
+      const errMsg = err.message || "OAuth exchange error";
+      res.send(`
+        <!DOCTYPE html>
+        <html>
+          <head><title>Authentication Failed</title></head>
+          <body style="font-family:sans-serif;padding:30px;text-align:center;background:#fff1f2;color:#9f1239;">
+            <h3>Google Sign-In Error</h3>
+            <p>${errMsg}</p>
+            <script>
+              if (window.opener) {
+                window.opener.postMessage({ type: 'GOOGLE_OAUTH_ERROR', error: ${JSON.stringify(errMsg)} }, '*');
+                setTimeout(() => window.close(), 2500);
+              }
+            </script>
+          </body>
+        </html>
+      `);
+    }
+  });
+
+  // Google OAuth Demo / Direct Sign-In (seamless sandbox fallback)
+  app.post("/api/auth/google/demo", (req, res) => {
+    try {
+      const { email = "parasmanikhunte@gmail.com", name = "Paras Mani Khunte" } = req.body || {};
+      const result = findOrCreateGoogleUser({
+        id: "demo_" + Math.random().toString(36).substring(2, 9),
+        email: String(email).trim(),
+        name: String(name).trim() || "Google User",
+      });
+      res.json({ success: true, ...result });
+    } catch (err: any) {
+      res.status(400).json({ success: false, error: err.message || "Google demo login failed" });
+    }
+  });
+
+  // Session Room Creation & Management Routes
+  app.post("/api/rooms/create", (req, res) => {
+    try {
+      const authHeader = req.headers.authorization;
+      const token = authHeader?.replace("Bearer ", "")?.trim();
+      const user = token ? getUserByToken(token) : null;
+
+      const { name, customCode, isLocked } = req.body;
+      let roomId = customCode ? customCode.trim().toUpperCase().replace(/[^A-Z0-9_-]/g, "-") : generateRoomCode();
+      if (!roomId || roomId.length < 2) roomId = generateRoomCode();
+
+      const creatorId = user ? user.id : req.body.creatorId || "guest_" + Math.random().toString(36).substring(2, 8);
+      const creatorName = user ? user.name : req.body.creatorName || "Session Host";
+
+      const roomMeta = {
+        id: roomId,
+        name: name?.trim() || `Session ${roomId}`,
+        creatorId,
+        creatorName,
+        createdAt: Date.now(),
+        isLocked: !!isLocked,
+      };
+
+      saveRoomMeta(roomMeta);
+
+      const room = getOrCreateRoom(roomId);
+      room.name = roomMeta.name;
+      room.creatorId = creatorId;
+      room.creatorName = creatorName;
+      room.isLocked = !!isLocked;
+
+      res.json({ success: true, room: roomMeta });
+    } catch (err: any) {
+      res.status(400).json({ success: false, error: err.message || "Could not create session room" });
+    }
+  });
+
+  app.get("/api/rooms/my-rooms", (req, res) => {
+    const authHeader = req.headers.authorization;
+    const token = authHeader?.replace("Bearer ", "")?.trim();
+    const user = token ? getUserByToken(token) : null;
+    if (!user) {
+      res.json({ success: true, rooms: [] });
+      return;
+    }
+    const userRooms = getRoomsForUser(user.id);
+    res.json({ success: true, rooms: userRooms });
+  });
+
   // Room status check
   app.get("/api/room/:roomId", (req, res) => {
     const roomId = req.params.roomId;
     const room = rooms.get(roomId);
-    if (!room) {
+    const meta = getRoomMeta(roomId);
+    if (!room && !meta) {
       res.json({ exists: false, userCount: 0 });
       return;
     }
     res.json({
       exists: true,
-      userCount: Object.keys(room.users).length,
-      elementCount: Object.keys(room.elements).length,
+      room: {
+        id: roomId,
+        name: room?.name || meta?.name || `Room ${roomId}`,
+        creatorId: room?.creatorId || meta?.creatorId,
+        creatorName: room?.creatorName || meta?.creatorName,
+        isLocked: room?.isLocked ?? meta?.isLocked ?? false,
+        userCount: room ? Object.keys(room.users).length : 0,
+        elementCount: room ? Object.keys(room.elements).length : 0,
+      },
     });
   });
 
@@ -100,44 +399,189 @@ async function startServer() {
     let currentRoomId: string | null = null;
     let currentUser: UserSession | null = null;
 
+    // Helper: Guard write operations
+    const checkCanWrite = (): boolean => {
+      if (!currentUser) return false;
+      if (currentUser.isHost) return true;
+      if (currentUser.canWrite) return true;
+      socket.emit("permission-denied", {
+        message: "Your drawing and editing permissions are currently restricted in this room.",
+      });
+      return false;
+    };
+
     // Join room
-    socket.on("join-room", (data: { roomId: string; user: { id: string; name: string; color: string } }) => {
-      const { roomId, user } = data;
+    socket.on("join-room", (data: { roomId: string; user: { id: string; name: string; color: string; username?: string }; token?: string }) => {
+      const { roomId, user, token } = data;
+      const room = getOrCreateRoom(roomId);
+
+      // Verify if user was kicked by the host
+      if (room.kickedUserIds.has(user.id)) {
+        socket.emit("kicked", {
+          reason: "You have been removed from this room by the host.",
+        });
+        return;
+      }
+
       currentRoomId = roomId;
       socket.join(roomId);
 
-      const room = getOrCreateRoom(roomId);
-      const isFirstUser = Object.keys(room.users).length === 0;
+      // Authenticated user resolution
+      const authenticatedUser = token ? getUserByToken(token) : null;
+      const actualUserId = authenticatedUser ? authenticatedUser.id : user.id;
+      const actualName = authenticatedUser ? authenticatedUser.name : user.name;
+      const actualColor = authenticatedUser ? authenticatedUser.color : user.color;
+
+      // Determine Host / Admin status
+      const isRoomCreator = room.creatorId && room.creatorId === actualUserId;
+      const isFirstUser = !room.creatorId && Object.keys(room.users).length === 0;
+
+      if (isFirstUser && !room.creatorId) {
+        room.creatorId = actualUserId;
+        room.creatorName = actualName;
+      }
+
+      const isHost = isRoomCreator || isFirstUser;
+      let canWrite = true;
+      let role: 'admin' | 'editor' | 'viewer' = 'editor';
+
+      if (isHost) {
+        role = 'admin';
+        canWrite = true;
+      } else {
+        if (room.userPermissions[actualUserId]) {
+          canWrite = room.userPermissions[actualUserId].canWrite;
+          role = room.userPermissions[actualUserId].role;
+        } else {
+          canWrite = !room.isLocked;
+          role = room.isLocked ? 'viewer' : 'editor';
+          room.userPermissions[actualUserId] = { canWrite, role };
+        }
+      }
 
       currentUser = {
-        id: user.id,
+        id: actualUserId,
         socketId: socket.id,
-        name: user.name,
-        color: user.color,
+        name: actualName,
+        color: actualColor,
         roomId,
-        isHost: isFirstUser,
+        isHost,
+        role,
+        canWrite,
         isSpeaking: false,
         audioLevel: 0,
       };
 
-      room.users[user.id] = currentUser;
+      room.users[actualUserId] = currentUser;
 
       // Send initial room state to connecting user
       socket.emit("room-init", {
         roomId,
+        roomName: room.name,
+        creatorId: room.creatorId,
+        creatorName: room.creatorName,
+        isLocked: room.isLocked,
         elements: room.elements,
         users: room.users,
         voteToClear: room.voteToClear,
-        yourRole: currentUser.isHost ? "host" : "member",
+        yourRole: currentUser.role,
+        canWrite: currentUser.canWrite,
+        isHost: currentUser.isHost,
       });
 
       // Broadcast user-joined to other users in room
       socket.to(roomId).emit("user-joined", currentUser);
     });
 
-    // Real-time live stroke streaming
+    // Admin: Set User Writing Permissions (Revoke / Grant)
+    socket.on("admin-set-permission", (payload: { targetUserId: string; canWrite: boolean }) => {
+      if (!currentRoomId || !currentUser || !currentUser.isHost) return;
+      const room = getOrCreateRoom(currentRoomId);
+      const { targetUserId, canWrite } = payload;
+      if (targetUserId === currentUser.id) return; // Host cannot revoke self
+
+      const role: 'editor' | 'viewer' = canWrite ? 'editor' : 'viewer';
+      room.userPermissions[targetUserId] = { canWrite, role };
+
+      if (room.users[targetUserId]) {
+        room.users[targetUserId].canWrite = canWrite;
+        room.users[targetUserId].role = role;
+      }
+
+      // Notify the target user specifically
+      const targetUser = room.users[targetUserId];
+      if (targetUser && targetUser.socketId) {
+        io.to(targetUser.socketId).emit("permission-updated", {
+          canWrite,
+          role,
+          message: canWrite
+            ? "Writing permission has been granted by the host."
+            : "Writing permission has been revoked by the host. You are in view-only mode.",
+        });
+      }
+
+      // Broadcast to all participants in room
+      io.to(currentRoomId).emit("user-permission-changed", {
+        userId: targetUserId,
+        canWrite,
+        role,
+      });
+    });
+
+    // Admin: Kick / Remove User from Room
+    socket.on("admin-kick-user", (payload: { targetUserId: string; reason?: string }) => {
+      if (!currentRoomId || !currentUser || !currentUser.isHost) return;
+      const room = getOrCreateRoom(currentRoomId);
+      const { targetUserId, reason } = payload;
+      if (targetUserId === currentUser.id) return; // Cannot kick host
+
+      room.kickedUserIds.add(targetUserId);
+      const targetUser = room.users[targetUserId];
+
+      if (targetUser && targetUser.socketId) {
+        const targetSocket = io.sockets.sockets.get(targetUser.socketId);
+        io.to(targetUser.socketId).emit("kicked", {
+          reason: reason || "You were removed from this room by the host.",
+        });
+        if (targetSocket) {
+          targetSocket.leave(currentRoomId);
+        }
+      }
+
+      delete room.users[targetUserId];
+
+      io.to(currentRoomId).emit("user-kicked", {
+        userId: targetUserId,
+        userName: targetUser?.name || "Participant",
+        reason: reason || "Removed by room administrator",
+      });
+      io.to(currentRoomId).emit("user-left", { userId: targetUserId });
+    });
+
+    // Admin: Toggle Lock Whiteboard
+    socket.on("admin-toggle-lock", (payload: { isLocked: boolean }) => {
+      if (!currentRoomId || !currentUser || !currentUser.isHost) return;
+      const room = getOrCreateRoom(currentRoomId);
+      room.isLocked = payload.isLocked;
+
+      // Update non-host users
+      Object.values(room.users).forEach((u) => {
+        if (!u.isHost) {
+          u.canWrite = !payload.isLocked;
+          u.role = payload.isLocked ? 'viewer' : 'editor';
+          room.userPermissions[u.id] = { canWrite: u.canWrite, role: u.role };
+        }
+      });
+
+      io.to(currentRoomId).emit("room-lock-changed", {
+        isLocked: room.isLocked,
+        users: room.users,
+      });
+    });
+
+    // Real-time live stroke streaming (Guarded)
     socket.on("stroke-live-start", (payload: { strokeId: string; point: { x: number; y: number }; color: string; size: number; isHighlighter?: boolean }) => {
-      if (!currentRoomId) return;
+      if (!currentRoomId || !checkCanWrite()) return;
       socket.to(currentRoomId).emit("stroke-live-started", {
         userId: currentUser?.id,
         ...payload,
@@ -145,22 +589,21 @@ async function startServer() {
     });
 
     socket.on("stroke-live-point", (payload: { strokeId: string; point: { x: number; y: number } }) => {
-      if (!currentRoomId) return;
+      if (!currentRoomId || !checkCanWrite()) return;
       socket.to(currentRoomId).emit("stroke-live-pointed", payload);
     });
 
-    // Final element creation (persisted)
+    // Final element creation (persisted, Guarded)
     socket.on("element-create", (element: CanvasElement) => {
-      if (!currentRoomId) return;
+      if (!currentRoomId || !checkCanWrite()) return;
       const room = getOrCreateRoom(currentRoomId);
       room.elements[element.id] = element;
-      // Broadcast to all other clients in the room
       socket.to(currentRoomId).emit("element-created", element);
     });
 
-    // Element update (e.g. moving sticky note or updating text)
+    // Element update (e.g. moving sticky note or updating text, Guarded)
     socket.on("element-update", (element: CanvasElement) => {
-      if (!currentRoomId) return;
+      if (!currentRoomId || !checkCanWrite()) return;
       const room = getOrCreateRoom(currentRoomId);
       if (room.elements[element.id]) {
         room.elements[element.id] = { ...room.elements[element.id], ...element };
@@ -170,17 +613,17 @@ async function startServer() {
       socket.to(currentRoomId).emit("element-updated", element);
     });
 
-    // Element delete
+    // Element delete (Guarded)
     socket.on("element-delete", (payload: { elementId: string }) => {
-      if (!currentRoomId) return;
+      if (!currentRoomId || !checkCanWrite()) return;
       const room = getOrCreateRoom(currentRoomId);
       delete room.elements[payload.elementId];
       socket.to(currentRoomId).emit("element-deleted", payload);
     });
 
-    // Batch elements delete (e.g. eraser dragged across multiple strokes)
+    // Batch elements delete (e.g. eraser dragged across multiple strokes, Guarded)
     socket.on("elements-batch-delete", (payload: { elementIds: string[] }) => {
-      if (!currentRoomId) return;
+      if (!currentRoomId || !checkCanWrite()) return;
       const room = getOrCreateRoom(currentRoomId);
       payload.elementIds.forEach((id) => {
         delete room.elements[id];
@@ -210,9 +653,74 @@ async function startServer() {
       });
     });
 
+    // Voice Chat State & Mute/Deafen update
+    socket.on("voice-status-update", (data: { isMuted?: boolean; isDeafened?: boolean; voiceConnected?: boolean }) => {
+      if (!currentRoomId || !currentUser) return;
+      if (typeof data.isMuted === 'boolean') currentUser.isMuted = data.isMuted;
+      if (typeof data.isDeafened === 'boolean') currentUser.isDeafened = data.isDeafened;
+      if (typeof data.voiceConnected === 'boolean') currentUser.voiceConnected = data.voiceConnected;
+
+      socket.to(currentRoomId).emit("voice-status-updated", {
+        userId: currentUser.id,
+        isMuted: currentUser.isMuted,
+        isDeafened: currentUser.isDeafened,
+        voiceConnected: currentUser.voiceConnected,
+      });
+    });
+
+    // WebRTC Voice Signaling Mesh
+    socket.on("voice-offer", (payload: { toUserId: string; offer: any }) => {
+      if (!currentRoomId || !currentUser) return;
+      const room = getOrCreateRoom(currentRoomId);
+      const targetUser = room.users[payload.toUserId];
+      if (targetUser && targetUser.socketId) {
+        io.to(targetUser.socketId).emit("voice-offer", {
+          fromUserId: currentUser.id,
+          offer: payload.offer,
+        });
+      }
+    });
+
+    socket.on("voice-answer", (payload: { toUserId: string; answer: any }) => {
+      if (!currentRoomId || !currentUser) return;
+      const room = getOrCreateRoom(currentRoomId);
+      const targetUser = room.users[payload.toUserId];
+      if (targetUser && targetUser.socketId) {
+        io.to(targetUser.socketId).emit("voice-answer", {
+          fromUserId: currentUser.id,
+          answer: payload.answer,
+        });
+      }
+    });
+
+    socket.on("voice-ice-candidate", (payload: { toUserId: string; candidate: any }) => {
+      if (!currentRoomId || !currentUser) return;
+      const room = getOrCreateRoom(currentRoomId);
+      const targetUser = room.users[payload.toUserId];
+      if (targetUser && targetUser.socketId) {
+        io.to(targetUser.socketId).emit("voice-ice-candidate", {
+          fromUserId: currentUser.id,
+          candidate: payload.candidate,
+        });
+      }
+    });
+
+    // Fail-safe Voice Audio Relay (streaming Opus/WebM audio chunks over WebSockets)
+    socket.on("voice-audio-chunk", (data: { chunk: string; mimeType?: string; timestamp?: number }) => {
+      if (!currentRoomId || !currentUser) return;
+      if (currentUser.isMuted) return;
+
+      socket.to(currentRoomId).emit("voice-audio-chunk", {
+        userId: currentUser.id,
+        chunk: data.chunk,
+        mimeType: data.mimeType || 'audio/webm',
+        timestamp: data.timestamp || Date.now(),
+      });
+    });
+
     // Vote to Clear Feature
     socket.on("vote-clear-start", () => {
-      if (!currentRoomId || !currentUser) return;
+      if (!currentRoomId || !currentUser || !checkCanWrite()) return;
       const room = getOrCreateRoom(currentRoomId);
       const userIds = Object.keys(room.users);
 
@@ -348,7 +856,7 @@ async function startServer() {
 
     // Direct clear (if user confirms solo or forced)
     socket.on("clear-board-direct", () => {
-      if (!currentRoomId || !currentUser) return;
+      if (!currentRoomId || !currentUser || !checkCanWrite()) return;
       const room = getOrCreateRoom(currentRoomId);
       room.elements = {};
       io.to(currentRoomId).emit("board-cleared", {

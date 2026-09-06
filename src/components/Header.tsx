@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { RemoteUser } from '../types';
+import { AuthUser } from '../hooks/useAuth';
 import { AudioVisualizerBar } from './AudioVisualizerBar';
 import {
   Share2,
@@ -10,27 +11,52 @@ import {
   Wifi,
   WifiOff,
   User,
-  ExternalLink,
   Crown,
+  Shield,
+  Lock,
+  Plus,
+  LogIn,
+  MicOff,
+  VolumeX,
 } from 'lucide-react';
 
 interface HeaderProps {
   roomId: string;
+  roomName?: string;
+  creatorName?: string;
   currentUser: { id: string; name: string; color: string };
   users: Record<string, RemoteUser>;
   isConnected: boolean;
   isHost: boolean;
+  canWrite?: boolean;
+  isLocked?: boolean;
+  authUser: AuthUser | null;
+  onOpenAuthModal: () => void;
+  onOpenCreateRoomModal: () => void;
+  onOpenShareModal: () => void;
+  onOpenAdminModal: () => void;
   onUpdateUserName: (name: string) => void;
   onUpdateUserColor: (color: string) => void;
   onSwitchRoom: (newRoomId: string) => void;
-  // Audio
-  isMicActive: boolean;
+  // Voice Chat
+  isVoiceConnected: boolean;
+  isMuted: boolean;
+  isDeafened: boolean;
+  volume: number;
+  onSetVolume?: (v: number) => void;
   audioLevel: number;
   isSpeaking: boolean;
   frequencyData: Uint8Array;
   isSimulated: boolean;
-  onToggleMic: () => void;
+  error: string | null;
+  isIframeRestricted: boolean;
+  activeSpeakers?: string[];
+  onJoinVoice: () => void;
+  onLeaveVoice: () => void;
+  onToggleMute: () => void;
+  onToggleDeafen: () => void;
   onToggleSimulated: () => void;
+  onOpenInNewTab: () => void;
   onAudioLevelChange?: (level: number, isSpeaking: boolean) => void;
 }
 
@@ -38,117 +64,155 @@ const PALETTE = ['#ef4444', '#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899
 
 export const Header: React.FC<HeaderProps> = ({
   roomId,
+  roomName,
+  creatorName,
   currentUser,
   users,
   isConnected,
   isHost,
+  canWrite = true,
+  isLocked = false,
+  authUser,
+  onOpenAuthModal,
+  onOpenCreateRoomModal,
+  onOpenShareModal,
+  onOpenAdminModal,
   onUpdateUserName,
   onUpdateUserColor,
   onSwitchRoom,
-  isMicActive,
+  isVoiceConnected,
+  isMuted,
+  isDeafened,
+  volume,
+  onSetVolume,
   audioLevel,
   isSpeaking,
   frequencyData,
   isSimulated,
-  onToggleMic,
+  error,
+  isIframeRestricted,
+  activeSpeakers = [],
+  onJoinVoice,
+  onLeaveVoice,
+  onToggleMute,
+  onToggleDeafen,
   onToggleSimulated,
+  onOpenInNewTab,
   onAudioLevelChange,
 }) => {
-  const [copied, setCopied] = useState(false);
   const [showProfileModal, setShowProfileModal] = useState(false);
-  const [showRoomModal, setShowRoomModal] = useState(false);
   const [tempName, setTempName] = useState(currentUser.name);
-  const [tempRoomInput, setTempRoomInput] = useState('');
-
-  const handleCopyLink = async () => {
-    const url = new URL(window.location.href);
-    url.searchParams.set('room', roomId);
-    try {
-      await navigator.clipboard.writeText(url.toString());
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2500);
-    } catch {
-      // Fallback
-      prompt('Copy this room link to share with friends:', url.toString());
-    }
-  };
 
   const activeUserList = Object.values(users) as RemoteUser[];
-  const totalUsers = Math.max(1, activeUserList.length);
 
   return (
     <header
       id="whiteboard-header"
-      className="fixed top-0 left-0 right-0 z-40 h-16 bg-white border-b border-slate-200 shadow-xs px-4 sm:px-8 flex items-center justify-between gap-4 select-none"
+      className="fixed top-0 left-0 right-0 z-40 h-14 sm:h-16 bg-white/95 backdrop-blur-md border-b border-slate-200/80 shadow-xs px-2 sm:px-6 flex items-center justify-between gap-2 sm:gap-4 select-none"
     >
       {/* Brand & Room Info */}
-      <div className="flex items-center gap-4 sm:gap-6">
-        <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white font-bold text-base shadow-xs">
+      <div className="flex items-center gap-2 sm:gap-4 shrink-0">
+        <div className="flex items-center gap-2">
+          <div className="w-8 h-8 bg-blue-600 rounded-xl flex items-center justify-center text-white font-bold text-base shadow-sm">
             W
           </div>
-          <span className="font-semibold text-base sm:text-lg tracking-tight text-slate-900 hidden sm:block">
-            Whiteboard.io
+          <span className="font-semibold text-base sm:text-lg tracking-tight text-slate-900 hidden lg:block">
+            Whiteboard
           </span>
         </div>
 
-        <div className="h-6 w-[1px] bg-slate-200 hidden sm:block"></div>
-
-        <div className="flex items-center gap-2">
+        {/* Room / Session Selector Button */}
+        <div className="flex items-center gap-1.5">
           <button
-            onClick={() => setShowRoomModal(true)}
-            className="text-xs font-medium px-3 py-1 bg-slate-100 hover:bg-slate-200/80 rounded-full text-slate-700 flex items-center gap-1.5 transition-colors cursor-pointer"
-            title="Click to switch or create room"
+            id="room-selector-btn"
+            onClick={onOpenCreateRoomModal}
+            className="text-xs font-semibold px-2.5 py-1 sm:px-3 sm:py-1.5 bg-slate-100 hover:bg-slate-200/80 rounded-xl text-slate-700 flex items-center gap-1.5 transition-colors cursor-pointer border border-slate-200/70 max-w-[130px] sm:max-w-[190px]"
+            title="Click to view sessions or create a new room"
           >
-            <span>room/{roomId}</span>
-            <ExternalLink className="w-3 h-3 text-slate-400" />
+            <span className="truncate">{roomName ? roomName : `room/${roomId}`}</span>
+            <Plus className="w-3 h-3 text-slate-400 shrink-0" />
           </button>
 
-          {/* Connection status */}
+          {/* Connection status indicator */}
           <div
-            title={isConnected ? 'Connected to WebSocket server' : 'Disconnected, reconnecting...'}
-            className="flex items-center gap-1.5 text-xs text-slate-500 font-medium"
+            title={isConnected ? 'Connected to real-time sync' : 'Reconnecting...'}
+            className="flex items-center gap-1 text-xs text-slate-500 font-medium"
           >
             <span
               className={`w-2 h-2 rounded-full ${
                 isConnected ? 'bg-emerald-500 ring-2 ring-emerald-100' : 'bg-rose-400 ring-2 ring-rose-100'
               }`}
             />
-            <span className="text-[11px] text-slate-400 hidden md:inline">
-              {isConnected ? 'Live' : 'Offline'}
-            </span>
           </div>
         </div>
       </div>
 
-      {/* Audio Wave Visualizer Center ("The Wow Feature") */}
-      <div className="flex items-center">
+      {/* Audio Visualizer Center */}
+      <div className="flex items-center shrink-0">
         <AudioVisualizerBar
-          isMicActive={isMicActive}
+          isVoiceConnected={isVoiceConnected}
+          isMuted={isMuted}
+          isDeafened={isDeafened}
+          volume={volume}
+          onSetVolume={onSetVolume}
           audioLevel={audioLevel}
           isSpeaking={isSpeaking}
           frequencyData={frequencyData}
           isSimulated={isSimulated}
-          onToggleMic={onToggleMic}
+          error={error}
+          isIframeRestricted={isIframeRestricted}
+          activeSpeakers={activeSpeakers}
+          onJoinVoice={onJoinVoice}
+          onLeaveVoice={onLeaveVoice}
+          onToggleMute={onToggleMute}
+          onToggleDeafen={onToggleDeafen}
           onToggleSimulated={onToggleSimulated}
+          onOpenInNewTab={onOpenInNewTab}
           onAudioLevelChange={onAudioLevelChange}
         />
       </div>
 
-      {/* Active Collaborators & Share Room Link */}
-      <div className="flex items-center gap-3">
+      {/* Actions: Admin Panel, Collaborators, Profile & Share */}
+      <div className="flex items-center gap-1.5 sm:gap-3 shrink-0">
+        {/* Admin Controls Button (Visible for host or when room has lock) */}
+        {isHost ? (
+          <button
+            id="admin-panel-btn"
+            onClick={onOpenAdminModal}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 sm:px-3 sm:py-1.5 rounded-xl text-xs font-semibold bg-amber-50 text-amber-800 border border-amber-300 hover:bg-amber-100 transition-colors shadow-2xs cursor-pointer"
+            title="Host Controls: Manage participant permissions and kick users"
+          >
+            <Crown className="w-3.5 h-3.5 text-amber-600 fill-amber-500 shrink-0" />
+            <span className="hidden sm:inline">Admin</span>
+          </button>
+        ) : !canWrite ? (
+          <button
+            onClick={onOpenAdminModal}
+            className="flex items-center gap-1 px-2.5 py-1 sm:px-3 sm:py-1.5 rounded-xl text-xs font-semibold bg-slate-100 text-slate-700 border border-slate-300 hover:bg-slate-200 transition-colors cursor-pointer"
+            title="Your writing permission is currently revoked"
+          >
+            <Lock className="w-3.5 h-3.5 text-slate-500" />
+            <span className="hidden md:inline">View-Only</span>
+          </button>
+        ) : null}
+
         {/* Collaborators Avatar Stack */}
-        <div className="flex items-center -space-x-2">
-          {activeUserList.slice(0, 4).map((u) => {
+        <div
+          onClick={onOpenAdminModal}
+          className="hidden sm:flex items-center -space-x-1.5 cursor-pointer"
+          title="Click to view participants"
+        >
+          {activeUserList.slice(0, 3).map((u) => {
             const isMe = u.id === currentUser.id;
             const speaking = isMe ? isSpeaking : u.isSpeaking;
+            const userMuted = isMe ? isMuted : u.isMuted;
 
             return (
               <div
                 key={u.id}
-                title={`${u.name}${isMe ? ' (You)' : ''}${u.isHost ? ' • Host' : ''}${speaking ? ' • Speaking' : ''}`}
+                title={`${u.name}${isMe ? ' (You)' : ''}${u.isHost ? ' • Host' : ''}`}
                 style={{ backgroundColor: u.color }}
-                className={`w-8 h-8 rounded-full text-white text-[11px] font-bold flex items-center justify-center border-2 border-white shadow-xs transition-all relative ${
+                className={`w-7 h-7 sm:w-8 sm:h-8 rounded-full text-white text-[10px] sm:text-[11px] font-bold flex items-center justify-center border-2 border-white shadow-2xs relative ${
                   speaking ? 'ring-2 ring-blue-500 scale-105 z-10' : ''
                 }`}
               >
@@ -156,17 +220,47 @@ export const Header: React.FC<HeaderProps> = ({
                 {u.isHost && (
                   <Crown className="w-2.5 h-2.5 text-amber-300 absolute -top-1 -right-1 fill-amber-300 drop-shadow" />
                 )}
+                {userMuted && (
+                  <div className="w-2.5 h-2.5 rounded-full bg-rose-500 border border-white flex items-center justify-center absolute -bottom-0.5 -right-0.5 z-20">
+                    <MicOff className="w-1.5 h-1.5 text-white" />
+                  </div>
+                )}
               </div>
             );
           })}
-          {activeUserList.length > 4 && (
-            <div className="w-8 h-8 rounded-full bg-slate-100 text-slate-600 text-[10px] font-bold flex items-center justify-center border-2 border-white shadow-xs">
-              +{activeUserList.length - 4}
+          {activeUserList.length > 3 && (
+            <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-slate-100 text-slate-600 text-[10px] font-bold flex items-center justify-center border-2 border-white shadow-2xs">
+              +{activeUserList.length - 3}
             </div>
           )}
         </div>
 
-        {/* User Identity / Edit button */}
+        {/* Auth / Account Profile Button */}
+        {authUser ? (
+          <button
+            id="auth-profile-btn"
+            onClick={onOpenAuthModal}
+            className="flex items-center gap-1.5 px-2 py-1.5 sm:px-2.5 sm:py-1.5 rounded-xl border border-slate-200 text-slate-700 hover:bg-slate-50 text-xs font-semibold transition-colors cursor-pointer"
+            title={`Signed in as ${authUser.email}`}
+          >
+            <div className="w-5 h-5 rounded-full bg-blue-600 text-white flex items-center justify-center text-[10px] font-bold">
+              {authUser.name.charAt(0).toUpperCase()}
+            </div>
+            <span className="hidden md:inline truncate max-w-[85px]">{authUser.name}</span>
+          </button>
+        ) : (
+          <button
+            id="sign-in-prompt-btn"
+            onClick={onOpenAuthModal}
+            className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-100 border border-slate-200 transition-colors cursor-pointer"
+            title="Sign in or register to save your rooms"
+          >
+            <LogIn className="w-3.5 h-3.5 text-slate-500" />
+            <span className="hidden sm:inline">Sign In</span>
+          </button>
+        )}
+
+        {/* User Appearance Customizer */}
         <button
           id="user-profile-btn"
           onClick={() => {
@@ -174,37 +268,34 @@ export const Header: React.FC<HeaderProps> = ({
             setShowProfileModal(true);
           }}
           title="Customize your name and cursor color"
-          className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
+          className="p-2 text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer"
         >
           <User className="w-4 h-4" />
         </button>
 
-        {/* Share Room Link Button */}
+        {/* Share Room Button */}
         <button
-          id="share-room-link-btn"
-          onClick={handleCopyLink}
-          className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all shadow-xs cursor-pointer active:scale-95 ${
-            copied
-              ? 'bg-emerald-600 text-white hover:bg-emerald-700'
-              : 'bg-slate-900 text-white hover:bg-slate-800'
-          }`}
+          id="share-room-modal-btn"
+          onClick={onOpenShareModal}
+          className="flex items-center gap-1.5 px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all shadow-xs cursor-pointer active:scale-95 bg-slate-900 text-white hover:bg-slate-800"
+          title="Share room code or invite link"
         >
-          {copied ? <Check className="w-4 h-4" /> : <Share2 className="w-4 h-4" />}
-          <span className="hidden sm:inline">{copied ? 'Link Copied' : 'Share Link'}</span>
+          <Share2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+          <span className="hidden sm:inline">Share</span>
         </button>
       </div>
 
-      {/* User Profile Modal */}
+      {/* User Profile Customizer Modal */}
       {showProfileModal && (
-        <div className="fixed inset-0 z-50 bg-black/30 backdrop-blur-xs flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl p-5 w-full max-w-sm border border-slate-200 shadow-2xl animate-in zoom-in-95 duration-150">
             <h3 className="font-bold text-slate-900 text-base mb-1">Your Identity</h3>
             <p className="text-xs text-slate-500 mb-4">
-              Other collaborators see this name and cursor tag in real-time.
+              Collaborators in this session will see this name and cursor tag.
             </p>
 
             <div className="mb-4">
-              <label className="block text-xs font-medium text-slate-700 mb-1.5">
+              <label className="block text-xs font-semibold text-slate-700 mb-1.5">
                 Display Name
               </label>
               <input
@@ -213,13 +304,13 @@ export const Header: React.FC<HeaderProps> = ({
                 onChange={(e) => setTempName(e.target.value)}
                 maxLength={20}
                 className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-                placeholder="e.g. Maya the Artist"
+                placeholder="e.g. Alex Doe"
               />
             </div>
 
             <div className="mb-5">
-              <label className="block text-xs font-medium text-slate-700 mb-1.5">
-                Avatar & Cursor Color
+              <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                Cursor & Avatar Color
               </label>
               <div className="flex gap-2">
                 {PALETTE.map((color) => (
@@ -227,7 +318,7 @@ export const Header: React.FC<HeaderProps> = ({
                     key={color}
                     onClick={() => onUpdateUserColor(color)}
                     style={{ backgroundColor: color }}
-                    className={`w-7 h-7 rounded-full transition-transform ${
+                    className={`w-7 h-7 rounded-full transition-transform cursor-pointer ${
                       currentUser.color === color
                         ? 'ring-2 ring-offset-2 ring-slate-800 scale-110'
                         : 'hover:scale-105'
@@ -240,7 +331,7 @@ export const Header: React.FC<HeaderProps> = ({
             <div className="flex justify-end gap-2">
               <button
                 onClick={() => setShowProfileModal(false)}
-                className="px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-100 rounded-lg"
+                className="px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-100 rounded-lg cursor-pointer"
               >
                 Close
               </button>
@@ -249,69 +340,10 @@ export const Header: React.FC<HeaderProps> = ({
                   onUpdateUserName(tempName);
                   setShowProfileModal(false);
                 }}
-                className="px-4 py-1.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow-sm"
+                className="px-4 py-1.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow-sm cursor-pointer"
               >
                 Save
               </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Switch / New Room Modal */}
-      {showRoomModal && (
-        <div className="fixed inset-0 z-50 bg-black/30 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl p-5 w-full max-w-sm border border-slate-200 shadow-2xl animate-in zoom-in-95 duration-150">
-            <h3 className="font-bold text-slate-900 text-base mb-1">Room Management</h3>
-            <p className="text-xs text-slate-500 mb-4">
-              Switch to an existing room or generate a new collaborative session.
-            </p>
-
-            <div className="mb-4">
-              <label className="block text-xs font-medium text-slate-700 mb-1.5">
-                Room Name / ID
-              </label>
-              <input
-                type="text"
-                value={tempRoomInput}
-                onChange={(e) => setTempRoomInput(e.target.value)}
-                placeholder="e.g. design-sprint-2"
-                className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-blue-500"
-              />
-            </div>
-
-            <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-100">
-              <button
-                onClick={() => {
-                  const randomCode = 'room-' + Math.random().toString(36).substring(2, 7);
-                  onSwitchRoom(randomCode);
-                  setShowRoomModal(false);
-                }}
-                className="text-xs text-blue-600 hover:underline font-medium"
-              >
-                + New Random Room
-              </button>
-
-              <div className="flex gap-2">
-                <button
-                  onClick={() => setShowRoomModal(false)}
-                  className="px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-100 rounded-lg"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={() => {
-                    if (tempRoomInput.trim()) {
-                      onSwitchRoom(tempRoomInput.trim());
-                    }
-                    setShowRoomModal(false);
-                  }}
-                  disabled={!tempRoomInput.trim()}
-                  className="px-4 py-1.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-40 rounded-lg shadow-sm"
-                >
-                  Join Room
-                </button>
-              </div>
             </div>
           </div>
         </div>

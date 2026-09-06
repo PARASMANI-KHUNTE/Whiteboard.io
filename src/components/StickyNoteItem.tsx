@@ -5,6 +5,7 @@ import { Trash2, Move, Palette } from 'lucide-react';
 interface StickyNoteItemProps {
   note: StickyNote;
   currentUserId: string;
+  canWrite?: boolean;
   onUpdate: (updated: StickyNote) => void;
   onDelete: (id: string) => void;
 }
@@ -19,6 +20,7 @@ const STICKY_COLORS = [
 export const StickyNoteItem: React.FC<StickyNoteItemProps> = ({
   note,
   currentUserId,
+  canWrite = true,
   onUpdate,
   onDelete,
 }) => {
@@ -41,6 +43,7 @@ export const StickyNoteItem: React.FC<StickyNoteItemProps> = ({
   }, [note.text, isEditing]);
 
   const handleMouseDownHeader = (e: React.MouseEvent) => {
+    if (!canWrite) return;
     e.stopPropagation();
     setIsDragging(true);
     dragStartRef.current = {
@@ -119,51 +122,56 @@ export const StickyNoteItem: React.FC<StickyNoteItemProps> = ({
           <span className="truncate">{note.userName || 'Note'}</span>
         </div>
 
-        <div className="flex items-center gap-1">
-          <div className="relative">
+        {canWrite && (
+          <div className="flex items-center gap-1">
+            <div className="relative">
+              <button
+                onClick={() => setShowColorPicker(!showColorPicker)}
+                className="p-1 hover:bg-black/10 rounded transition-colors text-black/60"
+                title="Change note color"
+              >
+                <Palette className="w-3 h-3" />
+              </button>
+
+              {showColorPicker && (
+                <div className="absolute right-0 top-6 bg-white rounded-lg shadow-lg border border-slate-200 p-1 flex gap-1 z-30">
+                  {STICKY_COLORS.map((c) => (
+                    <button
+                      key={c.name}
+                      onClick={() => handleColorSelect(c.bg)}
+                      style={{ backgroundColor: c.bg }}
+                      className="w-5 h-5 rounded-full border border-slate-300 hover:scale-110 transition-transform"
+                      title={c.name}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+
             <button
-              onClick={() => setShowColorPicker(!showColorPicker)}
-              className="p-1 hover:bg-black/10 rounded transition-colors text-black/60"
-              title="Change note color"
+              onClick={() => onDelete(note.id)}
+              className="p-1 hover:bg-red-500/20 hover:text-red-700 rounded transition-colors text-black/60"
+              title="Delete note"
             >
-              <Palette className="w-3 h-3" />
+              <Trash2 className="w-3 h-3" />
             </button>
-
-            {showColorPicker && (
-              <div className="absolute right-0 top-6 bg-white rounded-lg shadow-lg border border-slate-200 p-1 flex gap-1 z-30">
-                {STICKY_COLORS.map((c) => (
-                  <button
-                    key={c.name}
-                    onClick={() => handleColorSelect(c.bg)}
-                    style={{ backgroundColor: c.bg }}
-                    className="w-5 h-5 rounded-full border border-slate-300 hover:scale-110 transition-transform"
-                    title={c.name}
-                  />
-                ))}
-              </div>
-            )}
           </div>
-
-          <button
-            onClick={() => onDelete(note.id)}
-            className="p-1 hover:bg-red-500/20 hover:text-red-700 rounded transition-colors text-black/60"
-            title="Delete note"
-          >
-            <Trash2 className="w-3 h-3" />
-          </button>
-        </div>
+        )}
       </div>
 
       {/* Note Content */}
       <div className="p-2.5 flex-1 min-h-[100px] flex flex-col">
         <textarea
           value={localText}
-          onChange={(e) => setLocalText(e.target.value)}
-          onFocus={() => setIsEditing(true)}
+          readOnly={!canWrite}
+          onChange={(e) => canWrite && setLocalText(e.target.value)}
+          onFocus={() => canWrite && setIsEditing(true)}
           onBlur={handleTextBlur}
-          placeholder="Write a note..."
+          placeholder={canWrite ? "Write a note..." : "Read-only note"}
           rows={4}
-          className="w-full h-full bg-transparent resize-none outline-none font-sans text-sm placeholder:text-black/30 placeholder:italic leading-snug"
+          className={`w-full h-full bg-transparent resize-none outline-none font-sans text-sm leading-snug ${
+            !canWrite ? 'cursor-default' : 'placeholder:text-black/30 placeholder:italic'
+          }`}
         />
       </div>
     </div>

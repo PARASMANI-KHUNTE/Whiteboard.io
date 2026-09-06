@@ -17,6 +17,8 @@ interface CanvasProps {
   currentSize: number;
   currentUserId: string;
   currentUserName: string;
+  canWrite?: boolean;
+  onRestrictedAttempt?: () => void;
   elements: Record<string, CanvasElement>;
   liveStrokes: Record<
     string,
@@ -47,6 +49,8 @@ export const Canvas: React.FC<CanvasProps> = ({
   currentSize,
   currentUserId,
   currentUserName,
+  canWrite = true,
+  onRestrictedAttempt,
   elements,
   liveStrokes,
   remoteUsers,
@@ -232,6 +236,11 @@ export const Canvas: React.FC<CanvasProps> = ({
     const coords = getCanvasCoords(e);
     if (!coords) return;
 
+    if (!canWrite) {
+      onRestrictedAttempt?.();
+      return;
+    }
+
     // Handle Sticky Note placement
     if (currentTool === 'sticky') {
       const newSticky: StickyNote = {
@@ -356,7 +365,9 @@ export const Canvas: React.FC<CanvasProps> = ({
         backgroundImage: 'radial-gradient(#e2e8f0 1.25px, transparent 1.25px)',
         backgroundSize: '24px 24px',
       }}
-      className="relative w-full h-screen overflow-hidden bg-white cursor-crosshair select-none"
+      className={`relative w-full h-screen overflow-hidden bg-white select-none ${
+        canWrite ? 'cursor-crosshair' : 'cursor-default'
+      }`}
       onMouseDown={handlePointerDown}
       onMouseMove={handlePointerMove}
       onMouseUp={handlePointerUp}
@@ -372,7 +383,7 @@ export const Canvas: React.FC<CanvasProps> = ({
       <canvas ref={canvasRef} className="absolute inset-0 block touch-none" />
 
       {/* Eraser Cursor Indicator */}
-      {currentTool === 'eraser' && eraserCursor && (
+      {canWrite && currentTool === 'eraser' && eraserCursor && (
         <div
           style={{
             transform: `translate(${eraserCursor.x}px, ${eraserCursor.y}px)`,
@@ -389,6 +400,7 @@ export const Canvas: React.FC<CanvasProps> = ({
           key={note.id}
           note={note}
           currentUserId={currentUserId}
+          canWrite={canWrite}
           onUpdate={onElementUpdate}
           onDelete={onElementDelete}
         />
@@ -400,6 +412,7 @@ export const Canvas: React.FC<CanvasProps> = ({
           key={el.id}
           element={el}
           currentUserId={currentUserId}
+          canWrite={canWrite}
           onUpdate={onElementUpdate}
           onDelete={onElementDelete}
         />

@@ -5,6 +5,7 @@ import { Trash2, Move, Type } from 'lucide-react';
 interface TextItemProps {
   element: TextElement;
   currentUserId: string;
+  canWrite?: boolean;
   onUpdate: (updated: TextElement) => void;
   onDelete: (id: string) => void;
 }
@@ -12,6 +13,7 @@ interface TextItemProps {
 export const TextItem: React.FC<TextItemProps> = ({
   element,
   currentUserId,
+  canWrite = true,
   onUpdate,
   onDelete,
 }) => {
@@ -32,6 +34,7 @@ export const TextItem: React.FC<TextItemProps> = ({
   }, [element.text, isEditing]);
 
   const handleMouseDownHeader = (e: React.MouseEvent) => {
+    if (!canWrite) return;
     e.stopPropagation();
     setIsDragging(true);
     dragStartRef.current = {
@@ -96,26 +99,31 @@ export const TextItem: React.FC<TextItemProps> = ({
           <Move className="w-2.5 h-2.5" />
           <span>{element.userName || 'Text'}</span>
         </div>
-        <button
-          onClick={() => onDelete(element.id)}
-          className="p-0.5 hover:text-red-600 rounded"
-          title="Delete text"
-        >
-          <Trash2 className="w-3 h-3" />
-        </button>
+        {canWrite && (
+          <button
+            onClick={() => onDelete(element.id)}
+            className="p-0.5 hover:text-red-600 rounded"
+            title="Delete text"
+          >
+            <Trash2 className="w-3 h-3" />
+          </button>
+        )}
       </div>
 
       {/* Text Area Content */}
       <div className="p-1.5">
         <textarea
           value={localText}
-          onChange={(e) => setLocalText(e.target.value)}
-          onFocus={() => setIsEditing(true)}
+          readOnly={!canWrite}
+          onChange={(e) => canWrite && setLocalText(e.target.value)}
+          onFocus={() => canWrite && setIsEditing(true)}
           onBlur={handleTextBlur}
-          placeholder="Type here..."
+          placeholder={canWrite ? "Type here..." : "Read-only text"}
           rows={1}
           style={{ fontSize: `${element.fontSize || 18}px` }}
-          className="w-full bg-transparent resize-none outline-none font-sans font-medium placeholder:text-slate-300 leading-normal"
+          className={`w-full bg-transparent resize-none outline-none font-sans font-medium leading-normal ${
+            !canWrite ? 'cursor-default' : 'placeholder:text-slate-300'
+          }`}
         />
       </div>
     </div>

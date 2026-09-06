@@ -45,6 +45,17 @@ export interface TextElement {
 
 export type CanvasElement = DrawingStroke | StickyNote | TextElement;
 
+export interface AuthUser {
+  id: string;
+  username: string;
+  email: string;
+  name: string;
+  color: string;
+  isGuest?: boolean;
+  token?: string;
+  createdRooms?: string[];
+}
+
 export interface RemoteUser {
   id: string;
   name: string;
@@ -53,6 +64,48 @@ export interface RemoteUser {
   isSpeaking?: boolean;
   audioLevel?: number; // 0 to 1
   isHost?: boolean;
+  isMuted?: boolean;
+  isDeafened?: boolean;
+  voiceConnected?: boolean;
+  canWrite?: boolean;
+  role?: 'admin' | 'editor' | 'viewer';
+  isGuest?: boolean;
+  username?: string;
+}
+
+export interface SessionRoom {
+  id: string;
+  name: string;
+  creatorId: string;
+  creatorName: string;
+  createdAt: number;
+  isLocked: boolean;
+  userCount?: number;
+}
+
+export interface VoiceOfferPayload {
+  fromUserId: string;
+  toUserId: string;
+  offer: any;
+}
+
+export interface VoiceAnswerPayload {
+  fromUserId: string;
+  toUserId: string;
+  answer: any;
+}
+
+export interface VoiceIceCandidatePayload {
+  fromUserId: string;
+  toUserId: string;
+  candidate: any;
+}
+
+export interface VoiceChunkPayload {
+  userId: string;
+  chunk: string;
+  mimeType: string;
+  timestamp: number;
 }
 
 export interface VoteToClearState {
@@ -67,6 +120,11 @@ export interface VoteToClearState {
 
 export interface RoomState {
   roomId: string;
+  roomName?: string;
+  creatorId?: string;
+  isLocked?: boolean;
+  canWrite?: boolean;
+  isAdmin?: boolean;
   elements: Record<string, CanvasElement>;
   users: Record<string, RemoteUser>;
   voteToClear: VoteToClearState | null;

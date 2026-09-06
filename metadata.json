@@ -1,6 +1,6 @@
 {
   "name": "Real-time Collaborative Whiteboard",
-  "description": "A digital collaborative whiteboard with real-time multi-user drawing, sticky notes, live cursor tracking, vote-to-clear, and audio wave reactivity.",
+  "description": "A digital collaborative whiteboard featuring real-time multi-user drawing, sticky notes, session room creation with code sharing, authentication, host admin privileges for permissions & kicking, and mobile responsive controls.",
   "requestFramePermissions": ["microphone"],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

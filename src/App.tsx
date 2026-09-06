@@ -1,12 +1,18 @@
 import React, { useState, useCallback, useRef } from 'react';
 import { ToolType, CanvasElement, DrawingStroke, StickyNote, TextElement } from './types';
+import { useAuth } from './hooks/useAuth';
 import { useSocket } from './hooks/useSocket';
-import { useAudioVisualizer } from './hooks/useAudioVisualizer';
+import { useVoiceChat } from './hooks/useVoiceChat';
 import { Header } from './components/Header';
 import { Toolbar } from './components/Toolbar';
 import { Canvas } from './components/Canvas';
 import { VoteToClearModal } from './components/VoteToClearModal';
-import { Info, Sparkles, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { AuthModal } from './components/AuthModal';
+import { CreateRoomModal } from './components/CreateRoomModal';
+import { ShareRoomModal } from './components/ShareRoomModal';
+import { AdminPanelModal } from './components/AdminPanelModal';
+import { ErrorBoundary } from './components/ErrorBoundary';
+import { Info, Sparkles, AlertCircle, CheckCircle2, UserX } from 'lucide-react';
 
 export default function App() {
   const [currentTool, setCurrentTool] = useState<ToolType>('pen');
@@ -15,9 +21,35 @@ export default function App() {
   const [myCreatedElementIds, setMyCreatedElementIds] = useState<string[]>([]);
   const [showWelcomeHint, setShowWelcomeHint] = useState<boolean>(true);
 
+  // Modals state
+  const [showAuthModal, setShowAuthModal] = useState<boolean>(false);
+  const [showCreateRoomModal, setShowCreateRoomModal] = useState<boolean>(false);
+  const [showShareModal, setShowShareModal] = useState<boolean>(false);
+  const [showAdminModal, setShowAdminModal] = useState<boolean>(false);
+
+  // Authentication hook
+  const {
+    authUser,
+    token,
+    myRooms,
+    login,
+    register,
+    continueAsGuest,
+    logout,
+    signInWithGoogle,
+    fetchRooms,
+    createRoom,
+  } = useAuth();
+
   // Real-time WebSocket connection hook
   const {
     roomId,
+    roomName,
+    creatorName,
+    isLocked,
+    canWrite,
+    isKicked,
+    kickedReason,
     currentUser,
     isHost,
     isConnected,
@@ -38,44 +70,75 @@ export default function App() {
     emitVoteClearCast,
     emitVoteClearCancel,
     emitClearBoardDirect,
+    setParticipantPermission,
+    kickParticipant,
+    toggleLockBoard,
+    resetKickedState,
     updateUserName,
     updateUserColor,
     switchRoom,
     addNotification,
-  } = useSocket();
+    socket,
+  } = useSocket(undefined, authUser, token);
 
-  // Audio reactivity & mic hook ("The Wow Feature")
+  // Real-time Collaborative Voice Chat Engine
   const {
-    isMicActive,
+    isVoiceConnected,
+    isMuted,
+    isDeafened,
+    volume,
+    setVolume,
     audioLevel,
     isSpeaking,
     frequencyData,
     isSimulated,
-    toggleMic,
+    error: voiceError,
+    isIframeRestricted,
+    activeSpeakers,
+    startVoiceChat,
+    leaveVoiceChat,
+    toggleMute,
+    toggleDeafen,
     toggleSimulated,
-  } = useAudioVisualizer();
+    openInNewTab,
+  } = useVoiceChat({
+    socket,
+    currentUser,
+    roomId,
+    users,
+    onNotification: addNotification,
+  });
 
   const [cursorCoords, setCursorCoords] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
 
   // Handle local element creation & track for undo
   const handleElementCreate = useCallback(
     (element: CanvasElement) => {
+      if (!canWrite) {
+        addNotification('Drawing is restricted by the room host', 'warning');
+        return;
+      }
       emitElementCreate(element);
       setMyCreatedElementIds((prev) => [...prev, element.id]);
     },
-    [emitElementCreate]
+    [canWrite, emitElementCreate, addNotification]
   );
 
   // Undo last locally created element
   const handleUndo = useCallback(() => {
+    if (!canWrite) return;
     if (myCreatedElementIds.length === 0) return;
     const lastId = myCreatedElementIds[myCreatedElementIds.length - 1];
     setMyCreatedElementIds((prev) => prev.slice(0, -1));
     emitElementDelete(lastId);
-  }, [myCreatedElementIds, emitElementDelete]);
+  }, [canWrite, myCreatedElementIds, emitElementDelete]);
 
   // Request clear board
   const handleRequestClear = useCallback(() => {
+    if (!canWrite) {
+      addNotification('Only users with write permission can request board clear', 'warning');
+      return;
+    }
     const totalUsers = Object.keys(users).length;
     if (totalUsers > 1) {
       // Multiplayer: Trigger vote
@@ -93,7 +156,7 @@ export default function App() {
         addNotification('Whiteboard cleared', 'info');
       }
     }
-  }, [users, elements, emitVoteClearStart, emitClearBoardDirect, addNotification]);
+  }, [canWrite, users, elements, emitVoteClearStart, emitClearBoardDirect, addNotification]);
 
   // Export board as PNG
   const handleExport = useCallback(() => {
@@ -207,24 +270,44 @@ export default function App() {
   const isMultiplayer = Object.keys(users).length > 1;
 
   return (
-    <div id="collaborative-whiteboard-app" className="relative w-screen h-screen overflow-hidden font-sans">
+    <div id="collaborative-whiteboard-app" className="relative w-screen h-screen overflow-hidden font-sans select-none">
       {/* Top Header */}
       <Header
         roomId={roomId}
+        roomName={roomName}
+        creatorName={creatorName}
         currentUser={currentUser}
         users={users}
         isConnected={isConnected}
         isHost={isHost}
+        canWrite={canWrite}
+        isLocked={isLocked}
+        authUser={authUser}
+        onOpenAuthModal={() => setShowAuthModal(true)}
+        onOpenCreateRoomModal={() => setShowCreateRoomModal(true)}
+        onOpenShareModal={() => setShowShareModal(true)}
+        onOpenAdminModal={() => setShowAdminModal(true)}
         onUpdateUserName={updateUserName}
         onUpdateUserColor={updateUserColor}
         onSwitchRoom={switchRoom}
-        isMicActive={isMicActive}
+        isVoiceConnected={isVoiceConnected}
+        isMuted={isMuted}
+        isDeafened={isDeafened}
+        volume={volume}
+        onSetVolume={setVolume}
         audioLevel={audioLevel}
         isSpeaking={isSpeaking}
         frequencyData={frequencyData}
         isSimulated={isSimulated}
-        onToggleMic={toggleMic}
+        error={voiceError}
+        isIframeRestricted={isIframeRestricted}
+        activeSpeakers={activeSpeakers}
+        onJoinVoice={startVoiceChat}
+        onLeaveVoice={leaveVoiceChat}
+        onToggleMute={toggleMute}
+        onToggleDeafen={toggleDeafen}
         onToggleSimulated={toggleSimulated}
+        onOpenInNewTab={openInNewTab}
         onAudioLevelChange={emitAudioLevel}
       />
 
@@ -235,6 +318,10 @@ export default function App() {
         currentSize={currentSize}
         currentUserId={currentUser.id}
         currentUserName={currentUser.name}
+        canWrite={canWrite}
+        onRestrictedAttempt={() =>
+          addNotification('Drawing is restricted by room admin', 'warning')
+        }
         elements={elements}
         liveStrokes={liveStrokes}
         remoteUsers={users}
@@ -256,6 +343,7 @@ export default function App() {
         currentColor={currentColor}
         currentSize={currentSize}
         canUndo={myCreatedElementIds.length > 0}
+        canWrite={canWrite}
         onSelectTool={setCurrentTool}
         onSelectColor={setCurrentColor}
         onSelectSize={setCurrentSize}
@@ -265,7 +353,7 @@ export default function App() {
         isMultiplayer={isMultiplayer}
       />
 
-      {/* Vote to Clear Modal Banner ("The Wow Feature") */}
+      {/* Vote to Clear Modal Banner */}
       {voteToClear && voteToClear.active && (
         <VoteToClearModal
           vote={voteToClear}
@@ -275,11 +363,102 @@ export default function App() {
         />
       )}
 
-      {/* Quick Start Prompt & Instructions */}
+      {/* Authentication Modal */}
+      <ErrorBoundary fallbackTitle="Authentication Dialog">
+        <AuthModal
+          isOpen={showAuthModal}
+          onClose={() => setShowAuthModal(false)}
+          currentUser={authUser}
+          onLogin={login}
+          onRegister={register}
+          onContinueAsGuest={continueAsGuest}
+          onGoogleLogin={signInWithGoogle}
+          onLogout={logout}
+        />
+      </ErrorBoundary>
+
+      {/* Session Rooms Management Modal */}
+      <ErrorBoundary fallbackTitle="Session Rooms Dialog">
+        <CreateRoomModal
+          isOpen={showCreateRoomModal}
+          onClose={() => setShowCreateRoomModal(false)}
+          currentRoomId={roomId}
+          currentUserId={authUser?.id || currentUser.id}
+          myRooms={myRooms}
+          onSelectRoom={(id) => {
+            switchRoom(id);
+            setShowCreateRoomModal(false);
+          }}
+          onCreateRoom={createRoom}
+          onFetchRooms={fetchRooms}
+        />
+      </ErrorBoundary>
+
+      {/* Share Room Code & Link Modal */}
+      <ShareRoomModal
+        isOpen={showShareModal}
+        onClose={() => setShowShareModal(false)}
+        roomCode={roomId}
+        roomName={roomName}
+        isHost={isHost}
+      />
+
+      {/* Admin Panel & User Permissions Modal */}
+      <AdminPanelModal
+        isOpen={showAdminModal}
+        onClose={() => setShowAdminModal(false)}
+        roomId={roomId}
+        roomName={roomName}
+        isHost={isHost}
+        isLocked={isLocked}
+        currentUserId={currentUser.id}
+        users={users}
+        onSetPermission={setParticipantPermission}
+        onKickUser={kickParticipant}
+        onToggleLock={toggleLockBoard}
+      />
+
+      {/* Kicked from Room Dialog */}
+      {isKicked && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-white rounded-2xl p-6 w-full max-w-md border border-slate-200 shadow-2xl text-center">
+            <div className="w-12 h-12 bg-rose-100 text-rose-600 rounded-full flex items-center justify-center mx-auto mb-3">
+              <UserX className="w-6 h-6" />
+            </div>
+            <h3 className="text-lg font-bold text-slate-900 mb-1">Removed from Room</h3>
+            <p className="text-sm text-slate-600 mb-6">
+              {kickedReason || 'An admin has removed you from this collaborative session.'}
+            </p>
+            <div className="flex gap-2 justify-center">
+              <button
+                onClick={() => {
+                  resetKickedState();
+                  const newCode = 'room-' + Math.random().toString(36).substring(2, 7);
+                  switchRoom(newCode);
+                }}
+                className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-xl shadow-sm transition-colors cursor-pointer"
+              >
+                Join New Random Room
+              </button>
+              <button
+                onClick={() => {
+                  resetKickedState();
+                  setShowCreateRoomModal(true);
+                }}
+                className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-semibold rounded-xl transition-colors cursor-pointer"
+              >
+                Browse Rooms
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Quick Start Prompt & Instructions (Auto dismissible, hidden on mobile) */}
       {showWelcomeHint && (
         <div
           id="welcome-hint-pill"
-          className="fixed top-20 left-6 z-30 bg-white border border-slate-200 shadow-xl rounded-2xl p-4 max-w-xs text-xs text-slate-700 animate-in fade-in duration-300 select-none"
+          className="hidden sm:block fixed top-20 left-6 z-30 bg-white border border-slate-200 shadow-xl rounded-2xl p-4 max-w-xs text-xs text-slate-700 animate-in fade-in duration-300 select-none"
         >
           <div className="flex items-start justify-between gap-2">
             <div className="flex items-center gap-1.5 font-semibold text-slate-900">
@@ -294,13 +473,16 @@ export default function App() {
             </button>
           </div>
           <p className="mt-1.5 text-slate-500 leading-relaxed">
-            Click <strong className="text-slate-700 font-semibold">Share Link</strong> to invite friends to draw together in real-time. Use the <strong className="text-slate-700 font-semibold">Audio Wave</strong> to visualize speaking activity!
+            Click <strong className="text-slate-700 font-semibold">Share</strong> to invite friends via room code or link. Room creators can manage participants and toggle write permissions.
           </p>
         </div>
       )}
 
       {/* Floating System Notifications */}
-      <div id="system-notifications" className="fixed bottom-12 right-6 z-50 flex flex-col gap-2 pointer-events-none">
+      <div
+        id="system-notifications"
+        className="fixed top-16 sm:bottom-12 right-3 sm:right-6 z-50 flex flex-col gap-2 pointer-events-none max-w-[90vw]"
+      >
         {notifications.map((n) => (
           <div
             key={n.id}
@@ -320,15 +502,17 @@ export default function App() {
         ))}
       </div>
 
-      {/* Clean Minimalism Status Footer */}
+      {/* Clean Minimalism Status Footer (Desktop only) */}
       <footer
         id="whiteboard-status-footer"
-        className="fixed bottom-0 left-0 right-0 h-8 bg-slate-50 border-t border-slate-200 px-6 flex items-center justify-between z-30 select-none text-[10px] text-slate-400 font-medium"
+        className="hidden sm:flex fixed bottom-0 left-0 right-0 h-7 bg-slate-50/90 backdrop-blur-xs border-t border-slate-200 px-6 items-center justify-between z-30 select-none text-[10px] text-slate-400 font-medium"
       >
         <div className="flex items-center gap-4 font-mono">
-          <span>X: {cursorCoords.x.toFixed(1)}</span>
-          <span>Y: {cursorCoords.y.toFixed(1)}</span>
-          <span>Zoom: 100%</span>
+          <span>X: {cursorCoords.x.toFixed(0)}</span>
+          <span>Y: {cursorCoords.y.toFixed(0)}</span>
+          <span>Room: {roomId}</span>
+          {isHost && <span className="text-amber-600 font-semibold font-sans">★ Host</span>}
+          {!canWrite && <span className="text-rose-500 font-semibold font-sans">🔒 View-Only</span>}
         </div>
         <div className="flex items-center gap-2">
           <div
@@ -337,7 +521,7 @@ export default function App() {
             }`}
           />
           <span className="text-[10px] text-slate-500 font-semibold uppercase tracking-wider font-sans">
-            System Online — Socket.io {isConnected ? 'Connected' : 'Offline'}
+            Socket.io {isConnected ? 'Connected' : 'Offline'}
           </span>
         </div>
       </footer>

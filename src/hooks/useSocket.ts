@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { io, Socket } from 'socket.io-client';
-import { CanvasElement, RemoteUser, VoteToClearState, ToolType, Point } from '../types';
+import { CanvasElement, RemoteUser, VoteToClearState, ToolType, Point, AuthUser } from '../types';
 
 const USER_COLORS = [
   '#ef4444', // Red
@@ -36,11 +36,11 @@ export function getRoomIdFromUrl(): string {
   const params = new URLSearchParams(window.location.search);
   const roomParam = params.get('room');
   if (roomParam && roomParam.trim()) {
-    return roomParam.trim();
+    return roomParam.trim().toUpperCase();
   }
   // Check hash
   if (window.location.hash && window.location.hash.length > 1) {
-    return window.location.hash.replace('#', '');
+    return window.location.hash.replace('#', '').toUpperCase();
   }
   return 'collab-room';
 }
@@ -52,10 +52,41 @@ export function setRoomIdInUrl(roomId: string) {
   window.history.replaceState({}, '', url.toString());
 }
 
-export function useSocket(initialRoomId?: string) {
+export function useSocket(initialRoomId?: string, authUser?: AuthUser | null, authToken?: string | null) {
   const [roomId, setRoomId] = useState<string>(() => initialRoomId || getRoomIdFromUrl());
-  const [currentUser, setCurrentUser] = useState(getInitialUser);
+  const [currentUser, setCurrentUser] = useState<RemoteUser>(() => {
+    if (authUser) {
+      return {
+        id: authUser.id,
+        name: authUser.name,
+        color: authUser.color,
+        role: 'editor',
+        canWrite: true,
+        isGuest: authUser.isGuest,
+        username: authUser.username,
+      };
+    }
+    const initial = getInitialUser();
+    return {
+      id: initial.id,
+      name: initial.name,
+      color: initial.color,
+      role: 'editor',
+      canWrite: true,
+      isGuest: true,
+    };
+  });
+
   const [isHost, setIsHost] = useState(false);
+  const [role, setRole] = useState<'admin' | 'editor' | 'viewer'>('editor');
+  const [canWrite, setCanWrite] = useState<boolean>(true);
+  const [roomName, setRoomName] = useState<string>('');
+  const [creatorId, setCreatorId] = useState<string>('');
+  const [creatorName, setCreatorName] = useState<string>('');
+  const [isLocked, setIsLocked] = useState<boolean>(false);
+  const [isKicked, setIsKicked] = useState<boolean>(false);
+  const [kickedReason, setKickedReason] = useState<string | null>(null);
+
   const [isConnected, setIsConnected] = useState(false);
   const [elements, setElements] = useState<Record<string, CanvasElement>>({});
   const [users, setUsers] = useState<Record<string, RemoteUser>>({});
@@ -66,7 +97,20 @@ export function useSocket(initialRoomId?: string) {
   const [notifications, setNotifications] = useState<{ id: string; text: string; type: 'info' | 'success' | 'warning' }[]>([]);
 
   const socketRef = useRef<Socket | null>(null);
-  const liveStrokesTimeoutRef = useRef<Record<string, number>>({});
+
+  // Sync currentUser with authUser if provided
+  useEffect(() => {
+    if (authUser) {
+      setCurrentUser((prev) => ({
+        ...prev,
+        id: authUser.id,
+        name: authUser.name,
+        color: authUser.color,
+        username: authUser.username,
+        isGuest: authUser.isGuest,
+      }));
+    }
+  }, [authUser]);
 
   const addNotification = useCallback((text: string, type: 'info' | 'success' | 'warning' = 'info') => {
     const id = Math.random().toString(36).substring(2, 9);
@@ -79,6 +123,8 @@ export function useSocket(initialRoomId?: string) {
   // Connect socket
   useEffect(() => {
     setRoomIdInUrl(roomId);
+    setIsKicked(false);
+    setKickedReason(null);
 
     const socket = io({
       transports: ['websocket', 'polling'],
@@ -92,6 +138,7 @@ export function useSocket(initialRoomId?: string) {
       socket.emit('join-room', {
         roomId,
         user: currentUser,
+        token: authToken || undefined,
       });
     });
 
@@ -99,12 +146,33 @@ export function useSocket(initialRoomId?: string) {
       setIsConnected(false);
     });
 
-    socket.on('room-init', (data: { roomId: string; elements: Record<string, CanvasElement>; users: Record<string, RemoteUser>; voteToClear: VoteToClearState | null; yourRole: string }) => {
-      setElements(data.elements || {});
-      setUsers(data.users || {});
-      setVoteToClear(data.voteToClear);
-      setIsHost(data.yourRole === 'host');
-    });
+    socket.on(
+      'room-init',
+      (data: {
+        roomId: string;
+        roomName?: string;
+        creatorId?: string;
+        creatorName?: string;
+        isLocked?: boolean;
+        elements: Record<string, CanvasElement>;
+        users: Record<string, RemoteUser>;
+        voteToClear: VoteToClearState | null;
+        yourRole: 'admin' | 'editor' | 'viewer';
+        canWrite: boolean;
+        isHost: boolean;
+      }) => {
+        setElements(data.elements || {});
+        setUsers(data.users || {});
+        setVoteToClear(data.voteToClear);
+        setIsHost(data.isHost);
+        setRole(data.yourRole);
+        setCanWrite(data.canWrite);
+        if (data.roomName) setRoomName(data.roomName);
+        if (data.creatorId) setCreatorId(data.creatorId);
+        if (data.creatorName) setCreatorName(data.creatorName);
+        if (typeof data.isLocked === 'boolean') setIsLocked(data.isLocked);
+      }
+    );
 
     socket.on('user-joined', (user: RemoteUser) => {
       setUsers((prev) => ({ ...prev, [user.id]: user }));
@@ -121,6 +189,60 @@ export function useSocket(initialRoomId?: string) {
         }
         return next;
       });
+    });
+
+    // Admin & Permissions Events
+    socket.on('permission-updated', (data: { canWrite: boolean; role: 'editor' | 'viewer'; message?: string }) => {
+      setCanWrite(data.canWrite);
+      setRole(data.role);
+      addNotification(
+        data.message || (data.canWrite ? 'Drawing permission restored by host.' : 'Drawing permission revoked by host.'),
+        data.canWrite ? 'success' : 'warning'
+      );
+    });
+
+    socket.on('user-permission-changed', (data: { userId: string; canWrite: boolean; role: 'editor' | 'viewer' }) => {
+      setUsers((prev) => {
+        const u = prev[data.userId];
+        if (!u) return prev;
+        return {
+          ...prev,
+          [data.userId]: {
+            ...u,
+            canWrite: data.canWrite,
+            role: data.role,
+          },
+        };
+      });
+    });
+
+    socket.on('user-kicked', (data: { userId: string; userName: string; reason: string }) => {
+      addNotification(`${data.userName} was removed by room host`, 'info');
+    });
+
+    socket.on('kicked', (data: { reason: string }) => {
+      setIsKicked(true);
+      setKickedReason(data.reason || 'You have been removed from this room by the host.');
+      socket.disconnect();
+    });
+
+    socket.on('room-lock-changed', (data: { isLocked: boolean; users?: Record<string, RemoteUser> }) => {
+      setIsLocked(data.isLocked);
+      if (data.users) {
+        setUsers(data.users);
+      }
+      if (!isHost) {
+        setCanWrite(!data.isLocked);
+        setRole(data.isLocked ? 'viewer' : 'editor');
+        addNotification(
+          data.isLocked ? 'Board was locked by host (View-Only).' : 'Board was unlocked by host.',
+          'info'
+        );
+      }
+    });
+
+    socket.on('permission-denied', (data: { message: string }) => {
+      addNotification(data.message || 'Permission Denied: Writing is restricted.', 'warning');
     });
 
     // Real-time live stroke events from other users
@@ -213,6 +335,23 @@ export function useSocket(initialRoomId?: string) {
             ...user,
             audioLevel: data.level,
             isSpeaking: data.isSpeaking,
+          },
+        };
+      });
+    });
+
+    // Voice Chat status update from other users
+    socket.on('voice-status-updated', (data: { userId: string; isMuted?: boolean; isDeafened?: boolean; voiceConnected?: boolean }) => {
+      setUsers((prev) => {
+        const user = prev[data.userId];
+        if (!user) return prev;
+        return {
+          ...prev,
+          [data.userId]: {
+            ...user,
+            isMuted: typeof data.isMuted === 'boolean' ? data.isMuted : user.isMuted,
+            isDeafened: typeof data.isDeafened === 'boolean' ? data.isDeafened : user.isDeafened,
+            voiceConnected: typeof data.voiceConnected === 'boolean' ? data.voiceConnected : user.voiceConnected,
           },
         };
       });
@@ -350,8 +489,54 @@ export function useSocket(initialRoomId?: string) {
     setRoomId(cleaned);
   }, [roomId]);
 
+  const emitVoiceStatus = useCallback((data: { isMuted?: boolean; isDeafened?: boolean; voiceConnected?: boolean }) => {
+    socketRef.current?.emit('voice-status-update', data);
+  }, []);
+
+  const emitVoiceOffer = useCallback((toUserId: string, offer: any) => {
+    socketRef.current?.emit('voice-offer', { toUserId, offer });
+  }, []);
+
+  const emitVoiceAnswer = useCallback((toUserId: string, answer: any) => {
+    socketRef.current?.emit('voice-answer', { toUserId, answer });
+  }, []);
+
+  const emitVoiceIceCandidate = useCallback((toUserId: string, candidate: any) => {
+    socketRef.current?.emit('voice-ice-candidate', { toUserId, candidate });
+  }, []);
+
+  const emitVoiceAudioChunk = useCallback((chunk: string, mimeType?: string) => {
+    socketRef.current?.emit('voice-audio-chunk', { chunk, mimeType, timestamp: Date.now() });
+  }, []);
+
+  // Admin Privileges Emitters
+  const setParticipantPermission = useCallback((targetUserId: string, targetCanWrite: boolean) => {
+    socketRef.current?.emit('admin-set-permission', { targetUserId, canWrite: targetCanWrite });
+  }, []);
+
+  const kickParticipant = useCallback((targetUserId: string, reason?: string) => {
+    socketRef.current?.emit('admin-kick-user', { targetUserId, reason });
+  }, []);
+
+  const toggleLockBoard = useCallback((targetIsLocked: boolean) => {
+    socketRef.current?.emit('admin-toggle-lock', { isLocked: targetIsLocked });
+  }, []);
+
+  const resetKickedState = useCallback(() => {
+    setIsKicked(false);
+    setKickedReason(null);
+  }, []);
+
   return {
     roomId,
+    roomName,
+    creatorId,
+    creatorName,
+    isLocked,
+    canWrite,
+    role,
+    isKicked,
+    kickedReason,
     currentUser,
     isHost,
     isConnected,
@@ -360,6 +545,8 @@ export function useSocket(initialRoomId?: string) {
     liveStrokes,
     voteToClear,
     notifications,
+    socket: socketRef.current,
+    socketRef,
     emitStrokeLiveStart,
     emitStrokeLivePoint,
     emitElementCreate,
@@ -368,10 +555,19 @@ export function useSocket(initialRoomId?: string) {
     emitElementsBatchDelete,
     emitCursorMove,
     emitAudioLevel,
+    emitVoiceStatus,
+    emitVoiceOffer,
+    emitVoiceAnswer,
+    emitVoiceIceCandidate,
+    emitVoiceAudioChunk,
     emitVoteClearStart,
     emitVoteClearCast,
     emitVoteClearCancel,
     emitClearBoardDirect,
+    setParticipantPermission,
+    kickParticipant,
+    toggleLockBoard,
+    resetKickedState,
     updateUserName,
     updateUserColor,
     switchRoom,
