@@ -1,27 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { IconElement } from '../types';
-import {
-  Heart,
-  Star,
-  Sparkles,
-  Flame,
-  Lightbulb,
-  User,
-  Cloud,
-  Database,
-  Code,
-  Shield,
-  MessageSquare,
-  ThumbsUp,
-  AlertCircle,
-  Rocket,
-  Smile,
-  Compass,
-  CheckCircle2,
-  Trash2,
-  Move,
-  Palette,
-} from 'lucide-react';
+import { Trash2, Move, Palette } from 'lucide-react';
+import { AVAILABLE_ICONS } from '../constants/icons';
 
 interface IconItemProps {
   element: IconElement;
@@ -32,26 +12,6 @@ interface IconItemProps {
   onUpdate: (updated: IconElement) => void;
   onDelete: (id: string) => void;
 }
-
-export const AVAILABLE_ICONS: Record<string, { label: string; component: React.FC<{ className?: string; size?: number; color?: string }> }> = {
-  star: { label: 'Star', component: Star },
-  heart: { label: 'Heart', component: Heart },
-  sparkles: { label: 'Sparkles', component: Sparkles },
-  flame: { label: 'Flame', component: Flame },
-  lightbulb: { label: 'Idea', component: Lightbulb },
-  user: { label: 'User', component: User },
-  cloud: { label: 'Cloud', component: Cloud },
-  database: { label: 'Database', component: Database },
-  code: { label: 'Code', component: Code },
-  shield: { label: 'Shield', component: Shield },
-  message: { label: 'Chat', component: MessageSquare },
-  'thumbs-up': { label: 'Like', component: ThumbsUp },
-  alert: { label: 'Warning', component: AlertCircle },
-  rocket: { label: 'Rocket', component: Rocket },
-  smile: { label: 'Smile', component: Smile },
-  compass: { label: 'Explore', component: Compass },
-  check: { label: 'Done', component: CheckCircle2 },
-};
 
 const PALETTE_COLORS = ['#0f172a', '#ef4444', '#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899'];
 const SIZES = [32, 48, 64, 88];

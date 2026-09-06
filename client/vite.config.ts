@@ -24,15 +24,31 @@ export default defineConfig(() => {
         '/api': {
           target: 'http://127.0.0.1:3000',
           changeOrigin: true,
+          configure: (proxy) => {
+            proxy.on('error', (err: any) => {
+              if (err.code === 'ECONNRESET' || err.code === 'ECONNABORTED' || err.code === 'ECONNREFUSED') {
+                return;
+              }
+              console.warn('[Vite Proxy API Error]:', err.message);
+            });
+          },
         },
         '/auth': {
           target: 'http://127.0.0.1:3000',
           changeOrigin: true,
         },
         '/socket.io': {
-          target: 'ws://127.0.0.1:3000',
+          target: 'http://127.0.0.1:3000',
           ws: true,
           changeOrigin: true,
+          configure: (proxy) => {
+            proxy.on('error', (err: any) => {
+              if (err.code === 'ECONNRESET' || err.code === 'ECONNABORTED' || err.code === 'ECONNREFUSED') {
+                return;
+              }
+              console.warn('[Vite Proxy WS Error]:', err.message);
+            });
+          },
         },
       },
     },

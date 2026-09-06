@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { ToolType, ShapeType } from '../types';
-import { AVAILABLE_ICONS } from './IconItem';
+import { AVAILABLE_ICONS } from '../constants/icons';
 import {
   Pencil,
   Highlighter,
