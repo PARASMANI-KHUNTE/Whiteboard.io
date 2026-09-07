@@ -383,6 +383,18 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
     });
 
     // Persistent element events
+    socket.on('elements-batch-created', (newElements: CanvasElement[]) => {
+      if (!Array.isArray(newElements)) return;
+      setElements((prev) => {
+        const next = { ...prev };
+        newElements.forEach((el) => {
+          next[el.id] = el;
+        });
+        return next;
+      });
+      addNotification(`${newElements.length} elements added to whiteboard`, 'info');
+    });
+
     socket.on('element-created', (element: CanvasElement) => {
       setElements((prev) => ({ ...prev, [element.id]: element }));
       // Clean up live stroke representation if applicable
@@ -553,6 +565,20 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
     }
   }, [roomId]);
 
+  const emitElementsBatchCreate = useCallback((newElements: CanvasElement[]) => {
+    if (!Array.isArray(newElements) || newElements.length === 0) return;
+    setElements((prev) => {
+      const next = { ...prev };
+      newElements.forEach((el) => {
+        next[el.id] = el;
+      });
+      return next;
+    });
+    if (socketRef.current?.connected && roomId) {
+      socketRef.current.emit('elements-batch-create', newElements);
+    }
+  }, [roomId]);
+
   const emitCursorMove = useCallback((cursor: { x: number; y: number; tool?: ToolType; isDrawing?: boolean }) => {
     if (socketRef.current?.connected && roomId) {
       socketRef.current.emit('cursor-move', cursor);
@@ -696,6 +722,7 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
     emitElementCreate,
     emitElementUpdate,
     emitElementDelete,
+    emitElementsBatchCreate,
     emitElementsBatchDelete,
     emitCursorMove,
     emitAudioLevel,

@@ -14,6 +14,7 @@ import { ShareRoomModal } from './components/ShareRoomModal';
 import { AdminPanelModal } from './components/AdminPanelModal';
 import { SessionLauncherModal } from './components/SessionLauncherModal';
 import { ConfirmModal } from './components/ConfirmModal';
+import { AiGenerateModal } from './components/AiGenerateModal';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { Info, Sparkles, AlertCircle, CheckCircle2, UserX } from 'lucide-react';
 
@@ -31,6 +32,7 @@ export default function App() {
   const [showCreateRoomModal, setShowCreateRoomModal] = useState<boolean>(false);
   const [showShareModal, setShowShareModal] = useState<boolean>(false);
   const [showAdminModal, setShowAdminModal] = useState<boolean>(false);
+  const [showAiModal, setShowAiModal] = useState<boolean>(false);
   const [confirmModalState, setConfirmModalState] = useState<{
     isOpen: boolean;
     title: string;
@@ -96,6 +98,7 @@ export default function App() {
     emitElementCreate,
     emitElementUpdate,
     emitElementDelete,
+    emitElementsBatchCreate,
     emitElementsBatchDelete,
     emitCursorMove,
     emitAudioLevel,
@@ -138,6 +141,17 @@ export default function App() {
     setShowShareModal(true);
     addNotification(`Canvas converted to multiplayer room ${newRoomCode}!`, 'success');
   }, [convertToMultiplayerRoom, addNotification]);
+
+  const handleInsertAiElements = useCallback(
+    (newElements: CanvasElement[], replaceBoard?: boolean) => {
+      if (replaceBoard) {
+        emitClearBoardDirect();
+      }
+      emitElementsBatchCreate(newElements);
+      addNotification(`✨ Gemini generated ${newElements.length} elements!`, 'success');
+    },
+    [emitClearBoardDirect, emitElementsBatchCreate, addNotification]
+  );
 
   // Real-time Collaborative Voice Chat Engine
   const {
@@ -460,6 +474,7 @@ export default function App() {
         onOpenShareModal={() => setShowShareModal(true)}
         onShareAndGoLive={handleShareAndGoLive}
         onOpenAdminModal={() => setShowAdminModal(true)}
+        onOpenAiModal={() => setShowAiModal(true)}
         onUpdateUserName={updateUserName}
         onUpdateUserColor={updateUserColor}
         onSwitchRoom={switchRoom}
@@ -640,6 +655,18 @@ export default function App() {
         variant={confirmModalState.variant}
         onConfirm={confirmModalState.onConfirm}
         onCancel={() => setConfirmModalState((prev) => ({ ...prev, isOpen: false }))}
+      />
+
+      {/* Gemini AI Diagram Generator Modal */}
+      <AiGenerateModal
+        isOpen={showAiModal}
+        onClose={() => setShowAiModal(false)}
+        onInsertElements={handleInsertAiElements}
+        canvasCenter={{
+          x: typeof window !== 'undefined' ? Math.round(window.innerWidth / 2) : 500,
+          y: typeof window !== 'undefined' ? Math.round(window.innerHeight / 2) : 350,
+        }}
+        authToken={token}
       />
 
       {/* Kicked from Room Dialog */}

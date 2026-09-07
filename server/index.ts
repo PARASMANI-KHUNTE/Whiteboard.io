@@ -20,6 +20,7 @@ import {
   deleteRoom,
 } from "./auth";
 import { connectDb, checkDbHealth } from "./db";
+import { generateDiagramWithGemini, DiagramType } from "./gemini";
 import { fileURLToPath } from "url";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -312,6 +313,37 @@ async function startServer() {
       res.json({ success: true, user });
     } catch (err: any) {
       res.status(500).json({ success: false, error: err.message || "Authentication check failed" });
+    }
+  });
+
+  // Gemini AI Diagram Generation Route (Rate limited to 10 requests / min per IP)
+  app.post("/api/ai/generate-diagram", authRateLimiter(10, 60000), async (req, res) => {
+    try {
+      const { prompt, type, canvasCenter } = req.body;
+      if (!prompt || typeof prompt !== "string" || !prompt.trim()) {
+        res.status(400).json({ success: false, error: "Prompt is required" });
+        return;
+      }
+
+      const authHeader = req.headers.authorization;
+      const token = authHeader?.replace("Bearer ", "")?.trim();
+      const user = token ? await getUserByToken(token) : null;
+      const author = user ? { id: user.id, name: user.name } : { id: "ai_gemini", name: "Gemini AI" };
+
+      const validTypes = ["mindmap", "flowchart", "brainstorm", "architecture"];
+      const diagramType = validTypes.includes(type) ? type : "mindmap";
+
+      const result = await generateDiagramWithGemini(
+        prompt.trim(),
+        diagramType as DiagramType,
+        canvasCenter || { x: 0, y: 0 },
+        author
+      );
+
+      res.json({ success: true, ...result });
+    } catch (err: any) {
+      console.error("[Gemini AI Error]:", err.message);
+      res.status(500).json({ success: false, error: err.message || "Failed to generate diagram" });
     }
   });
 

@@ -15,6 +15,7 @@ import {
   MicOff,
   Sun,
   Moon,
+  Sparkles,
 } from 'lucide-react';
 
 interface HeaderProps {
@@ -40,6 +41,7 @@ interface HeaderProps {
   onLogout: () => void;
   theme: 'light' | 'dark';
   onToggleTheme: () => void;
+  onOpenAiModal?: () => void;
   // Voice Chat
   isVoiceConnected: boolean;
   isMuted: boolean;
@@ -87,6 +89,7 @@ export const Header: React.FC<HeaderProps> = ({
   onLogout,
   theme,
   onToggleTheme,
+  onOpenAiModal,
   isVoiceConnected,
   isMuted,
   isDeafened,
@@ -299,6 +302,20 @@ export const Header: React.FC<HeaderProps> = ({
           >
             <LogIn className="w-3.5 h-3.5 text-slate-500 dark:text-slate-400" />
             <span className="hidden sm:inline">Sign In</span>
+          </button>
+        )}
+
+        {/* AI Diagram Button */}
+        {onOpenAiModal && (
+          <button
+            id="ai-diagram-header-btn"
+            onClick={onOpenAiModal}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 sm:px-3.5 sm:py-2 rounded-xl text-xs sm:text-sm font-bold transition-all shadow-md cursor-pointer active:scale-95 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white shadow-indigo-500/20"
+            title="Generate Mindmaps, Flowcharts & Sticky Boards with Gemini AI"
+          >
+            <Sparkles className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-amber-300 animate-pulse shrink-0" />
+            <span className="hidden md:inline">AI Diagram</span>
+            <span className="md:hidden">AI</span>
           </button>
         )}
 
