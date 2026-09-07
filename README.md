@@ -6,8 +6,54 @@ Designed for distributed teams, design sprint brainstorming, remote tutoring, an
 
 ---
 
+## 💡 What is Whiteboard.io?
+
+**Whiteboard.io** is an all-in-one collaborative visual workspace engineered from the ground up for modern distributed engineering teams, product designers, educators, and creative thinkers. 
+
+Rather than treating a digital whiteboard as just a flat drawing canvas or an expensive enterprise subscription silo, Whiteboard.io merges **instant visual ideation**, **built-in spatial voice communication**, and **state-of-the-art AI diagram generation** into an open, frictionless platform that runs anywhere with zero setup.
+
+---
+
+## 🥊 Why Whiteboard.io? (How It Differs From Alternatives)
+
+Most existing whiteboards force compromises: either you pay heavy per-seat monthly subscriptions for closed-source corporate platforms, or you use simple drawing tools that lack integrated voice, AI synthesis, or room governance. Here is how Whiteboard.io stands out:
+
+### Feature Comparison Matrix
+
+| Capability | Whiteboard.io | Miro | Excalidraw | FigJam | Google Jamboard |
+| :--- | :---: | :---: | :---: | :---: | :---: |
+| **Integrated Gemini AI Diagrams** | ✅ **Free & Built-In** (Mindmaps, Flowcharts, Sticky Boards, Architecture) | 💰 Paid Add-on | ⚠️ Limited / External Plugin | 💰 Paid / Credit Capped | ❌ Deprecated / Dead |
+| **5-Layer AI Rate-Limit Shield** | ✅ **Guaranteed 100% Uptime** (Queue pacing, caching, procedural fallback) | ❌ Standard 429 errors | ❌ N/A | ❌ Hard caps | ❌ No AI |
+| **Built-in Peer-to-Peer Voice Mesh** | ✅ **Native WebRTC Audio** with Live Waveform Visualizer | 💰 Enterprise Only | ❌ Requires Zoom/Discord | ⚠️ Basic Audio | ❌ Requires Google Meet |
+| **Consensus Vote-to-Clear Protection** | ✅ **Democratic 15s Countdown** (Prevents accidental/troll board wipes) | ❌ Host wipe or undo | ❌ Anyone can clear | ❌ Anyone can clear | ❌ Anyone can clear |
+| **Host Moderation & Governance** | ✅ **Lock Room, Toggle User Drawing Privileges, Kick Users** | 💰 Team/Enterprise Tier | ❌ Basic / None | 💰 Paid Tier | ❌ Minimal |
+| **Self-Hostable & 100% Open Source** | ✅ **MIT License** (Run on Render, Docker, Railway, or VPS) | ❌ Proprietary SaaS | ⚠️ Client only (Backend custom) | ❌ Proprietary SaaS | ❌ Shut Down |
+| **Frictionless Guest Onboarding** | ✅ **1-Click Ephemeral Guests** + Google OAuth + Email Accounts | ⚠️ Requires account for full tools | ✅ Instant | ⚠️ Requires Figma account | ⚠️ Requires Google account |
+| **Persistent Cloud Database** | ✅ **MongoDB Native Driver** with TTL session cleanup | ❌ Vendor Lock-in | ⚠️ Ephemeral / LocalStorage | ❌ Figma Cloud Lock-in | ❌ Deprecated |
+
+### Key Differentiators Explained
+
+1. **⚡ Native AI Diagram Generation with Zero Failure Rate**:
+   Unlike platforms where AI features are gated behind $20/user/month paywalls or frequently crash with `429 Too Many Requests`, Whiteboard.io integrates Google Gemini 2.5 Flash with an enterprise-grade 5-layer rate-limit shield. It paces outbound requests, caches popular structures for 2 hours, and includes an offline procedural generator that guarantees your brainstorming flow is never interrupted.
+
+2. **🎙️ No More "Can You Send the Zoom Link?"**:
+   Whiteboard.io eliminates meeting tab fatigue. With native WebRTC mesh voice chat and real-time audio visualizers, participants speak directly through the whiteboard. Green audio rings pulsate around multiplayer cursors as team members talk, creating a genuine sense of co-presence.
+
+3. **🛡️ Anti-Troll & Accidental Wipe Protection**:
+   In large collaborative sessions, a single rogue click can clear hours of work. Whiteboard.io introduces a **Consensus Vote-to-Clear** mechanism: wiping the canvas requires a 15-second democratic vote where participants cast their ballots in real time. For organized presentations, hosts can lock the canvas into view-only mode or revoke drawing privileges for specific attendees.
+
+4. **🔓 Complete Data Sovereignty & Zero Vendor Lock-in**:
+   Your architectural diagrams, sprint retrospectives, and product blueprints belong to you. Whiteboard.io is 100% open-source, connects directly to your own MongoDB instance, and can be deployed to your own private cloud or local intranet with a single command.
+
+---
+
 ## 🚀 Key Features
 
+* **✨ Gemini AI Diagram & Mind Map Generator**:
+  * Generate instant visual diagrams using Google Gemini 2.5 Flash from natural language prompts.
+  * 4 Specialized styles: 🧠 **Mind Maps** (radial hubs), 🔀 **Flowcharts** (decision diamonds & step boxes), 📋 **Sticky Boards** (SWOT / Kanban columns), and 🏗️ **System Architectures**.
+  * **5-Layer Rate-Limit Shield**: Outbound request throttling queue (3s spacing), in-memory response cache (2hr TTL), exponential backoff retries, and offline procedural fallback engine.
+  * Real-time batch insertion that broadcasts new elements to all connected users instantly.
 * **⚡ Real-Time Collaboration**: Sub-50ms drawing synchronization across unlimited concurrent users powered by Socket.io and optimistic rendering.
 * **🖌️ Infinite Canvas Engine**: Smooth pan, pinch-to-zoom, high-DPI Retina scaling, and quadratic Bézier curve stroke smoothing.
 * **📐 Rich Creative Toolset**:
@@ -38,6 +84,7 @@ Designed for distributed teams, design sprint brainstorming, remote tutoring, an
 | :--- | :--- |
 | **Frontend** | React 19, TypeScript, Vite, TailwindCSS, Lucide Icons |
 | **Canvas Engine** | HTML5 Canvas 2D API, Web Audio API, AnalyserNode |
+| **Artificial Intelligence**| Google Gemini 2.5 Flash, Structured JSON Schema Generation |
 | **Real-Time Signaling** | Socket.io Client, WebRTC `RTCPeerConnection` (Mesh) |
 | **Backend** | Node.js (ESM), Express 4, Socket.io Server |
 | **Database** | MongoDB 7 / MongoDB Atlas Native Node Driver |
@@ -82,6 +129,9 @@ PORT=3000
 APP_URL=http://localhost:5173
 MONGODB_URI=mongodb://127.0.0.1:27017/whiteboard
 
+# Google Gemini API Key for AI Diagram & Mind Map Generation
+GEMINI_API_KEY=your_gemini_api_key_here
+
 # Optional Google OAuth Credentials
 GOOGLE_CLIENT_ID=
 GOOGLE_CLIENT_SECRET=
@@ -120,12 +170,14 @@ Deploying on **Render**, **Railway**, or a single VPS:
 4. Set environment variables:
    * `APP_URL`: `https://<your-service>.onrender.com`
    * `MONGODB_URI`: `<your_atlas_connection_string>`
+   * `GEMINI_API_KEY`: `your_gemini_api_key_here`
    * `GOOGLE_CLIENT_ID` & `GOOGLE_CLIENT_SECRET`: *(From Google Cloud Console)*
 
 ### Option B: Split Frontend (Static) & Backend (Web Service)
 * **Backend (Render Web Service)**:
   * Runs Node server on `https://<your-backend>.onrender.com`.
   * Set `APP_URL=https://<your-frontend>.onrender.com` to allow CORS and OAuth redirects.
+  * Set `GEMINI_API_KEY=your_gemini_api_key_here`.
 * **Frontend (Render Static Site or Vercel)**:
   * Publishes `client/dist`.
   * Set `VITE_BACKEND_URL=https://<your-backend>.onrender.com`.

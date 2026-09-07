@@ -169,3 +169,61 @@ interface RoomElementsDoc {
   updatedAt: number;
 }
 ```
+
+---
+
+## 6. Google Gemini AI Engine & 5-Layer Rate-Limit Shield
+
+Whiteboard.io includes an integrated AI diagram generation pipeline powered by **Google Gemini 2.5 Flash** (`server/gemini.ts`). Users can describe ideas in plain English and automatically receive fully styled, interactive canvas elements (mind maps, flowcharts, Kanban/SWOT boards, and architecture diagrams).
+
+### AI Generation Flow
+
+```
+┌─────────────────┐       POST /api/ai/generate-diagram       ┌────────────────────────┐
+│  Client Browser │ ─────────────────────────────────────────►│  Express REST Handler  │
+│ (AiGenerateModal│◄───────────────────────────────────────── │  (10 req/min IP limit) │
+└────────┬────────┘      JSON CanvasElement[] Batch           └───────────┬────────────┘
+         │                                                                │
+         │ emitElementsBatchCreate                                        ▼
+         ▼                                                    ┌────────────────────────┐
+┌─────────────────┐                                           │  In-Memory 2hr Cache   │
+│ Socket.io Relay │                                           │ (Matches prompt+style) │
+│ (Room broadcast)│                                           └───────────┬────────────┘
+└────────┬────────┘                                                       │ (Cache miss)
+         │                                                                ▼
+         ▼                                                    ┌────────────────────────┐
+┌─────────────────┐                                           │ Outbound Request Queue │
+│ All Peers in    │                                           │ (Enforces 3000ms delay)│
+│ Collaborative   │                                           └───────────┬────────────┘
+│ Room Viewport   │                                                       │
+└─────────────────┘                                                       ▼
+                                                              ┌────────────────────────┐
+                                                              │ Google Gemini API Call │
+                                                              │ (Exponential Backoff)  │
+                                                              └───────────┬────────────┘
+                                                                          │ (If offline / 429)
+                                                                          ▼
+                                                              ┌────────────────────────┐
+                                                              │  Procedural Fallback   │
+                                                              │   Synthesis Engine     │
+                                                              └────────────────────────┘
+```
+
+### 5-Layer Rate-Limit Shield Architecture
+
+Google Gemini's free tier has strict concurrency and Requests-Per-Minute (RPM) limits (~15 RPM). To prevent rate limit exhaustion (`HTTP 429 Resource Exhausted`) and guarantee 100% uptime for collaborative sessions, the backend implements a **5-layer defensive shield**:
+
+| Layer | Mechanism | Implementation Detail |
+| :--- | :--- | :--- |
+| **Layer 1: IP Rate Limiting** | Express In-Memory Token Limiter | Restricts clients to a maximum of **10 AI diagram requests per minute per IP address** (`server/index.ts`). |
+| **Layer 2: Response Caching** | Normalizing In-Memory Cache (2hr TTL) | Caches generated diagrams using a normalized hash key `[style]:[lowercase_prompt]`. Repeated prompts (e.g. popular templates) return immediately in **<1ms** with zero Gemini API quota consumed. |
+| **Layer 3: Request Pacing Queue** | Serial FIFO Promise Queue | Queues all outbound calls to Google Gemini and enforces a strict **3000ms inter-call spacing window**. This prevents simultaneous users from triggering burst spikes that exceed Gemini's RPM. |
+| **Layer 4: Exponential Backoff & Retry** | Jittered Retry Loop | If Google returns `429 Too Many Requests` or `503 Service Unavailable`, the queue automatically pauses and retries up to 3 times with exponential backoff (`1500ms`, `3000ms`, `6000ms`). |
+| **Layer 5: Procedural Fallback Engine** | Offline Algorithmic Diagram Synthesis | If no API key is provided, if retries are exhausted, or if Gemini services are experiencing downtime, the system transparently falls back to a deterministic procedural generator. The user always receives a clean, connected diagram without any application error. |
+
+### Diagram Synthesis Styles & Structured Output
+The generator maps natural language into specific graph topologies:
+- **Mind Map (`mindmap`)**: Radial tree layout with a central topic node, colored primary branches, and secondary sub-topic nodes with directional arrows.
+- **Flowchart (`flowchart`)**: Sequential top-down or left-to-right DAG with start/end terminals, process rectangles, decision diamonds, and labeled connectors.
+- **Sticky Board (`brainstorm`)**: Kanban/SWOT matrix with themed column headers and color-coded sticky notes organized in a 2D grid.
+- **System Architecture (`architecture`)**: Layered architectural schematic depicting client tiers, API gateways, microservices, messaging queues, and databases with interconnecting bus lines.

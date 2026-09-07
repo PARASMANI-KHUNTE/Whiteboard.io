@@ -247,6 +247,69 @@ Permanently deletes a room and clears all persisted elements.
 
 ---
 
+### AI Diagram Generation
+
+#### `POST /api/ai/generate-diagram`
+Generates structured canvas elements (shapes, sticky notes, directional connector arrows, text labels) using Google Gemini 2.5 Flash from natural language prompts. Protected by a 5-layer rate-limit shield, 2hr in-memory response caching, request pacing queue, and automatic procedural fallback.
+
+* **Rate limit**: 10 requests / minute per IP address.
+* **Request Body**:
+  ```json
+  {
+    "prompt": "User Authentication & OAuth 2.0 Flow with JWT tokens",
+    "style": "flowchart",
+    "viewportCenter": {
+      "x": 450,
+      "y": 320
+    }
+  }
+  ```
+  * `prompt` (*string, required*): The natural language concept or architecture to visualize.
+  * `style` (*string, optional*): One of `"mindmap"`, `"flowchart"`, `"brainstorm"`, `"architecture"`. Default is `"mindmap"`.
+  * `viewportCenter` (*object, optional*): Canvas world coordinates `{ x: number, y: number }` indicating where to center the generated diagram.
+* **Response (`200 OK`)**:
+  ```json
+  {
+    "success": true,
+    "elements": [
+      {
+        "id": "ai-geom-1725705601234-0",
+        "type": "shape",
+        "shapeType": "roundrect",
+        "x": 350,
+        "y": 120,
+        "width": 200,
+        "height": 60,
+        "fillColor": "#3b82f6",
+        "strokeColor": "#1d4ed8",
+        "strokeWidth": 2,
+        "text": "Start: User Visits Site",
+        "textColor": "#ffffff",
+        "fontSize": 15
+      },
+      {
+        "id": "ai-geom-1725705601234-1",
+        "type": "shape",
+        "shapeType": "arrow",
+        "x": 450,
+        "y": 180,
+        "width": 40,
+        "height": 60,
+        "strokeColor": "#64748b",
+        "strokeWidth": 2
+      }
+    ],
+    "cached": false,
+    "fallback": false,
+    "count": 8
+  }
+  ```
+* **Error Responses**:
+  * `400 Bad Request`: When `prompt` is missing, empty, or not a string.
+  * `500 Internal Server Error`: Critical generation failure (procedural fallback ensures this is exceptionally rare).
+
+---
+
 ## 2. Socket.io Real-Time Protocol
 
 Clients establish a connection to `/socket.io/` using WebSocket or HTTP long-polling fallback.
@@ -260,7 +323,8 @@ Clients establish a connection to `/socket.io/` using WebSocket or HTTP long-pol
 | `join-room` | `{ roomId, user, token }` | Joins a room, validates credentials, and initializes state. |
 | `stroke-live-start` | `{ strokeId, point, color, size, isHighlighter }` | Starts streaming a live pen stroke. |
 | `stroke-live-point` | `{ strokeId, point }` | Streams an incremental coordinate point. |
-| `element-create` | `CanvasElement` | Finalizes a completed element (stroke, shape, sticky, text, icon). |
+| `element-create` | `CanvasElement` | Finalizes a single completed element (stroke, shape, sticky, text, icon). |
+| `elements-batch-create` | `{ elements: CanvasElement[] }` | Atomically adds and broadcasts an array of elements (used by AI Diagram Generator). |
 | `element-update` | `CanvasElement` | Updates coordinates, dimensions, content, or styling of an element. |
 | `element-delete` | `{ elementId }` | Deletes a single canvas element. |
 | `elements-batch-delete` | `{ elementIds: string[] }` | Deletes multiple elements simultaneously. |
@@ -291,6 +355,7 @@ Clients establish a connection to `/socket.io/` using WebSocket or HTTP long-pol
 | `stroke-live-started` | `{ userId, strokeId, point, color, size, isHighlighter }` | Real-time stroke starting by another participant. |
 | `stroke-live-pointed` | `{ strokeId, point }` | Incoming coordinate point for an active stroke. |
 | `element-created` | `CanvasElement` | A new persistent element has been added to the board. |
+| `elements-batch-created` | `{ elements: CanvasElement[] }` | Multiple elements created and added simultaneously to the board. |
 | `element-updated` | `CanvasElement` | An existing element has been edited, moved, or resized. |
 | `element-deleted` | `{ elementId }` | An element has been removed from the canvas. |
 | `elements-batch-deleted` | `{ elementIds }` | Multiple elements removed in batch. |

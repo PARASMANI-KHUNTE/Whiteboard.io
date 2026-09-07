@@ -42,6 +42,7 @@ In this mode, the Node.js Express server automatically builds and serves the Rea
    - `PORT`: `3000` *(Render provides this automatically, but setting 3000 ensures consistency)*
    - `APP_URL`: `https://whiteboard-app.onrender.com`
    - `MONGODB_URI`: `mongodb+srv://<user>:<password>@cluster0.mongodb.net/whiteboard?retryWrites=true&w=majority`
+   - `GEMINI_API_KEY`: `your-google-gemini-api-key` *(From [Google AI Studio](https://aistudio.google.com/app/apikey))*
    - `GOOGLE_CLIENT_ID`: `your-google-client-id.apps.googleusercontent.com`
    - `GOOGLE_CLIENT_SECRET`: `your-google-client-secret`
 
@@ -58,6 +59,7 @@ In this mode, the Node.js Express server automatically builds and serves the Rea
    PORT=3000
    APP_URL=https://whiteboard-frontend.onrender.com (or your Vercel URL)
    MONGODB_URI=your_mongodb_connection_string
+   GEMINI_API_KEY=your-google-gemini-api-key
    GOOGLE_CLIENT_ID=your-google-client-id
    GOOGLE_CLIENT_SECRET=your-google-client-secret
    ```
@@ -151,6 +153,7 @@ VITE_TURN_PASSWORD=your_turn_password
 | `PORT` | HTTP server listening port | No | `3000` |
 | `APP_URL` | Frontend URL allowed for CORS and OAuth return | Yes | `http://localhost:5173` |
 | `MONGODB_URI` | MongoDB connection URI | Yes | `mongodb://127.0.0.1:27017/whiteboard` |
+| `GEMINI_API_KEY` | Google Gemini API key for AI diagram generation | No (optional; uses procedural fallback if unset) | `""` |
 | `GOOGLE_CLIENT_ID` | Google OAuth 2.0 Web Client ID | Yes (for OAuth) | None |
 | `GOOGLE_CLIENT_SECRET`| Google OAuth 2.0 Client Secret | Yes (for OAuth) | None |
 | `GOOGLE_CALLBACK_URL` | Explicit redirect URI override sent to Google | No | `${SERVER_URL}/auth/google/callback` |

@@ -10,9 +10,10 @@ The frontend is organized into modular React components centered around an infin
 
 ```
 App.tsx
-├── Header.tsx (Room status, users dropdown, voice toggle, auth buttons, theme toggle)
+├── Header.tsx (Room status, users dropdown, voice toggle, auth buttons, theme toggle, ✨ AI Diagram button, ℹ️ About modal)
 │   ├── AudioVisualizerBar.tsx (Waveform rendering & mic controls)
-│   └── AdminPanelModal.tsx (Host room lock, user permissions, kick user)
+│   ├── AdminPanelModal.tsx (Host room lock, user permissions, kick user)
+│   └── AboutModal.tsx (App mission, key differentiators, and feature comparison matrix)
 ├── Toolbar.tsx (Drawing tools, shapes, sticky notes, text, icons, colors, stroke width)
 ├── Canvas.tsx (Interactive drawing surface, coordinate transformation, remote cursors)
 │   ├── ShapeItem.tsx (Rectangles, circles, diamonds, triangles, stars, arrows)
@@ -23,7 +24,8 @@ App.tsx
 ├── AuthModal.tsx (Login, registration, guest onboarding, Google sign-in)
 ├── CreateRoomModal.tsx (Room code generator, room naming, private lock)
 ├── ShareRoomModal.tsx (Shareable link, QR code, room code copy)
-└── VoteToClearModal.tsx (Interactive voting modal with live consensus progress)
+├── VoteToClearModal.tsx (Interactive voting modal with live consensus progress)
+└── AiGenerateModal.tsx (Gemini AI prompt modal with style tabs, prompt chips, loading states)
 ```
 
 ---
@@ -40,7 +42,8 @@ Located in [`client/src/hooks/useSocket.ts`](file:///f:/Codes/Projects/Whiteboar
   - `voteToClear`: Active vote timer and participant vote tallies.
   - `canWrite`: Boolean indicating whether the local user has write permissions.
   - `isHost`: Boolean indicating whether the local user is room administrator.
-- Provides unified emission functions: `emitElementCreate`, `emitElementUpdate`, `emitElementDelete`, `emitCursorMove`, `emitAudioLevel`, `setParticipantPermission`, `kickParticipant`.
+- Provides unified emission functions: `emitElementCreate`, `emitElementsBatchCreate`, `emitElementUpdate`, `emitElementDelete`, `emitElementsBatchDelete`, `emitCursorMove`, `emitAudioLevel`, `setParticipantPermission`, `kickParticipant`.
+- Listens for `elements-batch-created` events to seamlessly insert multi-element AI diagrams broadcast from remote peers.
 
 ### 2. `useAuth()`
 Located in [`client/src/hooks/useAuth.ts`](file:///f:/Codes/Projects/Whiteboard/Whiteboard.io/client/src/hooks/useAuth.ts).
@@ -120,3 +123,37 @@ The eraser tool supports two modes:
 | `Space + Drag` | Pan across canvas |
 | `Ctrl + Scroll` / `Cmd + Scroll` | Zoom in and out |
 | `Ctrl + 0` | Reset zoom to 100% |
+
+---
+
+## 5. AI Diagram Generation & Viewport Mathematics
+
+### Natural Language to Canvas Elements
+The `AiGenerateModal` component provides an intuitive interface for transforming text into structured diagrams:
+1. **Style Selection**: Users choose from 4 specialized diagram typologies:
+   - 🧠 **Mind Map**: Radial hierarchy radiating from a central idea.
+   - 🔀 **Flowchart**: Decision tree with logic diamonds and sequence arrows.
+   - 📋 **Sticky Board**: Kanban columns (To Do / In Progress / Done) or SWOT quadrants.
+   - 🏗️ **Architecture**: Multi-tier microservice / cloud architecture topology.
+2. **Template Inspiration Chips**: Pre-crafted prompts enable 1-click experimentation (e.g. "OAuth 2.0 Auth Flow", "E-Commerce Microservices", "SWOT Analysis").
+
+### Viewport Coordinate Centering
+To ensure generated diagrams appear right where the user is currently looking (rather than at arbitrary `(0,0)` coordinates):
+```typescript
+// App.tsx
+const handleOpenAiModal = () => {
+  // Compute the world-space center of the current user's viewport
+  const centerWorldX = (window.innerWidth / 2 - panOffset.x) / zoomLevel;
+  const centerWorldY = (window.innerHeight / 2 - panOffset.y) / zoomLevel;
+  setAiViewportCenter({ x: Math.round(centerWorldX), y: Math.round(centerWorldY) });
+  setIsAiModalOpen(true);
+};
+```
+The backend uses this `viewportCenter` as the origin anchor, positioning the root hub or first node directly at the user's focal point.
+
+### Collaborative Batch Dispatch
+When the API returns a generated batch of elements:
+1. The client updates local React state immediately for zero-lag rendering.
+2. The client emits `emitElementsBatchCreate(elements)`.
+3. The server relays `elements-batch-created` to all other participants in the room, creating an instant shared canvas update without overloading the WebSocket gateway with individual single-element packets.
+

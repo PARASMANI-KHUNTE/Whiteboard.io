@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { RemoteUser } from '../types';
 import { AuthUser } from '../hooks/useAuth';
 import { AudioVisualizerBar } from './AudioVisualizerBar';
+import { AboutModal } from './AboutModal';
 import {
   Share2,
   Radio,
@@ -16,6 +17,7 @@ import {
   Sun,
   Moon,
   Sparkles,
+  Info,
 } from 'lucide-react';
 
 interface HeaderProps {
@@ -111,6 +113,7 @@ export const Header: React.FC<HeaderProps> = ({
   onAudioLevelChange,
 }) => {
   const [showProfileModal, setShowProfileModal] = useState(false);
+  const [showAboutModal, setShowAboutModal] = useState(false);
   const [tempName, setTempName] = useState(currentUser.name);
 
   const activeUserList = Object.values(users) as RemoteUser[];
@@ -224,6 +227,16 @@ export const Header: React.FC<HeaderProps> = ({
             <span className="hidden sm:inline">Admin</span>
           </button>
         )}
+
+        {/* About Whiteboard.io & Alternatives Comparison */}
+        <button
+          id="about-app-btn"
+          onClick={() => setShowAboutModal(true)}
+          title="About Whiteboard.io & Why It's Different"
+          className="p-2 text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
+        >
+          <Info className="w-4 h-4" />
+        </button>
 
         {/* Dark / Light Theme Toggle */}
         <button
@@ -511,6 +524,13 @@ export const Header: React.FC<HeaderProps> = ({
           </div>,
           document.body
         )}
+
+      {/* About & Alternatives Comparison Modal */}
+      <AboutModal
+        isOpen={showAboutModal}
+        onClose={() => setShowAboutModal(false)}
+        onOpenAiModal={onOpenAiModal}
+      />
     </header>
   );
 };
