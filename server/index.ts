@@ -320,7 +320,12 @@ async function startServer() {
     const originParam = (req.query.origin as string)?.trim();
     const reqOrigin = originParam || req.get("origin") || "";
     const trustedOrigin = resolveTrustedOrigin(reqOrigin);
-    const redirectUri = `${trustedOrigin}/auth/google/callback`;
+
+    // The callback endpoint /auth/google/callback is hosted on this backend server
+    const protocol = req.get("x-forwarded-proto") || req.protocol || "http";
+    const host = req.get("host") || `localhost:${PORT}`;
+    const serverOrigin = (process.env.SERVER_URL || `${protocol}://${host}`).replace(/\/$/, "");
+    const redirectUri = `${serverOrigin}/auth/google/callback`;
     const clientId = process.env.GOOGLE_CLIENT_ID?.trim();
 
     if (!clientId) {
@@ -1233,12 +1238,21 @@ async function startServer() {
   });
 
   // Serve production client bundle if available
-  const clientDist = path.resolve(__dirname, "../client/dist");
-  if (fs.existsSync(clientDist)) {
+  const clientDistCandidates = [
+    path.resolve(__dirname, "../../client/dist"),
+    path.resolve(__dirname, "../client/dist"),
+    path.resolve(process.cwd(), "client/dist"),
+    path.resolve(process.cwd(), "../client/dist"),
+  ];
+  const clientDist = clientDistCandidates.find((dir) => fs.existsSync(dir));
+  if (clientDist) {
+    console.log(`[Static] Serving client production build from: ${clientDist}`);
     app.use(express.static(clientDist));
     app.get("*", (_req, res) => {
       res.sendFile(path.join(clientDist, "index.html"));
     });
+  } else {
+    console.warn("[Static] client/dist was not found. If this is a full-stack deployment, ensure client is built.");
   }
 
   server.listen(PORT, "0.0.0.0", () => {
