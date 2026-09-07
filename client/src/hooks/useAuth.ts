@@ -37,10 +37,46 @@ export function useAuth() {
     localStorage.removeItem(USER_KEY);
   }, []);
 
-  // Fetch current user on mount
+  // Fetch current user on mount (with support for OAuth redirect tokens)
   useEffect(() => {
     const checkAuth = async () => {
-      const currentToken = localStorage.getItem(TOKEN_KEY);
+      // 1. Extract auth_token from URL hash (#auth_token=...) or query parameter if redirected
+      let incomingToken: string | null = null;
+      if (typeof window !== 'undefined') {
+        try {
+          if (window.location.hash) {
+            const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+            const hashToken = hashParams.get('auth_token');
+            if (hashToken) {
+              incomingToken = hashToken;
+              hashParams.delete('auth_token');
+              const remainingHash = hashParams.toString();
+              const newUrl = window.location.pathname + window.location.search + (remainingHash ? '#' + remainingHash : '');
+              window.history.replaceState({}, document.title, newUrl);
+            }
+          }
+          if (!incomingToken && window.location.search) {
+            const searchParams = new URLSearchParams(window.location.search);
+            const queryToken = searchParams.get('auth_token');
+            if (queryToken) {
+              incomingToken = queryToken;
+              searchParams.delete('auth_token');
+              const newSearch = searchParams.toString();
+              const newUrl = window.location.pathname + (newSearch ? '?' + newSearch : '') + window.location.hash;
+              window.history.replaceState({}, document.title, newUrl);
+            }
+          }
+        } catch (e) {
+          console.warn('Could not parse URL auth token:', e);
+        }
+      }
+
+      if (incomingToken) {
+        localStorage.setItem(TOKEN_KEY, incomingToken);
+        setToken(incomingToken);
+      }
+
+      const currentToken = incomingToken || localStorage.getItem(TOKEN_KEY);
       if (!currentToken) {
         setIsLoading(false);
         return;
@@ -71,25 +107,42 @@ export function useAuth() {
   // Global window message listener for OAuth popups
   useEffect(() => {
     const handleOAuthMessage = (event: MessageEvent) => {
-      const customAllowed = (import.meta.env.VITE_ALLOWED_ORIGINS as string | undefined)
-        ?.split(',')
-        .map((o) => o.trim())
-        .filter(Boolean) ?? [
+      if (event.data?.type !== 'GOOGLE_OAUTH_SUCCESS') {
+        return;
+      }
+
+      // Check allowed origins
+      const allowedOrigins = new Set([
+        window.location.origin,
         'http://localhost:5173',
         'http://localhost:3000',
         'http://127.0.0.1:5173',
         'http://127.0.0.1:3000',
-      ];
-      const allowedOrigins = [
-        window.location.origin,
-        ...(BACKEND_URL ? [BACKEND_URL] : []),
-        ...customAllowed,
-      ];
-      if (!allowedOrigins.includes(event.origin)) {
+      ]);
+
+      if (BACKEND_URL) {
+        try {
+          allowedOrigins.add(new URL(BACKEND_URL, window.location.origin).origin);
+        } catch {}
+      }
+
+      const customAllowed = (import.meta.env.VITE_ALLOWED_ORIGINS as string | undefined)
+        ?.split(',')
+        .map((o) => o.trim())
+        .filter(Boolean) || [];
+      customAllowed.forEach((o) => {
+        try {
+          allowedOrigins.add(new URL(o, window.location.origin).origin);
+        } catch {}
+      });
+
+      // Accept if origin is in allowed set or matches backend host
+      const isTrusted = !event.origin || allowedOrigins.has(event.origin) || event.origin.includes('onrender.com');
+      if (!isTrusted) {
         return;
       }
 
-      if (event.data?.type === 'GOOGLE_OAUTH_SUCCESS' && event.data.token && event.data.user) {
+      if (event.data.token && event.data.user) {
         saveAuth(event.data.user, event.data.token);
       }
     };

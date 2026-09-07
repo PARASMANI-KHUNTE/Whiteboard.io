@@ -451,17 +451,40 @@ async function startServer() {
           <head><title>Authentication Succeeded</title></head>
           <body style="font-family:sans-serif;padding:30px;text-align:center;background:#f0fdf4;color:#166534;">
             <h3>Connected with Google</h3>
-            <p>Closing popup window...</p>
+            <p>Completing sign in...</p>
             <script>
-              if (window.opener) {
-                window.opener.postMessage({
-                  type: 'GOOGLE_OAUTH_SUCCESS',
-                  token: ${JSON.stringify(result.token)},
-                  user: ${JSON.stringify(result.user)}
-                }, ${JSON.stringify(targetOrigin)});
-                setTimeout(() => window.close(), 300);
-              } else {
-                window.location.href = '/';
+              const token = ${JSON.stringify(result.token)};
+              const user = ${JSON.stringify(result.user)};
+              const targetOrigin = ${JSON.stringify(targetOrigin)};
+
+              // 1. Save directly into localStorage for same-origin sessions
+              try {
+                localStorage.setItem('whiteboard_auth_token', token);
+                localStorage.setItem('whiteboard_cached_user', JSON.stringify(user));
+              } catch (e) {}
+
+              // 2. Notify opener window if popup was used
+              let notifiedOpener = false;
+              if (window.opener && !window.opener.closed) {
+                try {
+                  window.opener.postMessage({
+                    type: 'GOOGLE_OAUTH_SUCCESS',
+                    token: token,
+                    user: user
+                  }, '*');
+                  notifiedOpener = true;
+                  setTimeout(() => window.close(), 400);
+                } catch (err) {
+                  console.warn('Could not postMessage to opener:', err);
+                }
+              }
+
+              // 3. Fallback: If no opener (e.g. redirected or popup blocked), redirect to app with auth_token in URL hash
+              if (!notifiedOpener) {
+                const redirectTarget = targetOrigin.replace(/\\/$/, '') + '/#auth_token=' + encodeURIComponent(token);
+                setTimeout(() => {
+                  window.location.href = redirectTarget;
+                }, 200);
               }
             </script>
           </body>
