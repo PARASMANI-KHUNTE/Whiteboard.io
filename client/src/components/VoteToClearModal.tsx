@@ -1,6 +1,5 @@
 import React, { useEffect, useState } from 'react';
 import { VoteToClearState } from '../types';
-import { AlertTriangle, Check, X, Clock } from 'lucide-react';
 
 interface VoteToClearModalProps {
   vote: VoteToClearState;
@@ -15,7 +14,7 @@ export const VoteToClearModal: React.FC<VoteToClearModalProps> = ({
   onCastVote,
   onCancelVote,
 }) => {
-  const [secondsLeft, setSecondsLeft] = useState(15);
+  const [secondsLeft, setSecondsLeft] = useState(Math.max(1, Math.ceil(vote.durationMs / 1000)));
 
   useEffect(() => {
     const updateCountdown = () => {
@@ -45,7 +44,7 @@ export const VoteToClearModal: React.FC<VoteToClearModalProps> = ({
           Action Required
         </span>
         <span className="text-xs font-semibold text-rose-500 bg-rose-50 px-2.5 py-0.5 rounded-full">
-          {yesCount}/{vote.totalEligible} Voted
+          {yesCount}Y / {noCount}N ({requiredVotes} to pass)
         </span>
       </div>
 

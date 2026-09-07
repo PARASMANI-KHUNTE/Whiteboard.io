@@ -1,8 +1,9 @@
-import React, { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { ToolType, ShapeType, CanvasElement, DrawingStroke, StickyNote, TextElement, ShapeElement, IconElement } from './types';
 import { useAuth } from './hooks/useAuth';
 import { useSocket } from './hooks/useSocket';
 import { useVoiceChat } from './hooks/useVoiceChat';
+import { useTheme } from './hooks/useTheme';
 import { Header } from './components/Header';
 import { Toolbar } from './components/Toolbar';
 import { Canvas } from './components/Canvas';
@@ -12,6 +13,7 @@ import { CreateRoomModal } from './components/CreateRoomModal';
 import { ShareRoomModal } from './components/ShareRoomModal';
 import { AdminPanelModal } from './components/AdminPanelModal';
 import { SessionLauncherModal } from './components/SessionLauncherModal';
+import { ConfirmModal } from './components/ConfirmModal';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { Info, Sparkles, AlertCircle, CheckCircle2, UserX } from 'lucide-react';
 
@@ -25,11 +27,29 @@ export default function App() {
   const [showWelcomeHint, setShowWelcomeHint] = useState<boolean>(true);
   const [hasChosenSessionMode, setHasChosenSessionMode] = useState<boolean>(false);
 
-  // Modals state
   const [showAuthModal, setShowAuthModal] = useState<boolean>(false);
   const [showCreateRoomModal, setShowCreateRoomModal] = useState<boolean>(false);
   const [showShareModal, setShowShareModal] = useState<boolean>(false);
   const [showAdminModal, setShowAdminModal] = useState<boolean>(false);
+  const [confirmModalState, setConfirmModalState] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    confirmText?: string;
+    cancelText?: string;
+    variant?: 'danger' | 'warning' | 'info';
+    onConfirm: () => void;
+  }>({
+    isOpen: false,
+    title: '',
+    message: '',
+    onConfirm: () => {},
+  });
+
+  const selectAllHandlerRef = useRef<(() => void) | null>(null);
+
+  // Theme hook
+  const { theme, toggleTheme } = useTheme();
 
   // Authentication hook
   const {
@@ -44,7 +64,13 @@ export default function App() {
     signInWithGoogle,
     fetchRooms,
     createRoom,
+    deleteRoom,
   } = useAuth();
+
+  const handleLogout = useCallback(async () => {
+    await logout();
+    addNotification('Logged out successfully. Switched to guest session.', 'info');
+  }, [logout]);
 
   // Real-time WebSocket connection hook
   const {
@@ -80,6 +106,7 @@ export default function App() {
     setParticipantPermission,
     kickParticipant,
     toggleLockBoard,
+    deleteCurrentRoom,
     resetKickedState,
     updateUserName,
     updateUserColor,
@@ -87,6 +114,23 @@ export default function App() {
     addNotification,
     socket,
   } = useSocket(undefined, authUser, token);
+
+  const handleDeleteRoom = useCallback(async (targetRoomId: string) => {
+    const isCurrent = targetRoomId === roomId;
+    if (isCurrent) {
+      deleteCurrentRoom();
+    }
+    const res = await deleteRoom(targetRoomId);
+    if (res.success) {
+      addNotification(`Room ${targetRoomId} deleted successfully.`, 'success');
+      if (isCurrent) {
+        switchRoom(null);
+      }
+    } else {
+      addNotification(res.error || `Failed to delete room ${targetRoomId}.`, 'warning');
+    }
+    return res;
+  }, [roomId, deleteCurrentRoom, deleteRoom, addNotification, switchRoom]);
 
   // Convert current solo canvas to a collaborative multiplayer room
   const handleShareAndGoLive = useCallback(() => {
@@ -138,14 +182,21 @@ export default function App() {
     [canWrite, emitElementCreate, addNotification]
   );
 
+  // Reset undo history on room change
+  useEffect(() => {
+    setMyCreatedElementIds([]);
+  }, [roomId]);
+
   // Undo last locally created element
   const handleUndo = useCallback(() => {
     if (!canWrite) return;
     if (myCreatedElementIds.length === 0) return;
     const lastId = myCreatedElementIds[myCreatedElementIds.length - 1];
     setMyCreatedElementIds((prev) => prev.slice(0, -1));
-    emitElementDelete(lastId);
-  }, [canWrite, myCreatedElementIds, emitElementDelete]);
+    if (elements[lastId]) {
+      emitElementDelete(lastId);
+    }
+  }, [canWrite, myCreatedElementIds, elements, emitElementDelete]);
 
   // Request clear board
   const handleRequestClear = useCallback(() => {
@@ -163,12 +214,20 @@ export default function App() {
         addNotification('Board is already blank', 'info');
         return;
       }
-      const ok = window.confirm('Clear all drawings and notes from the board?');
-      if (ok) {
-        emitClearBoardDirect();
-        setMyCreatedElementIds([]);
-        addNotification('Whiteboard cleared', 'info');
-      }
+      setConfirmModalState({
+        isOpen: true,
+        title: 'Clear Whiteboard?',
+        message: 'This will erase all strokes, sticky notes, text, shapes, and stickers from your canvas. This action cannot be undone.',
+        confirmText: 'Clear Board',
+        cancelText: 'Cancel',
+        variant: 'danger',
+        onConfirm: () => {
+          emitClearBoardDirect();
+          setMyCreatedElementIds([]);
+          addNotification('Whiteboard cleared', 'info');
+          setConfirmModalState((prev) => ({ ...prev, isOpen: false }));
+        },
+      });
     }
   }, [canWrite, users, elements, emitVoteClearStart, emitClearBoardDirect, addNotification]);
 
@@ -377,7 +436,12 @@ export default function App() {
   }
 
   return (
-    <div id="collaborative-whiteboard-app" className="relative w-screen h-screen overflow-hidden font-sans select-none">
+    <div
+      id="collaborative-whiteboard-app"
+      className={`relative w-screen h-screen overflow-hidden font-sans select-none ${
+        theme === 'dark' ? 'dark' : ''
+      } bg-white dark:bg-[#0b0f19] text-slate-900 dark:text-slate-100 transition-colors`}
+    >
       {/* Top Header */}
       <Header
         roomId={roomId}
@@ -399,6 +463,9 @@ export default function App() {
         onUpdateUserName={updateUserName}
         onUpdateUserColor={updateUserColor}
         onSwitchRoom={switchRoom}
+        onLogout={handleLogout}
+        theme={theme}
+        onToggleTheme={toggleTheme}
         isVoiceConnected={isVoiceConnected}
         isMuted={isMuted}
         isDeafened={isDeafened}
@@ -428,6 +495,7 @@ export default function App() {
         currentUserId={currentUser.id}
         currentUserName={currentUser.name}
         canWrite={canWrite}
+        theme={theme}
         onRestrictedAttempt={() =>
           addNotification('Drawing is restricted by room admin', 'warning')
         }
@@ -447,6 +515,9 @@ export default function App() {
         onSelectTool={setCurrentTool}
         selectedShapeType={selectedShapeType}
         selectedIconName={selectedIconName}
+        onRegisterSelectAll={(fn) => {
+          selectAllHandlerRef.current = fn;
+        }}
       />
 
       {/* Bottom Floating Toolbar */}
@@ -466,6 +537,7 @@ export default function App() {
         onUndo={handleUndo}
         onRequestClear={handleRequestClear}
         onExport={handleExport}
+        onSelectAll={() => selectAllHandlerRef.current?.()}
         isMultiplayer={isMultiplayer}
       />
 
@@ -507,6 +579,7 @@ export default function App() {
             switchRoom(id);
             setShowCreateRoomModal(false);
           }}
+          onDeleteRoom={handleDeleteRoom}
           onCreateRoom={createRoom}
           onFetchRooms={fetchRooms}
         />
@@ -539,17 +612,13 @@ export default function App() {
           setHasChosenSessionMode(true);
           switchRoom(code);
         }}
-        onSelectSavedRoom={(id) => {
-          setHasChosenSessionMode(true);
-          switchRoom(id);
-        }}
       />
 
       {/* Admin Panel & User Permissions Modal */}
       <AdminPanelModal
         isOpen={showAdminModal}
         onClose={() => setShowAdminModal(false)}
-        roomId={roomId}
+        roomId={roomId ?? undefined}
         roomName={roomName}
         isHost={isHost}
         isLocked={isLocked}
@@ -558,6 +627,19 @@ export default function App() {
         onSetPermission={setParticipantPermission}
         onKickUser={kickParticipant}
         onToggleLock={toggleLockBoard}
+        onDeleteRoom={handleDeleteRoom}
+      />
+
+      {/* Custom Confirmation Modal */}
+      <ConfirmModal
+        isOpen={confirmModalState.isOpen}
+        title={confirmModalState.title}
+        message={confirmModalState.message}
+        confirmText={confirmModalState.confirmText}
+        cancelText={confirmModalState.cancelText}
+        variant={confirmModalState.variant}
+        onConfirm={confirmModalState.onConfirm}
+        onCancel={() => setConfirmModalState((prev) => ({ ...prev, isOpen: false }))}
       />
 
       {/* Kicked from Room Dialog */}
@@ -575,12 +657,11 @@ export default function App() {
               <button
                 onClick={() => {
                   resetKickedState();
-                  const newCode = 'room-' + Math.random().toString(36).substring(2, 7);
-                  switchRoom(newCode);
+                  switchRoom(null);
                 }}
                 className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-xl shadow-sm transition-colors cursor-pointer"
               >
-                Join New Random Room
+                Return to Solo Canvas
               </button>
               <button
                 onClick={() => {
@@ -589,7 +670,7 @@ export default function App() {
                 }}
                 className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-semibold rounded-xl transition-colors cursor-pointer"
               >
-                Browse Rooms
+                Browse / Create Room
               </button>
             </div>
           </div>

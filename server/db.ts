@@ -37,6 +37,13 @@ export interface RoomElementsDoc {
   updatedAt: number;
 }
 
+export interface IndividualElementDoc {
+  roomId: string;
+  elementId: string;
+  data: any;
+  updatedAt: number;
+}
+
 let client: MongoClient | null = null;
 let db: Db | null = null;
 
@@ -62,16 +69,21 @@ export async function connectDb(): Promise<Db> {
   const tokens = db.collection<SessionTokenDoc>('tokens');
   const rooms = db.collection<SessionRoomDoc>('rooms');
   const elements = db.collection<RoomElementsDoc>('elements');
+  const individualElements = db.collection<IndividualElementDoc>('room_elements');
 
   await Promise.allSettled([
     users.createIndex({ id: 1 }, { unique: true }),
     users.createIndex({ username: 1 }),
     users.createIndex({ email: 1 }),
+    users.createIndex({ createdAt: 1 }, { expireAfterSeconds: 7 * 24 * 60 * 60, partialFilterExpression: { isGuest: true } }),
     tokens.createIndex({ token: 1 }, { unique: true }),
     tokens.createIndex({ userId: 1 }),
+    tokens.createIndex({ createdAt: 1 }, { expireAfterSeconds: 30 * 24 * 60 * 60 }),
     rooms.createIndex({ id: 1 }, { unique: true }),
     rooms.createIndex({ creatorId: 1 }),
     elements.createIndex({ roomId: 1 }, { unique: true }),
+    individualElements.createIndex({ roomId: 1, elementId: 1 }, { unique: true }),
+    individualElements.createIndex({ roomId: 1 }),
   ]);
 
   return db;
@@ -98,6 +110,10 @@ export function getRoomsCollection(): Collection<SessionRoomDoc> {
 
 export function getElementsCollection(): Collection<RoomElementsDoc> {
   return getDb().collection<RoomElementsDoc>('elements');
+}
+
+export function getIndividualElementsCollection(): Collection<IndividualElementDoc> {
+  return getDb().collection<IndividualElementDoc>('room_elements');
 }
 
 export async function disconnectDb(): Promise<void> {

@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 
 interface AudioVisualizerBarProps {
+  roomId?: string | null;
   isVoiceConnected: boolean;
   isMuted: boolean;
   isDeafened: boolean;
@@ -177,6 +178,11 @@ export const AudioVisualizerBar: React.FC<AudioVisualizerBarProps> = ({
                 ? 'Simulated Voice'
                 : 'Voice Live'
               : 'Voice Chat'}
+            {activeSpeakers.length > 0 && (
+              <span className="ml-1 text-[10px] text-blue-600 font-semibold lowercase">
+                ({activeSpeakers.length})
+              </span>
+            )}
           </span>
         </div>
 
@@ -239,6 +245,40 @@ export const AudioVisualizerBar: React.FC<AudioVisualizerBarProps> = ({
               >
                 {isDeafened ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5" />}
               </button>
+
+              {/* Volume Slider Popover */}
+              <div className="relative flex items-center">
+                <button
+                  id="toggle-volume-slider-btn"
+                  onClick={() => setShowVolumeSlider((prev) => !prev)}
+                  title={`Voice Volume (${Math.round(volume * 100)}%)`}
+                  className={`p-1.5 rounded-md transition-colors cursor-pointer ${
+                    showVolumeSlider
+                      ? 'bg-blue-100 text-blue-700'
+                      : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+                  }`}
+                >
+                  <Headphones className="w-3.5 h-3.5" />
+                </button>
+
+                {showVolumeSlider && (
+                  <div className="absolute top-full right-0 mt-2 p-2.5 bg-white rounded-lg shadow-xl border border-slate-200 z-50 flex items-center gap-2 min-w-[150px]">
+                    <Volume2 className="w-3.5 h-3.5 text-slate-500" />
+                    <input
+                      type="range"
+                      min="0"
+                      max="1"
+                      step="0.05"
+                      value={volume}
+                      onChange={(e) => onSetVolume?.(parseFloat(e.target.value))}
+                      className="w-20 h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
+                    />
+                    <span className="text-[11px] font-mono text-slate-600 min-w-[28px]">
+                      {Math.round(volume * 100)}%
+                    </span>
+                  </div>
+                )}
+              </div>
 
               {/* Disconnect Voice */}
               <button

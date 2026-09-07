@@ -1,16 +1,16 @@
 import React, { useState } from 'react';
-import { Palette, Users, ArrowRight, Sparkles, Hash, Layers, Clock, Lock } from 'lucide-react';
-import { SessionRoom, AuthUser } from '../types';
+import { createPortal } from 'react-dom';
+import { AuthUser, SessionRoom } from '../types';
+import { Users, Palette, Sparkles, ArrowRight, Hash, LogIn } from 'lucide-react';
 
 interface SessionLauncherModalProps {
   isOpen: boolean;
   onClose: () => void;
   authUser: AuthUser | null;
-  myRooms: SessionRoom[];
+  myRooms?: SessionRoom[];
   onStartSolo: () => void;
   onOpenCreateRoom: () => void;
   onJoinRoomByCode: (code: string) => void;
-  onSelectSavedRoom: (roomId: string) => void;
 }
 
 export const SessionLauncherModal: React.FC<SessionLauncherModalProps> = ({
@@ -20,7 +20,6 @@ export const SessionLauncherModal: React.FC<SessionLauncherModalProps> = ({
   onStartSolo,
   onOpenCreateRoom,
   onJoinRoomByCode,
-  onSelectSavedRoom,
 }) => {
   const [joinCodeInput, setJoinCodeInput] = useState('');
   const [joinError, setJoinError] = useState<string | null>(null);
@@ -38,14 +37,14 @@ export const SessionLauncherModal: React.FC<SessionLauncherModalProps> = ({
     onJoinRoomByCode(clean);
   };
 
-  return (
+  return createPortal(
     <div
       id="session-launcher-overlay"
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 dark:bg-black/80 backdrop-blur-sm animate-in fade-in duration-200"
     >
       <div
         id="session-launcher-dialog"
-        className="w-full max-w-2xl bg-white rounded-3xl border border-slate-200 shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200"
+        className="w-full max-w-2xl bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 text-slate-900 dark:text-slate-100"
       >
         {/* Header Banner */}
         <div className="p-6 sm:p-8 bg-gradient-to-br from-slate-900 via-slate-800 to-blue-950 text-white relative overflow-hidden">
@@ -72,21 +71,21 @@ export const SessionLauncherModal: React.FC<SessionLauncherModalProps> = ({
             {/* Solo Mode Card */}
             <div
               onClick={onStartSolo}
-              className="group p-5 rounded-2xl border-2 border-slate-200/90 hover:border-blue-500 hover:shadow-lg hover:shadow-blue-500/5 bg-white transition-all cursor-pointer flex flex-col justify-between"
+              className="group p-5 rounded-2xl border-2 border-slate-200/90 dark:border-slate-800 hover:border-blue-500 dark:hover:border-blue-500 hover:shadow-lg hover:shadow-blue-500/5 bg-white dark:bg-slate-800/60 transition-all cursor-pointer flex flex-col justify-between"
             >
               <div>
-                <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center mb-3 group-hover:scale-105 transition-transform">
+                <div className="w-10 h-10 rounded-xl bg-blue-50 dark:bg-blue-950 text-blue-600 dark:text-blue-400 flex items-center justify-center mb-3 group-hover:scale-105 transition-transform">
                   <Palette className="w-5 h-5" />
                 </div>
-                <h3 className="text-sm font-bold text-slate-900 mb-1 flex items-center gap-1.5">
+                <h3 className="text-sm font-bold text-slate-900 dark:text-white mb-1 flex items-center gap-1.5">
                   Draw Solo (Personal)
                   <Sparkles className="w-3.5 h-3.5 text-amber-500 opacity-0 group-hover:opacity-100 transition-opacity" />
                 </h3>
-                <p className="text-xs text-slate-500 leading-relaxed">
+                <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
                   Start privately on a clean canvas. You can convert to a live multiplayer room at any time with 1 click.
                 </p>
               </div>
-              <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-xs font-semibold text-blue-600 group-hover:text-blue-700">
+              <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-700/80 flex items-center justify-between text-xs font-semibold text-blue-600 dark:text-blue-400 group-hover:text-blue-700">
                 <span>Start Alone</span>
                 <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
               </div>
@@ -95,88 +94,79 @@ export const SessionLauncherModal: React.FC<SessionLauncherModalProps> = ({
             {/* Collaborative Room Card */}
             <div
               onClick={onOpenCreateRoom}
-              className="group p-5 rounded-2xl border-2 border-slate-200/90 hover:border-indigo-500 hover:shadow-lg hover:shadow-indigo-500/5 bg-white transition-all cursor-pointer flex flex-col justify-between"
+              className="group p-5 rounded-2xl border-2 border-slate-200/90 dark:border-slate-800 hover:border-indigo-500 dark:hover:border-indigo-500 hover:shadow-lg hover:shadow-indigo-500/5 bg-white dark:bg-slate-800/60 transition-all cursor-pointer flex flex-col justify-between"
             >
               <div>
-                <div className="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center mb-3 group-hover:scale-105 transition-transform">
+                <div className="w-10 h-10 rounded-xl bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 flex items-center justify-center mb-3 group-hover:scale-105 transition-transform">
                   <Users className="w-5 h-5" />
                 </div>
-                <h3 className="text-sm font-bold text-slate-900 mb-1 flex items-center gap-1.5">
+                <h3 className="text-sm font-bold text-slate-900 dark:text-white mb-1 flex items-center gap-1.5">
                   Create Room
-                  <span className="text-[10px] font-medium px-1.5 py-0.5 bg-indigo-50 text-indigo-700 rounded-md">
+                  <span className="text-[10px] font-medium px-1.5 py-0.5 bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 rounded-md">
                     Multiplayer
                   </span>
                 </h3>
-                <p className="text-xs text-slate-500 leading-relaxed">
+                <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
                   Start an online session with real-time multi-user drawing, live cursors, and voice chat.
                 </p>
               </div>
-              <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-xs font-semibold text-indigo-600 group-hover:text-indigo-700">
+              <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-700/80 flex items-center justify-between text-xs font-semibold text-indigo-600 dark:text-indigo-400 group-hover:text-indigo-700">
                 <span>Create & Invite</span>
                 <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
               </div>
             </div>
           </div>
 
-          {/* Join with Code Inline Bar */}
-          <form onSubmit={handleJoinSubmit} className="pt-2">
-            <label className="block text-xs font-medium text-slate-700 mb-1.5 flex items-center gap-1.5">
-              <Hash className="w-3.5 h-3.5 text-slate-400" />
-              Have an invitation code?
-            </label>
-            <div className="flex gap-2">
-              <input
-                type="text"
-                value={joinCodeInput}
-                onChange={(e) => {
-                  setJoinCodeInput(e.target.value.toUpperCase());
-                  setJoinError(null);
-                }}
-                placeholder="e.g. AFT-9AU or TEAM-ROOM"
-                className="flex-1 px-3.5 py-2 text-xs uppercase tracking-wider border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
+          {/* Or Join Existing by Code */}
+          <div className="pt-2 border-t border-slate-100 dark:border-slate-800">
+            <form onSubmit={handleJoinSubmit} className="flex flex-col sm:flex-row items-center gap-3">
+              <div className="relative flex-1 w-full">
+                <Hash className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={joinCodeInput}
+                  onChange={(e) => {
+                    setJoinCodeInput(e.target.value);
+                    setJoinError(null);
+                  }}
+                  placeholder="Or enter room code to join..."
+                  className="w-full pl-9 pr-4 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-mono text-slate-900 dark:text-white uppercase placeholder:normal-case placeholder:font-sans focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
               <button
                 type="submit"
-                className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold rounded-xl transition-colors cursor-pointer"
+                className="w-full sm:w-auto px-5 py-2.5 bg-slate-900 dark:bg-blue-600 hover:bg-slate-800 dark:hover:bg-blue-700 text-white font-medium text-xs rounded-xl shadow-xs transition-colors flex items-center justify-center gap-1.5 cursor-pointer shrink-0"
               >
-                Join Board
+                <LogIn className="w-3.5 h-3.5" />
+                <span>Join Room</span>
               </button>
-            </div>
-            {joinError && <p className="text-[11px] text-rose-600 mt-1">{joinError}</p>}
-          </form>
+            </form>
+            {joinError && <p className="text-[11px] text-rose-500 mt-1.5">{joinError}</p>}
+          </div>
 
-          {/* My Saved Rooms (MongoDB) */}
-          {myRooms && myRooms.length > 0 && (
-            <div className="pt-2 border-t border-slate-100">
-              <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-700 mb-2.5">
-                <Layers className="w-3.5 h-3.5 text-slate-500" />
-                <span>Your Saved Rooms in MongoDB ({myRooms.length})</span>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-36 overflow-y-auto pr-1">
+          {/* Quick-list of existing rooms */}
+          {myRooms.length > 0 && (
+            <div className="pt-2">
+              <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider block mb-2">
+                Recently Created Rooms
+              </span>
+              <div className="flex flex-wrap gap-2">
                 {myRooms.slice(0, 4).map((r) => (
-                  <div
+                  <button
                     key={r.id}
-                    onClick={() => onSelectSavedRoom(r.id)}
-                    className="p-2.5 bg-slate-50 hover:bg-blue-50 border border-slate-200/80 rounded-xl cursor-pointer transition-colors flex items-center justify-between group"
+                    onClick={() => onJoinRoomByCode(r.id)}
+                    className="px-3 py-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-colors cursor-pointer"
                   >
-                    <div className="min-w-0 flex-1 pr-2">
-                      <p className="text-xs font-semibold text-slate-900 truncate group-hover:text-blue-600">
-                        {r.name}
-                      </p>
-                      <p className="text-[10px] text-slate-400 flex items-center gap-1">
-                        <Clock className="w-2.5 h-2.5" />
-                        <span>Code: {r.id}</span>
-                        {r.isLocked && <Lock className="w-2.5 h-2.5 text-amber-500 ml-1" />}
-                      </p>
-                    </div>
-                    <ArrowRight className="w-3 h-3 text-slate-400 group-hover:text-blue-600 shrink-0" />
-                  </div>
+                    <span>{r.name}</span>
+                    <span className="font-mono text-[10px] text-slate-400">({r.id})</span>
+                  </button>
                 ))}
               </div>
             </div>
           )}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };

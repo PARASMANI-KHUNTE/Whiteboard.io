@@ -4,6 +4,7 @@ import {
   getTokensCollection,
   getRoomsCollection,
   getElementsCollection,
+  getIndividualElementsCollection,
   StoredUserDoc,
   SessionRoomDoc,
 } from './db';
@@ -390,6 +391,17 @@ export async function loadRoomElements(roomId: string): Promise<Record<string, a
   if (!cleanRoomId) return {};
 
   try {
+    const individualCol = getIndividualElementsCollection();
+    const docs = await individualCol.find({ roomId: cleanRoomId }).toArray();
+    if (docs.length > 0) {
+      const result: Record<string, any> = {};
+      for (const d of docs) {
+        result[d.elementId] = d.data;
+      }
+      return result;
+    }
+
+    // Backward-compatibility: check legacy single document
     const elementsCol = getElementsCollection();
     const doc = await elementsCol.findOne({ roomId: cleanRoomId });
     if (doc && doc.elements) {
@@ -403,27 +415,6 @@ export async function loadRoomElements(roomId: string): Promise<Record<string, a
 
 const pendingElementSaves = new Map<string, NodeJS.Timeout>();
 
-export function saveRoomElementsDebounced(roomId: string, elements: Record<string, any>, delayMs = 1000) {
-  const existingTimer = pendingElementSaves.get(roomId);
-  if (existingTimer) {
-    clearTimeout(existingTimer);
-  }
-  const timer = setTimeout(async () => {
-    pendingElementSaves.delete(roomId);
-    try {
-      const elementsCol = getElementsCollection();
-      await elementsCol.updateOne(
-        { roomId },
-        { $set: { roomId, elements, updatedAt: Date.now() } },
-        { upsert: true }
-      );
-    } catch (err) {
-      console.warn(`Could not persist elements to MongoDB for room ${roomId}:`, err);
-    }
-  }, delayMs);
-  pendingElementSaves.set(roomId, timer);
-}
-
 export async function saveRoomElements(roomId: string, elements: Record<string, any>) {
   try {
     const existingTimer = pendingElementSaves.get(roomId);
@@ -431,13 +422,84 @@ export async function saveRoomElements(roomId: string, elements: Record<string, 
       clearTimeout(existingTimer);
       pendingElementSaves.delete(roomId);
     }
-    const elementsCol = getElementsCollection();
-    await elementsCol.updateOne(
-      { roomId },
-      { $set: { roomId, elements, updatedAt: Date.now() } },
-      { upsert: true }
-    );
+    const cleanRoomId = sanitizeString(roomId);
+    if (!cleanRoomId) return;
+
+    const individualCol = getIndividualElementsCollection();
+    const entries = Object.entries(elements);
+
+    if (entries.length === 0) {
+      await individualCol.deleteMany({ roomId: cleanRoomId });
+      return;
+    }
+
+    const bulkOps = entries.map(([elementId, data]) => ({
+      updateOne: {
+        filter: { roomId: cleanRoomId, elementId },
+        update: { $set: { roomId: cleanRoomId, elementId, data, updatedAt: Date.now() } },
+        upsert: true,
+      },
+    }));
+
+    const activeIds = entries.map(([id]) => id);
+    await Promise.all([
+      individualCol.bulkWrite(bulkOps, { ordered: false }),
+      individualCol.deleteMany({ roomId: cleanRoomId, elementId: { $nin: activeIds } }),
+    ]);
   } catch (err) {
     console.warn(`Could not persist elements to MongoDB for room ${roomId}:`, err);
   }
 }
+
+export function saveRoomElementsDebounced(roomId: string, elements: Record<string, any>, delayMs = 1000) {
+  const existingTimer = pendingElementSaves.get(roomId);
+  if (existingTimer) {
+    clearTimeout(existingTimer);
+  }
+  const timer = setTimeout(async () => {
+    pendingElementSaves.delete(roomId);
+    await saveRoomElements(roomId, elements);
+  }, delayMs);
+  pendingElementSaves.set(roomId, timer);
+}
+
+export async function deleteRoom(roomId: string, requestingUserId?: string): Promise<boolean> {
+  const cleanRoomId = sanitizeString(roomId);
+  if (!cleanRoomId) return false;
+
+  const rooms = getRoomsCollection();
+  const meta = await rooms.findOne({ id: cleanRoomId });
+
+  // If requestingUserId is provided and creatorId exists, ensure authorization
+  if (requestingUserId && meta?.creatorId) {
+    const cleanUserId = sanitizeString(requestingUserId);
+    if (meta.creatorId !== cleanUserId) {
+      return false;
+    }
+  }
+
+  // Cancel any pending debounced save timer
+  const existingTimer = pendingElementSaves.get(cleanRoomId);
+  if (existingTimer) {
+    clearTimeout(existingTimer);
+    pendingElementSaves.delete(cleanRoomId);
+  }
+
+  // Delete from rooms collection
+  await rooms.deleteOne({ id: cleanRoomId });
+
+  // Delete from room_elements collection
+  const individualCol = getIndividualElementsCollection();
+  await individualCol.deleteMany({ roomId: cleanRoomId });
+
+  // Delete from legacy elements collection if exists
+  const elementsCol = getElementsCollection();
+  await elementsCol.deleteOne({ roomId: cleanRoomId });
+
+  // Prune roomId from users' createdRooms array
+  const users = getUsersCollection();
+  await users.updateMany({}, { $pull: { createdRooms: cleanRoomId } });
+
+  return true;
+}
+

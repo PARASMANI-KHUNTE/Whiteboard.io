@@ -5,18 +5,41 @@ import { RemoteUser } from '../types';
 interface UseVoiceChatProps {
   socket: Socket | null;
   currentUser: { id: string; name: string; color: string };
-  roomId: string;
+  roomId: string | null;
   users: Record<string, RemoteUser>;
   onNotification?: (text: string, type?: 'info' | 'success' | 'warning') => void;
 }
 
-const ICE_SERVERS: RTCConfiguration = {
-  iceServers: [
-    { urls: 'stun:stun.l.google.com:19302' },
-    { urls: 'stun:stun1.l.google.com:19302' },
-    { urls: 'stun:stun2.l.google.com:19302' },
-  ],
-};
+const DEFAULT_STUN = [
+  { urls: 'stun:stun.l.google.com:19302' },
+  { urls: 'stun:stun1.l.google.com:19302' },
+  { urls: 'stun:stun2.l.google.com:19302' },
+];
+
+function buildIceServerConfig(): RTCConfiguration {
+  const iceServers: RTCIceServer[] = [...DEFAULT_STUN];
+
+  const customStuns = (import.meta.env.VITE_STUN_URLS as string | undefined)
+    ?.split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (customStuns && customStuns.length > 0) {
+    iceServers.push(...customStuns.map((urls) => ({ urls })));
+  }
+
+  const turnUrl = import.meta.env.VITE_TURN_URL as string | undefined;
+  if (turnUrl) {
+    iceServers.push({
+      urls: turnUrl.split(',').map((s) => s.trim()).filter(Boolean),
+      username: import.meta.env.VITE_TURN_USERNAME,
+      credential: import.meta.env.VITE_TURN_PASSWORD,
+    });
+  }
+
+  return { iceServers };
+}
+
+const ICE_SERVERS: RTCConfiguration = buildIceServerConfig();
 
 export function useVoiceChat({
   socket,
@@ -51,11 +74,9 @@ export function useVoiceChat({
   const simGainRef = useRef<GainNode | null>(null);
   const simIntervalRef = useRef<number | null>(null);
 
-  // WebRTC & Audio Relay refs
+  // WebRTC Audio refs
   const peerConnectionsRef = useRef<Record<string, RTCPeerConnection>>({});
   const remoteAudioElementsRef = useRef<Record<string, HTMLAudioElement>>({});
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const remoteAudioContextRef = useRef<AudioContext | null>(null);
 
   // Helper to ensure an active AudioContext
   const getOrCreateAudioContext = useCallback(() => {
@@ -100,13 +121,6 @@ export function useVoiceChat({
       simOscillatorRef.current = null;
     }
 
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-      try {
-        mediaRecorderRef.current.stop();
-      } catch (_) {}
-      mediaRecorderRef.current = null;
-    }
-
     // Stop and close all peer connections
     Object.keys(peerConnectionsRef.current).forEach((userId) => {
       try {
@@ -144,13 +158,6 @@ export function useVoiceChat({
         audioCtxRef.current.close();
       } catch (_) {}
       audioCtxRef.current = null;
-    }
-
-    if (remoteAudioContextRef.current && remoteAudioContextRef.current.state !== 'closed') {
-      try {
-        remoteAudioContextRef.current.close();
-      } catch (_) {}
-      remoteAudioContextRef.current = null;
     }
 
     setIsVoiceConnected(false);
@@ -254,50 +261,13 @@ export function useVoiceChat({
     });
   }, [socket, currentUser.id, users, createPeerConnection]);
 
-  // Setup MediaRecorder fallback relay
-  const setupMediaRecorderRelay = useCallback(
-    (stream: MediaStream) => {
-      if (typeof MediaRecorder === 'undefined') return;
-
-      try {
-        let mimeType = 'audio/webm;codecs=opus';
-        if (!MediaRecorder.isTypeSupported(mimeType)) {
-          mimeType = 'audio/ogg;codecs=opus';
-          if (!MediaRecorder.isTypeSupported(mimeType)) {
-            mimeType = '';
-          }
-        }
-
-        const options = mimeType ? { mimeType } : undefined;
-        const recorder = new MediaRecorder(stream, options);
-        mediaRecorderRef.current = recorder;
-
-        recorder.ondataavailable = async (e) => {
-          if (e.data && e.data.size > 0 && socket && !isMuted) {
-            const reader = new FileReader();
-            reader.onloadend = () => {
-              const base64 = (reader.result as string)?.split(',')[1];
-              if (base64) {
-                socket.emit('voice-audio-chunk', {
-                  chunk: base64,
-                  mimeType: recorder.mimeType || 'audio/webm',
-                });
-              }
-            };
-            reader.readAsDataURL(e.data);
-          }
-        };
-
-        recorder.start(250); // 250ms audio chunk slices
-      } catch (err) {
-        console.warn('MediaRecorder fallback setup failed:', err);
-      }
-    },
-    [socket, isMuted]
-  );
-
   // Start real microphone voice chat
   const startVoiceChat = useCallback(async () => {
+    if (!roomId) {
+      if (onNotification) onNotification('Please join or create a multiplayer room to use voice chat.', 'warning');
+      return;
+    }
+
     cleanupAll();
     setError(null);
     setIsIframeRestricted(false);
@@ -345,9 +315,6 @@ export function useVoiceChat({
 
       // Initiate WebRTC mesh connections
       initiatePeerConnections();
-
-      // Setup WebSocket fallback recorder
-      setupMediaRecorderRelay(stream);
 
       // Start dynamic audio analysis loop
       const updateAnalysis = () => {
@@ -413,9 +380,9 @@ export function useVoiceChat({
     socket,
     isDeafened,
     initiatePeerConnections,
-    setupMediaRecorderRelay,
     isMuted,
     onNotification,
+    roomId,
   ]);
 
   // Leave Voice Chat
@@ -607,65 +574,16 @@ export function useVoiceChat({
       }
     };
 
-    // Fallback Audio Chunk Relay from other users
-    const handleVoiceAudioChunk = async (data: {
-      userId: string;
-      chunk: string;
-      mimeType: string;
-      timestamp: number;
-    }) => {
-      if (isDeafened) return;
-      // If WebRTC is already streaming audio for this peer, skip fallback chunk to prevent echo
-      if (peerConnectionsRef.current[data.userId]?.connectionState === 'connected') {
-        return;
-      }
-
-      try {
-        if (!remoteAudioContextRef.current || remoteAudioContextRef.current.state === 'closed') {
-          const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
-          remoteAudioContextRef.current = new AudioCtx();
-        }
-        const ctx = remoteAudioContextRef.current;
-        if (ctx.state === 'suspended') {
-          await ctx.resume();
-        }
-
-        const binary = atob(data.chunk);
-        const len = binary.length;
-        const bytes = new Uint8Array(len);
-        for (let i = 0; i < len; i++) {
-          bytes[i] = binary.charCodeAt(i);
-        }
-
-        // Decode audio chunk buffer
-        ctx.decodeAudioData(
-          bytes.buffer.slice(0),
-          (audioBuffer) => {
-            const bufferSource = ctx.createBufferSource();
-            bufferSource.buffer = audioBuffer;
-            const gain = ctx.createGain();
-            gain.gain.value = volume;
-            bufferSource.connect(gain);
-            gain.connect(ctx.destination);
-            bufferSource.start();
-          },
-          () => {}
-        );
-      } catch (_) {}
-    };
-
     socket.on('voice-offer', handleVoiceOffer);
     socket.on('voice-answer', handleVoiceAnswer);
     socket.on('voice-ice-candidate', handleVoiceIceCandidate);
-    socket.on('voice-audio-chunk', handleVoiceAudioChunk);
 
     return () => {
       socket.off('voice-offer', handleVoiceOffer);
       socket.off('voice-answer', handleVoiceAnswer);
       socket.off('voice-ice-candidate', handleVoiceIceCandidate);
-      socket.off('voice-audio-chunk', handleVoiceAudioChunk);
     };
-  }, [socket, createPeerConnection, isDeafened, volume]);
+  }, [socket, createPeerConnection]);
 
   // Clean up when unmounting
   useEffect(() => {

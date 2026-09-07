@@ -104,7 +104,6 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
   });
 
   const [isHost, setIsHost] = useState(false);
-  const [role, setRole] = useState<'admin' | 'editor' | 'viewer'>('editor');
   const [canWrite, setCanWrite] = useState<boolean>(true);
   const [roomName, setRoomName] = useState<string>('');
   const [creatorId, setCreatorId] = useState<string>('');
@@ -123,6 +122,8 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
   const [notifications, setNotifications] = useState<{ id: string; text: string; type: 'info' | 'success' | 'warning' }[]>([]);
 
   const socketRef = useRef<Socket | null>(null);
+  const isSoloMigrationRef = useRef<boolean>(false);
+  const connectErrorNotifiedRef = useRef<boolean>(false);
   const currentUserRef = useRef<RemoteUser>(currentUser);
   currentUserRef.current = currentUser;
   const authTokenRef = useRef<string | null | undefined>(authToken);
@@ -157,7 +158,6 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
     if (!roomId) {
       setIsConnected(false);
       setIsHost(true);
-      setRole('admin');
       setCanWrite(true);
       setIsLocked(false);
       setIsKicked(false);
@@ -184,6 +184,7 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
     socketRef.current = socket;
 
     socket.on('connect', () => {
+      connectErrorNotifiedRef.current = false;
       setIsConnected(true);
       socket.emit('join-room', {
         roomId,
@@ -194,6 +195,10 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
 
     socket.on('connect_error', (err) => {
       console.warn('Realtime connection issue (reconnecting):', err.message);
+      if (!connectErrorNotifiedRef.current) {
+        connectErrorNotifiedRef.current = true;
+        addNotification('Realtime connection lost — reconnecting...', 'warning');
+      }
     });
 
     socket.on('reconnect', () => {
@@ -225,25 +230,26 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
         isHost: boolean;
       }) => {
         const serverElements = data.elements || {};
-        const localElements = elementsRef.current || {};
-        // Merge so any drawings created in solo mode are kept!
-        const merged = { ...serverElements, ...localElements };
-        setElements(merged);
+        if (isSoloMigrationRef.current) {
+          const localElements = elementsRef.current || {};
+          const merged = { ...serverElements, ...localElements };
+          setElements(merged);
+          isSoloMigrationRef.current = false;
+          const localItems = Object.values(localElements);
+          if (localItems.length > 0) {
+            socket.emit('elements-batch-create', localItems);
+          }
+        } else {
+          setElements(serverElements);
+        }
         setUsers(data.users || {});
         setVoteToClear(data.voteToClear);
         setIsHost(data.isHost);
-        setRole(data.yourRole);
         setCanWrite(data.canWrite);
         if (data.roomName) setRoomName(data.roomName);
         if (data.creatorId) setCreatorId(data.creatorId);
         if (data.creatorName) setCreatorName(data.creatorName);
         if (typeof data.isLocked === 'boolean') setIsLocked(data.isLocked);
-
-        // If we brought local elements from solo mode, batch-sync them to MongoDB!
-        const localItems = Object.values(localElements);
-        if (localItems.length > 0) {
-          socket.emit('elements-batch-create', localItems);
-        }
       }
     );
 
@@ -267,7 +273,6 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
     // Admin & Permissions Events
     socket.on('permission-updated', (data: { canWrite: boolean; role: 'editor' | 'viewer'; message?: string }) => {
       setCanWrite(data.canWrite);
-      setRole(data.role);
       addNotification(
         data.message || (data.canWrite ? 'Drawing permission restored by host.' : 'Drawing permission revoked by host.'),
         data.canWrite ? 'success' : 'warning'
@@ -298,7 +303,6 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
       setCreatorName(data.newHostName);
       if (currentUserRef.current.id === data.newHostId) {
         setIsHost(true);
-        setRole('admin');
         setCanWrite(true);
         addNotification('You are now the host of this room.', 'success');
       } else {
@@ -323,6 +327,13 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
       socket.disconnect();
     });
 
+    socket.on('room-deleted', (data: { roomId: string; message?: string }) => {
+      setIsKicked(true);
+      setKickedReason(data.message || 'This room has been permanently deleted by the host.');
+      addNotification(data.message || 'Room was deleted by the host.', 'warning');
+      socket.disconnect();
+    });
+
     socket.on('room-lock-changed', (data: { isLocked: boolean; users?: Record<string, RemoteUser> }) => {
       setIsLocked(data.isLocked);
       if (data.users) {
@@ -330,7 +341,6 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
       }
       if (!isHost) {
         setCanWrite(!data.isLocked);
-        setRole(data.isLocked ? 'viewer' : 'editor');
         addNotification(
           data.isLocked ? 'Board was locked by host (View-Only).' : 'Board was unlocked by host.',
           'info'
@@ -606,6 +616,11 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
   }, [currentUser, roomId]);
 
   const switchRoom = useCallback((newRoomId: string | null) => {
+    isSoloMigrationRef.current = false;
+    setElements({});
+    elementsRef.current = {};
+    setLiveStrokes({});
+    setUsers({});
     if (!newRoomId) {
       setRoomId(null);
       setRoomIdInUrl(null);
@@ -618,41 +633,12 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
   }, [roomId]);
 
   const convertToMultiplayerRoom = useCallback((customCode?: string): string => {
+    isSoloMigrationRef.current = true;
     const code = customCode ? customCode.trim().toUpperCase().replace(/[^A-Z0-9_-]/g, '-') : generateRandomRoomCode();
     setRoomId(code);
     setRoomIdInUrl(code);
     return code;
   }, []);
-
-  const emitVoiceStatus = useCallback((data: { isMuted?: boolean; isDeafened?: boolean; voiceConnected?: boolean }) => {
-    if (socketRef.current?.connected && roomId) {
-      socketRef.current.emit('voice-status-update', data);
-    }
-  }, [roomId]);
-
-  const emitVoiceOffer = useCallback((toUserId: string, offer: any) => {
-    if (socketRef.current?.connected && roomId) {
-      socketRef.current.emit('voice-offer', { toUserId, offer });
-    }
-  }, [roomId]);
-
-  const emitVoiceAnswer = useCallback((toUserId: string, answer: any) => {
-    if (socketRef.current?.connected && roomId) {
-      socketRef.current.emit('voice-answer', { toUserId, answer });
-    }
-  }, [roomId]);
-
-  const emitVoiceIceCandidate = useCallback((toUserId: string, candidate: any) => {
-    if (socketRef.current?.connected && roomId) {
-      socketRef.current.emit('voice-ice-candidate', { toUserId, candidate });
-    }
-  }, [roomId]);
-
-  const emitVoiceAudioChunk = useCallback((chunk: string, mimeType?: string) => {
-    if (socketRef.current?.connected && roomId) {
-      socketRef.current.emit('voice-audio-chunk', { chunk, mimeType, timestamp: Date.now() });
-    }
-  }, [roomId]);
 
   // Admin Privileges Emitters
   const setParticipantPermission = useCallback((targetUserId: string, targetCanWrite: boolean) => {
@@ -673,6 +659,12 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
     }
   }, [roomId]);
 
+  const deleteCurrentRoom = useCallback(() => {
+    if (socketRef.current?.connected && roomId) {
+      socketRef.current.emit('admin-delete-room', { roomId });
+    }
+  }, [roomId]);
+
   const resetKickedState = useCallback(() => {
     setIsKicked(false);
     setKickedReason(null);
@@ -687,7 +679,6 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
     creatorName,
     isLocked,
     canWrite,
-    role,
     isKicked,
     kickedReason,
     currentUser,
@@ -699,7 +690,6 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
     voteToClear,
     notifications,
     socket: socketRef.current,
-    socketRef,
     emitStrokeLiveStart,
     emitStrokeLivePoint,
     emitElementCreate,
@@ -708,11 +698,6 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
     emitElementsBatchDelete,
     emitCursorMove,
     emitAudioLevel,
-    emitVoiceStatus,
-    emitVoiceOffer,
-    emitVoiceAnswer,
-    emitVoiceIceCandidate,
-    emitVoiceAudioChunk,
     emitVoteClearStart,
     emitVoteClearCast,
     emitVoteClearCancel,
@@ -720,6 +705,7 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
     setParticipantPermission,
     kickParticipant,
     toggleLockBoard,
+    deleteCurrentRoom,
     resetKickedState,
     updateUserName,
     updateUserColor,

@@ -17,6 +17,7 @@ import {
   loadRoomElements,
   saveRoomElements,
   saveRoomElementsDebounced,
+  deleteRoom,
 } from "./auth";
 import { connectDb } from "./db";
 import { fileURLToPath } from "url";
@@ -24,9 +25,20 @@ import { fileURLToPath } from "url";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Load environment variables from server/.env
-dotenv.config({ path: path.resolve(__dirname, ".env") });
-dotenv.config();
+// Load environment variables cleanly
+const envPath = fs.existsSync(path.resolve(__dirname, ".env"))
+  ? path.resolve(__dirname, ".env")
+  : path.resolve(process.cwd(), ".env");
+dotenv.config({ path: envPath });
+
+function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
 
 interface CanvasElement {
   id: string;
@@ -76,7 +88,8 @@ interface RoomData {
   voteTimer?: NodeJS.Timeout | null;
 }
 
-const PORT = 3000;
+const PORT = Number(process.env.PORT) || 3000;
+const VOTE_CLEAR_DURATION_MS = Number(process.env.VOTE_CLEAR_DURATION_MS) || 15000;
 const rooms = new Map<string, RoomData>();
 
 async function getOrCreateRoom(roomId: string): Promise<RoomData> {
@@ -129,6 +142,17 @@ function resolveTrustedOrigin(rawOrigin?: string): string {
 
 // In-memory rate limiter to protect against credential stuffing / brute-force
 const authRateLimitMap = new Map<string, { count: number; resetTime: number }>();
+
+// Periodic pruning of expired rate-limit records
+setInterval(() => {
+  const now = Date.now();
+  for (const [ip, record] of authRateLimitMap.entries()) {
+    if (now > record.resetTime) {
+      authRateLimitMap.delete(ip);
+    }
+  }
+}, 10 * 60 * 1000);
+
 function authRateLimiter(maxRequests = 30, windowMs = 60000) {
   return (req: express.Request, res: express.Response, next: express.NextFunction) => {
     const ip = req.ip || req.socket.remoteAddress || "unknown_ip";
@@ -233,18 +257,22 @@ async function startServer() {
   });
 
   app.get("/api/auth/me", async (req, res) => {
-    const authHeader = req.headers.authorization;
-    const token = authHeader?.replace("Bearer ", "")?.trim();
-    if (!token) {
-      res.status(401).json({ success: false, error: "Not authenticated" });
-      return;
+    try {
+      const authHeader = req.headers.authorization;
+      const token = authHeader?.replace("Bearer ", "")?.trim();
+      if (!token) {
+        res.status(401).json({ success: false, error: "Not authenticated" });
+        return;
+      }
+      const user = await getUserByToken(token);
+      if (!user) {
+        res.status(401).json({ success: false, error: "Invalid session token" });
+        return;
+      }
+      res.json({ success: true, user });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message || "Authentication check failed" });
     }
-    const user = await getUserByToken(token);
-    if (!user) {
-      res.status(401).json({ success: false, error: "Invalid session token" });
-      return;
-    }
-    res.json({ success: true, user });
   });
 
   // Google OAuth URL generator
@@ -299,17 +327,18 @@ async function startServer() {
     }
 
     if (error || !code) {
-      const errMsg = (error as string) || "Authorization was cancelled or code was not returned";
+      const rawErrMsg = (error as string) || "Authorization was cancelled or code was not returned";
+      const safeErrMsg = escapeHtml(rawErrMsg);
       res.send(`
         <!DOCTYPE html>
         <html>
           <head><title>Authentication Failed</title></head>
           <body style="font-family:sans-serif;padding:30px;text-align:center;background:#fff1f2;color:#9f1239;">
             <h3>Google Sign-In Cancelled or Failed</h3>
-            <p>${errMsg}</p>
+            <p>${safeErrMsg}</p>
             <script>
               if (window.opener) {
-                window.opener.postMessage({ type: 'GOOGLE_OAUTH_ERROR', error: ${JSON.stringify(errMsg)} }, ${JSON.stringify(targetOrigin)});
+                window.opener.postMessage({ type: 'GOOGLE_OAUTH_ERROR', error: ${JSON.stringify(rawErrMsg)} }, ${JSON.stringify(targetOrigin)});
                 setTimeout(() => window.close(), 1500);
               } else {
                 setTimeout(() => { window.location.href = '/'; }, 2000);
@@ -399,17 +428,18 @@ async function startServer() {
         </html>
       `);
     } catch (err: any) {
-      const errMsg = err.message || "OAuth exchange error";
+      const rawErrMsg = err.message || "OAuth exchange error";
+      const safeErrMsg = escapeHtml(rawErrMsg);
       res.send(`
         <!DOCTYPE html>
         <html>
           <head><title>Authentication Failed</title></head>
           <body style="font-family:sans-serif;padding:30px;text-align:center;background:#fff1f2;color:#9f1239;">
             <h3>Google Sign-In Error</h3>
-            <p>${errMsg}</p>
+            <p>${safeErrMsg}</p>
             <script>
               if (window.opener) {
-                window.opener.postMessage({ type: 'GOOGLE_OAUTH_ERROR', error: ${JSON.stringify(errMsg)} }, ${JSON.stringify(targetOrigin)});
+                window.opener.postMessage({ type: 'GOOGLE_OAUTH_ERROR', error: ${JSON.stringify(rawErrMsg)} }, ${JSON.stringify(targetOrigin)});
                 setTimeout(() => window.close(), 2500);
               }
             </script>
@@ -457,44 +487,96 @@ async function startServer() {
   });
 
   app.get("/api/rooms/my-rooms", async (req, res) => {
-    const authHeader = req.headers.authorization;
-    const token = authHeader?.replace("Bearer ", "")?.trim();
-    const user = token ? await getUserByToken(token) : null;
-    if (!user) {
-      res.json({ success: true, rooms: [] });
-      return;
+    try {
+      const authHeader = req.headers.authorization;
+      const token = authHeader?.replace("Bearer ", "")?.trim();
+      const user = token ? await getUserByToken(token) : null;
+      if (!user) {
+        res.json({ success: true, rooms: [] });
+        return;
+      }
+      const userRooms = await getRoomsForUser(user.id);
+      res.json({ success: true, rooms: userRooms });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message || "Could not load rooms" });
     }
-    const userRooms = await getRoomsForUser(user.id);
-    res.json({ success: true, rooms: userRooms });
   });
 
   // Room status check
   app.get("/api/room/:roomId", async (req, res) => {
-    const roomId = req.params.roomId;
-    const room = rooms.get(roomId);
-    const meta = await getRoomMeta(roomId);
-    if (!room && !meta) {
-      res.json({ exists: false, userCount: 0 });
-      return;
+    try {
+      const roomId = req.params.roomId;
+      const room = rooms.get(roomId);
+      const meta = await getRoomMeta(roomId);
+      if (!room && !meta) {
+        res.json({ exists: false, userCount: 0 });
+        return;
+      }
+      res.json({
+        exists: true,
+        room: {
+          id: roomId,
+          name: room?.name || meta?.name || `Room ${roomId}`,
+          creatorId: room?.creatorId || meta?.creatorId,
+          creatorName: room?.creatorName || meta?.creatorName,
+          isLocked: room?.isLocked ?? meta?.isLocked ?? false,
+          userCount: room ? Object.keys(room.users).length : 0,
+          elementCount: room ? Object.keys(room.elements).length : 0,
+        },
+      });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message || "Could not retrieve room details" });
     }
-    res.json({
-      exists: true,
-      room: {
-        id: roomId,
-        name: room?.name || meta?.name || `Room ${roomId}`,
-        creatorId: room?.creatorId || meta?.creatorId,
-        creatorName: room?.creatorName || meta?.creatorName,
-        isLocked: room?.isLocked ?? meta?.isLocked ?? false,
-        userCount: room ? Object.keys(room.users).length : 0,
-        elementCount: room ? Object.keys(room.elements).length : 0,
-      },
-    });
+  });
+
+  // Delete Room endpoint
+  app.delete("/api/rooms/:roomId", async (req, res) => {
+    try {
+      const roomId = req.params.roomId;
+      const authHeader = req.headers.authorization;
+      const token = authHeader?.replace("Bearer ", "")?.trim();
+      const user = token ? await getUserByToken(token) : null;
+
+      const roomData = rooms.get(roomId);
+      const meta = await getRoomMeta(roomId);
+      const creatorId = roomData?.creatorId || meta?.creatorId;
+
+      // Verify authorization: if user token exists and creator is known, require ownership
+      if (user && creatorId && creatorId !== user.id) {
+        res.status(403).json({ success: false, error: "Only the room creator can delete this room" });
+        return;
+      }
+
+      const success = await deleteRoom(roomId, user?.id);
+
+      // Notify and clean up active socket room
+      if (rooms.has(roomId)) {
+        io.to(roomId).emit("room-deleted", {
+          roomId,
+          message: "This room has been permanently deleted by the host.",
+        });
+        io.in(roomId).socketsLeave(roomId);
+        rooms.delete(roomId);
+      }
+
+      res.json({ success, roomId });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message || "Failed to delete room" });
+    }
   });
 
   // Socket.io Real-time Handlers
   io.on("connection", (socket: Socket) => {
     let currentRoomId: string | null = null;
     let currentUser: UserSession | null = null;
+
+    // Drop all incoming socket events if socket was kicked
+    socket.use((_packet, next) => {
+      if (socket.data.kicked) {
+        return;
+      }
+      next();
+    });
 
     // Helper: Guard write operations
     const checkCanWrite = (): boolean => {
@@ -651,7 +733,9 @@ async function startServer() {
           reason: reason || "You were removed from this room by the host.",
         });
         if (targetSocket) {
+          targetSocket.data.kicked = true;
           targetSocket.leave(currentRoomId);
+          targetSocket.disconnect(true);
         }
       }
 
@@ -685,6 +769,31 @@ async function startServer() {
         isLocked: room.isLocked,
         users: room.users,
       });
+    });
+
+    // Admin: Delete Room
+    socket.on("admin-delete-room", async (payload?: { roomId?: string }) => {
+      const targetRoomId = payload?.roomId || currentRoomId;
+      if (!targetRoomId || !currentUser) return;
+      const room = rooms.get(targetRoomId);
+      const meta = await getRoomMeta(targetRoomId);
+      const creatorId = room?.creatorId || meta?.creatorId;
+
+      if (!currentUser.isHost && creatorId && creatorId !== currentUser.id) {
+        socket.emit("permission-denied", {
+          message: "Only the room host or creator can delete this room.",
+        });
+        return;
+      }
+
+      await deleteRoom(targetRoomId, currentUser.id);
+
+      io.to(targetRoomId).emit("room-deleted", {
+        roomId: targetRoomId,
+        message: "This room has been permanently deleted by the host.",
+      });
+      io.in(targetRoomId).socketsLeave(targetRoomId);
+      rooms.delete(targetRoomId);
     });
 
     // Real-time live stroke streaming (Guarded)
@@ -838,18 +947,6 @@ async function startServer() {
       }
     });
 
-    // Fail-safe Voice Audio Relay (streaming Opus/WebM audio chunks over WebSockets)
-    socket.on("voice-audio-chunk", (data: { chunk: string; mimeType?: string; timestamp?: number }) => {
-      if (!currentRoomId || !currentUser) return;
-      if (currentUser.isMuted) return;
-
-      socket.to(currentRoomId).emit("voice-audio-chunk", {
-        userId: currentUser.id,
-        chunk: data.chunk,
-        mimeType: data.mimeType || 'audio/webm',
-        timestamp: data.timestamp || Date.now(),
-      });
-    });
 
     // Vote to Clear Feature
     socket.on("vote-clear-start", () => {
@@ -873,7 +970,7 @@ async function startServer() {
       // If a vote is already active, ignore
       if (room.voteToClear && room.voteToClear.active) return;
 
-      const durationMs = 15000;
+      const durationMs = VOTE_CLEAR_DURATION_MS;
       const newVote: VoteState = {
         active: true,
         initiatorId: currentUser.id,
@@ -1065,6 +1162,11 @@ async function startServer() {
         }, 3600000);
       }
     });
+  });
+
+  // 404 handler for unhandled API routes
+  app.all("/api/*", (_req, res) => {
+    res.status(404).json({ success: false, error: "API endpoint not found" });
   });
 
   // Serve production client bundle if available

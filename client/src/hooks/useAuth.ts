@@ -197,7 +197,7 @@ export function useAuth() {
   };
 
   // Google OAuth action
-  const signInWithGoogle = async (options?: { email?: string; name?: string }): Promise<{
+  const signInWithGoogle = async (_options?: { email?: string; name?: string }): Promise<{
     success: boolean;
     error?: string;
     isDemo?: boolean;
@@ -282,6 +282,27 @@ export function useAuth() {
     }
   };
 
+  const deleteRoom = async (roomId: string): Promise<{ success: boolean; error?: string }> => {
+    const currentToken = token || localStorage.getItem(TOKEN_KEY);
+    try {
+      const res = await fetch(`/api/rooms/${encodeURIComponent(roomId)}`, {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(currentToken ? { Authorization: `Bearer ${currentToken}` } : {}),
+        },
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        return { success: false, error: data.error || 'Failed to delete room' };
+      }
+      setMyRooms((prev) => prev.filter((r) => r.id !== roomId));
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message || 'Network error while deleting room' };
+    }
+  };
+
   return {
     user,
     authUser: user,
@@ -294,7 +315,9 @@ export function useAuth() {
     logout,
     signInWithGoogle,
     createRoom,
+    deleteRoom,
     fetchMyRooms,
     fetchRooms: fetchMyRooms,
   };
 }
+

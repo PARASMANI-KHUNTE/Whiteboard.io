@@ -10,6 +10,8 @@ import {
   Ban,
   Crown,
   Users,
+  Trash2,
+  AlertTriangle,
 } from 'lucide-react';
 import { RemoteUser } from '../types';
 
@@ -26,6 +28,7 @@ interface AdminPanelModalProps {
   onSetPermission: (targetUserId: string, canWrite: boolean) => void;
   onKickUser: (targetUserId: string, reason?: string) => void;
   onToggleLock: (isLocked: boolean) => void;
+  onDeleteRoom?: (roomId: string) => void;
 }
 
 export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
@@ -41,8 +44,10 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
   onSetPermission,
   onKickUser,
   onToggleLock,
+  onDeleteRoom,
 }) => {
   const [confirmKickId, setConfirmKickId] = useState<string | null>(null);
+  const [confirmDeleteRoom, setConfirmDeleteRoom] = useState(false);
 
   if (!isOpen) return null;
 
@@ -81,8 +86,8 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
               </div>
               <p className="text-xs text-slate-500">
                 {isHost
-                  ? 'Manage permissions, revoke writing access, or remove users'
-                  : `Administered by ${creatorName || 'Room Host'}`}
+                  ? `Room ${roomId || ''} • Manage permissions, writing access, or remove users`
+                  : `Room ${roomId || ''} • Administered by ${creatorName || 'Room Host'}`}
               </p>
             </div>
           </div>
@@ -280,6 +285,55 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
               })}
             </div>
           </div>
+
+          {/* Danger Zone: Delete Room (Host only) */}
+          {isHost && (
+            <div className="p-4 bg-rose-50/60 dark:bg-rose-950/20 border border-rose-200 dark:border-rose-900/50 rounded-xl space-y-3">
+              <div className="flex items-start gap-2.5">
+                <div className="p-2 bg-rose-100 dark:bg-rose-900/40 text-rose-600 dark:text-rose-400 rounded-lg shrink-0">
+                  <AlertTriangle className="w-4 h-4" />
+                </div>
+                <div>
+                  <div className="text-xs font-semibold text-rose-900 dark:text-rose-200">
+                    Danger Zone: Delete Room
+                  </div>
+                  <div className="text-[11px] text-rose-700/80 dark:text-rose-400/80 mt-0.5 leading-relaxed">
+                    Permanently delete this whiteboard session and all drawings. All participants will be disconnected immediately.
+                  </div>
+                </div>
+              </div>
+
+              {confirmDeleteRoom ? (
+                <div className="flex items-center gap-2 pt-1 animate-in fade-in duration-150">
+                  <button
+                    onClick={() => {
+                      if (roomId) onDeleteRoom?.(roomId);
+                      setConfirmDeleteRoom(false);
+                      onClose();
+                    }}
+                    className="px-3.5 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-semibold shadow-xs transition-colors cursor-pointer flex items-center gap-1.5"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Yes, Delete Room Permanently</span>
+                  </button>
+                  <button
+                    onClick={() => setConfirmDeleteRoom(false)}
+                    className="px-3 py-2 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-medium transition-colors cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setConfirmDeleteRoom(true)}
+                  className="px-3.5 py-2 bg-white dark:bg-slate-800 hover:bg-rose-50 dark:hover:bg-rose-950/40 text-rose-600 dark:text-rose-400 border border-rose-200 dark:border-rose-900/60 hover:border-rose-300 rounded-xl text-xs font-semibold transition-colors cursor-pointer flex items-center gap-1.5 shadow-2xs"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Delete Room</span>
+                </button>
+              )}
+            </div>
+          )}
 
           <button
             onClick={onClose}

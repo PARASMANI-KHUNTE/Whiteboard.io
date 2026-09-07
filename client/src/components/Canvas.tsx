@@ -16,6 +16,7 @@ import { TextItem } from './TextItem';
 import { ShapeItem } from './ShapeItem';
 import { IconItem } from './IconItem';
 import { ZoomControls } from './ZoomControls';
+import { CheckSquare, Copy, Trash2, X, MousePointer } from 'lucide-react';
 
 interface CanvasProps {
   currentTool: ToolType;
@@ -24,6 +25,7 @@ interface CanvasProps {
   currentUserId: string;
   currentUserName: string;
   canWrite?: boolean;
+  theme?: 'light' | 'dark';
   selectedShapeType?: ShapeType;
   selectedIconName?: string;
   onRestrictedAttempt?: () => void;
@@ -41,6 +43,7 @@ interface CanvasProps {
   onStrokeLiveStart: (strokeId: string, point: Point, color: string, size: number, isHighlighter?: boolean) => void;
   onStrokeLivePoint: (strokeId: string, point: Point) => void;
   onSelectTool?: (tool: ToolType) => void;
+  onRegisterSelectAll?: (fn: () => void) => void;
 }
 
 // Distance from point to line segment
@@ -59,6 +62,7 @@ export const Canvas: React.FC<CanvasProps> = ({
   currentUserId,
   currentUserName,
   canWrite = true,
+  theme = 'light',
   selectedShapeType = 'rectangle',
   selectedIconName = 'star',
   onRestrictedAttempt,
@@ -73,6 +77,7 @@ export const Canvas: React.FC<CanvasProps> = ({
   onStrokeLiveStart,
   onStrokeLivePoint,
   onSelectTool,
+  onRegisterSelectAll,
 }) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -83,8 +88,12 @@ export const Canvas: React.FC<CanvasProps> = ({
   const [isPanning, setIsPanning] = useState(false);
   const [spacePressed, setSpacePressed] = useState(false);
 
-  // Active object selection state (keeps controls pinned open)
-  const [selectedElementId, setSelectedElementId] = useState<string | null>(null);
+  // Active object selection state (multi-select capable)
+  const [selectedElementIds, setSelectedElementIds] = useState<Set<string>>(new Set());
+
+  // Marquee selection box state
+  const [marqueeRect, setMarqueeRect] = useState<{ startX: number; startY: number; currentX: number; currentY: number } | null>(null);
+  const isMarqueeRef = useRef(false);
 
   const panStartRef = useRef<{ mouseX: number; mouseY: number; panX: number; panY: number }>({
     mouseX: 0,
@@ -96,18 +105,121 @@ export const Canvas: React.FC<CanvasProps> = ({
   const [isDrawing, setIsDrawing] = useState(false);
   const [currentStroke, setCurrentStroke] = useState<DrawingStroke | null>(null);
   const [eraserCursor, setEraserCursor] = useState<{ x: number; y: number } | null>(null);
+  const lastEraserPointRef = useRef<Point | null>(null);
+  const elementsRef = useRef<Record<string, CanvasElement>>(elements);
+  elementsRef.current = elements;
 
   // Throttled cursor emission
   const lastCursorEmitRef = useRef<number>(0);
 
-  // Spacebar pan listener and Escape deselect
+  // Selection management helpers
+  const handleSelectElement = useCallback((id: string, isMulti = false) => {
+    setSelectedElementIds((prev) => {
+      const next = new Set(isMulti ? prev : []);
+      if (isMulti && next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  }, []);
+
+  const handleSelectAll = useCallback(() => {
+    const allIds = Object.keys(elementsRef.current);
+    setSelectedElementIds(new Set(allIds));
+  }, []);
+
+  const handleClearSelection = useCallback(() => {
+    setSelectedElementIds(new Set());
+  }, []);
+
+  const cloneElementWithOffset = useCallback((el: CanvasElement, dx = 24, dy = 24): CanvasElement => {
+    const newId = `${el.type}_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    if (el.type === 'stroke') {
+      return {
+        ...el,
+        id: newId,
+        points: el.points.map((p) => ({ x: p.x + dx, y: p.y + dy })),
+        createdAt: Date.now(),
+      };
+    }
+    return {
+      ...el,
+      id: newId,
+      x: el.x + dx,
+      y: el.y + dy,
+      updatedAt: Date.now(),
+    } as CanvasElement;
+  }, []);
+
+  const handleDuplicateSelected = useCallback(() => {
+    if (selectedElementIds.size === 0) return;
+    const newIds: string[] = [];
+    selectedElementIds.forEach((id) => {
+      const el = elementsRef.current[id];
+      if (el) {
+        const cloned = cloneElementWithOffset(el, 24, 24);
+        onElementCreate(cloned);
+        newIds.push(cloned.id);
+      }
+    });
+    if (newIds.length > 0) {
+      setSelectedElementIds(new Set(newIds));
+    }
+  }, [selectedElementIds, cloneElementWithOffset, onElementCreate]);
+
+  const handleDeleteSelected = useCallback(() => {
+    if (selectedElementIds.size === 0) return;
+    const idsToDelete = Array.from(selectedElementIds);
+    onElementsBatchDelete(idsToDelete);
+    setSelectedElementIds(new Set());
+  }, [selectedElementIds, onElementsBatchDelete]);
+
+  // Register external select-all callback
+  useEffect(() => {
+    onRegisterSelectAll?.(handleSelectAll);
+  }, [onRegisterSelectAll, handleSelectAll]);
+
+  // Spacebar pan listener, keyboard shortcuts & selection actions
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.code === 'Space' && !['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement).tagName)) {
-        setSpacePressed(true);
+      const isInput = ['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement).tagName);
+      if (!isInput) {
+        if (e.code === 'Space') {
+          setSpacePressed(true);
+        } else if (e.key === 'v' || e.key === 'V') {
+          onSelectTool?.('select');
+        } else if (e.key === 'h' || e.key === 'H') {
+          onSelectTool?.('hand');
+        }
+
+        // Select All: Ctrl+A / Cmd+A
+        if ((e.ctrlKey || e.metaKey) && (e.key === 'a' || e.key === 'A')) {
+          e.preventDefault();
+          handleSelectAll();
+          return;
+        }
+
+        // Duplicate: Ctrl+D / Cmd+D
+        if ((e.ctrlKey || e.metaKey) && (e.key === 'd' || e.key === 'D')) {
+          e.preventDefault();
+          handleDuplicateSelected();
+          return;
+        }
+
+        // Delete selected: Delete or Backspace
+        if (e.key === 'Delete' || e.key === 'Backspace') {
+          if (selectedElementIds.size > 0) {
+            e.preventDefault();
+            handleDeleteSelected();
+            return;
+          }
+        }
       }
+
       if (e.code === 'Escape') {
-        setSelectedElementId(null);
+        handleClearSelection();
       }
     };
 
@@ -131,7 +243,7 @@ export const Canvas: React.FC<CanvasProps> = ({
       window.removeEventListener('keyup', handleKeyUp);
       window.removeEventListener('auxclick', handleAuxClick);
     };
-  }, []);
+  }, [handleSelectAll, handleDuplicateSelected, handleDeleteSelected, handleClearSelection, selectedElementIds, onSelectTool]);
 
   // Native Wheel listener for Zooming (Ctrl+Wheel / Pinch) and Panning
   useEffect(() => {
@@ -149,7 +261,7 @@ export const Canvas: React.FC<CanvasProps> = ({
 
         const zoomFactor = e.deltaY < 0 ? 1.08 : 0.92;
         setZoom((prevZoom) => {
-          const nextZoom = Math.max(0.2, Math.min(3.0, prevZoom * zoomFactor));
+          const nextZoom = Math.max(0.25, Math.min(3.0, prevZoom * zoomFactor));
           setPan((prevPan) => {
             const worldX = (mouseX - prevPan.x) / prevZoom;
             const worldY = (mouseY - prevPan.y) / prevZoom;
@@ -239,7 +351,26 @@ export const Canvas: React.FC<CanvasProps> = ({
     const elementList = Object.values(elements) as CanvasElement[];
     for (const el of elementList) {
       if (el.type === 'stroke') {
-        drawSingleStroke(ctx, el as DrawingStroke);
+        const stroke = el as DrawingStroke;
+        drawSingleStroke(ctx, stroke);
+
+        // Highlight selected stroke
+        if (selectedElementIds.has(stroke.id) && stroke.points && stroke.points.length > 0) {
+          let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+          for (const p of stroke.points) {
+            if (p.x < minX) minX = p.x;
+            if (p.x > maxX) maxX = p.x;
+            if (p.y < minY) minY = p.y;
+            if (p.y > maxY) maxY = p.y;
+          }
+          const pad = 6;
+          ctx.save();
+          ctx.strokeStyle = '#3b82f6';
+          ctx.lineWidth = 1.5 / zoom;
+          ctx.setLineDash([4 / zoom, 4 / zoom]);
+          ctx.strokeRect(minX - pad, minY - pad, Math.max(12, maxX - minX + pad * 2), Math.max(12, maxY - minY + pad * 2));
+          ctx.restore();
+        }
       }
     }
 
@@ -255,7 +386,7 @@ export const Canvas: React.FC<CanvasProps> = ({
     }
 
     ctx.restore();
-  }, [elements, liveStrokes, currentStroke, drawSingleStroke, pan, zoom]);
+  }, [elements, liveStrokes, currentStroke, drawSingleStroke, pan, zoom, selectedElementIds]);
 
   // Handle canvas sizing and DPI scaling
   useEffect(() => {
@@ -289,30 +420,79 @@ export const Canvas: React.FC<CanvasProps> = ({
     renderCanvas();
   }, [renderCanvas]);
 
-  // Eraser collision check in world coordinates
-  const checkAndEraseAtPoint = useCallback(
-    (point: Point) => {
-      const eraserRadius = (currentSize * 2.5 + 8) / zoom;
-      const elementsToDelete: string[] = [];
+  // Continuous eraser collision check in world coordinates (interpolates between mouse moves)
+  const checkAndEraseAlongSegment = useCallback(
+    (from: Point, to: Point) => {
+      const allElements = elementsRef.current || {};
+      const elList = Object.values(allElements) as CanvasElement[];
+      if (elList.length === 0) return;
 
-      (Object.values(elements) as CanvasElement[]).forEach((el) => {
-        if (el.type === 'stroke') {
-          const stroke = el as DrawingStroke;
-          for (let i = 0; i < stroke.points.length - 1; i++) {
-            const dist = distanceToSegment(point, stroke.points[i], stroke.points[i + 1]);
-            if (dist <= eraserRadius + stroke.size / 2) {
-              elementsToDelete.push(stroke.id);
-              break;
+      const eraserRadius = Math.max(16, currentSize * 3 + 12) / zoom;
+      const dist = Math.hypot(to.x - from.x, to.y - from.y);
+      const stepDist = Math.max(4, eraserRadius * 0.4);
+      const steps = Math.max(1, Math.ceil(dist / stepDist));
+
+      const elementsToDelete = new Set<string>();
+
+      for (let s = 0; s <= steps; s++) {
+        const t = s / steps;
+        const pt = {
+          x: from.x + t * (to.x - from.x),
+          y: from.y + t * (to.y - from.y),
+        };
+
+        for (const el of elList) {
+          if (elementsToDelete.has(el.id)) continue;
+
+          // Check if stroke (by type or points array presence)
+          const rawPoints = (el as any).points;
+          if (el.type === 'stroke' || (Array.isArray(rawPoints) && rawPoints.length > 0)) {
+            const points: Point[] = rawPoints || [];
+            if (!points || points.length === 0) continue;
+            const strokeSize = (el as any).size || 3;
+            const effectiveR = eraserRadius + strokeSize / 2;
+
+            // Single-dot stroke (length === 1)
+            if (points.length === 1) {
+              const d = Math.hypot(pt.x - points[0].x, pt.y - points[0].y);
+              if (d <= effectiveR) {
+                elementsToDelete.add(el.id);
+              }
+              continue;
+            }
+
+            // Multi-point stroke segments
+            for (let i = 0; i < points.length - 1; i++) {
+              const d = distanceToSegment(pt, points[i], points[i + 1]);
+              if (d <= effectiveR) {
+                elementsToDelete.add(el.id);
+                break;
+              }
+            }
+          } else {
+            // Bounding box collision check for shapes, stickies, text, icons
+            const w = (el as any).width || (el as any).size || (el.type === 'sticky' ? 224 : el.type === 'text' ? 180 : 100);
+            const h = (el as any).height || (el as any).size || (el.type === 'sticky' ? 150 : el.type === 'text' ? 60 : 100);
+            const elX = (el as any).x ?? 0;
+            const elY = (el as any).y ?? 0;
+
+            if (
+              pt.x + eraserRadius >= elX &&
+              pt.x - eraserRadius <= elX + w &&
+              pt.y + eraserRadius >= elY &&
+              pt.y - eraserRadius <= elY + h
+            ) {
+              elementsToDelete.add(el.id);
             }
           }
         }
-      });
+      }
 
-      if (elementsToDelete.length > 0) {
-        onElementsBatchDelete(elementsToDelete);
+      if (elementsToDelete.size > 0) {
+        onElementsBatchDelete(Array.from(elementsToDelete));
       }
     },
-    [elements, currentSize, zoom, onElementsBatchDelete]
+    [currentSize, zoom, onElementsBatchDelete]
   );
 
   // Convert screen mouse coordinates into world coordinates
@@ -359,14 +539,57 @@ export const Canvas: React.FC<CanvasProps> = ({
         panX: pan.x,
         panY: pan.y,
       };
+      if (currentTool === 'hand') {
+        setSelectedElementIds(new Set());
+      }
       return;
     }
 
-    // Deselect any active element when clicking canvas background
-    setSelectedElementId(null);
-
     const coords = getCanvasCoords(e);
     if (!coords) return;
+
+    // Handle Select tool (Single click selection, Shift+click multi-select, or drag marquee)
+    if (currentTool === 'select') {
+      const isMulti = 'shiftKey' in e && (e.shiftKey || e.ctrlKey || e.metaKey);
+      const clicked = (Object.values(elements) as CanvasElement[]).reverse().find((el) => {
+        if (el.type === 'shape' || el.type === 'icon') {
+          const w = (el as any).width || (el as any).size || 100;
+          const h = (el as any).height || (el as any).size || 100;
+          return coords.x >= el.x && coords.x <= el.x + w && coords.y >= el.y && coords.y <= el.y + h;
+        }
+        if (el.type === 'sticky') {
+          return coords.x >= el.x && coords.x <= el.x + 224 && coords.y >= el.y && coords.y <= el.y + 150;
+        }
+        if (el.type === 'text') {
+          return coords.x >= el.x && coords.x <= el.x + 200 && coords.y >= el.y && coords.y <= el.y + 60;
+        }
+        if (el.type === 'stroke' && (el as DrawingStroke).points) {
+          const stroke = el as DrawingStroke;
+          return stroke.points.some((p) => Math.hypot(p.x - coords.x, p.y - coords.y) <= Math.max(12, stroke.size * 2));
+        }
+        return false;
+      });
+
+      if (clicked) {
+        handleSelectElement(clicked.id, isMulti);
+      } else {
+        if (!isMulti) {
+          handleClearSelection();
+        }
+        // Start marquee selection drag on empty canvas
+        isMarqueeRef.current = true;
+        setMarqueeRect({
+          startX: coords.x,
+          startY: coords.y,
+          currentX: coords.x,
+          currentY: coords.y,
+        });
+      }
+      return;
+    }
+
+    // Deselect any active elements when clicking canvas background with other tools
+    handleClearSelection();
 
     if (!canWrite) {
       onRestrictedAttempt?.();
@@ -389,7 +612,8 @@ export const Canvas: React.FC<CanvasProps> = ({
         updatedAt: Date.now(),
       };
       onElementCreate(newSticky);
-      onSelectTool?.('pen'); // Return to pen tool
+      setSelectedElementIds(new Set([newSticky.id]));
+      onSelectTool?.('select'); // Switch to select tool
       return;
     }
 
@@ -408,7 +632,8 @@ export const Canvas: React.FC<CanvasProps> = ({
         updatedAt: Date.now(),
       };
       onElementCreate(newText);
-      onSelectTool?.('pen'); // Return to pen tool
+      setSelectedElementIds(new Set([newText.id]));
+      onSelectTool?.('select'); // Switch to select tool so user can type immediately
       return;
     }
 
@@ -432,8 +657,8 @@ export const Canvas: React.FC<CanvasProps> = ({
         updatedAt: Date.now(),
       };
       onElementCreate(newShape);
-      setSelectedElementId(newShape.id);
-      onSelectTool?.('pen'); // Return to pen tool
+      setSelectedElementIds(new Set([newShape.id]));
+      onSelectTool?.('select'); // Keep in select mode
       return;
     }
 
@@ -453,15 +678,16 @@ export const Canvas: React.FC<CanvasProps> = ({
         updatedAt: Date.now(),
       };
       onElementCreate(newIcon);
-      setSelectedElementId(newIcon.id);
-      onSelectTool?.('pen'); // Return to pen tool
+      setSelectedElementIds(new Set([newIcon.id]));
+      onSelectTool?.('select'); // Keep in select mode
       return;
     }
 
     // Handle Eraser
     if (currentTool === 'eraser') {
       setIsDrawing(true);
-      checkAndEraseAtPoint(coords);
+      lastEraserPointRef.current = coords;
+      checkAndEraseAlongSegment(coords, coords);
       return;
     }
 
@@ -524,10 +750,17 @@ export const Canvas: React.FC<CanvasProps> = ({
       });
     }
 
+    // Update marquee selection drag rectangle
+    if (isMarqueeRef.current && marqueeRect) {
+      setMarqueeRect((prev) => (prev ? { ...prev, currentX: coords.x, currentY: coords.y } : null));
+    }
+
     if (!isDrawing) return;
 
     if (currentTool === 'eraser') {
-      checkAndEraseAtPoint(coords);
+      const fromPt = lastEraserPointRef.current || coords;
+      lastEraserPointRef.current = coords;
+      checkAndEraseAlongSegment(fromPt, coords);
       return;
     }
 
@@ -549,11 +782,55 @@ export const Canvas: React.FC<CanvasProps> = ({
       return;
     }
 
+    // Finalize marquee selection
+    if (isMarqueeRef.current && marqueeRect) {
+      isMarqueeRef.current = false;
+      const minX = Math.min(marqueeRect.startX, marqueeRect.currentX);
+      const maxX = Math.max(marqueeRect.startX, marqueeRect.currentX);
+      const minY = Math.min(marqueeRect.startY, marqueeRect.currentY);
+      const maxY = Math.max(marqueeRect.startY, marqueeRect.currentY);
+      const width = maxX - minX;
+      const height = maxY - minY;
+
+      if (width > 5 || height > 5) {
+        const enclosedIds: string[] = [];
+        (Object.values(elementsRef.current) as CanvasElement[]).forEach((el) => {
+          if (el.type === 'shape' || el.type === 'icon') {
+            const w = (el as any).width || (el as any).size || 100;
+            const h = (el as any).height || (el as any).size || 100;
+            if (el.x + w >= minX && el.x <= maxX && el.y + h >= minY && el.y <= maxY) {
+              enclosedIds.push(el.id);
+            }
+          } else if (el.type === 'sticky') {
+            if (el.x + 224 >= minX && el.x <= maxX && el.y + 150 >= minY && el.y <= maxY) {
+              enclosedIds.push(el.id);
+            }
+          } else if (el.type === 'text') {
+            if (el.x + 200 >= minX && el.x <= maxX && el.y + 60 >= minY && el.y <= maxY) {
+              enclosedIds.push(el.id);
+            }
+          } else if (el.type === 'stroke' && (el as DrawingStroke).points) {
+            const hasPoint = (el as DrawingStroke).points.some(
+              (p) => p.x >= minX && p.x <= maxX && p.y >= minY && p.y <= maxY
+            );
+            if (hasPoint) {
+              enclosedIds.push(el.id);
+            }
+          }
+        });
+
+        setSelectedElementIds(new Set(enclosedIds));
+      }
+      setMarqueeRect(null);
+      return;
+    }
+
     if (isDrawing && currentStroke && currentStroke.points.length > 0) {
       onElementCreate(currentStroke);
     }
     setIsDrawing(false);
     setCurrentStroke(null);
+    lastEraserPointRef.current = null;
   };
 
   // Sticky, Text, Shape, and Icon items
@@ -568,20 +845,50 @@ export const Canvas: React.FC<CanvasProps> = ({
     if (isPanning) return 'cursor-grabbing';
     if (currentTool === 'hand' || spacePressed) return 'cursor-grab';
     if (!canWrite) return 'cursor-default';
+    if (currentTool === 'select') return 'cursor-default';
     if (currentTool === 'eraser') return 'cursor-none';
     return 'cursor-crosshair';
   };
+
+  const handleDuplicateElement = useCallback(
+    (el: CanvasElement) => {
+      let cloned: CanvasElement;
+      const newId = `${el.type}_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+      if (el.type === 'stroke') {
+        cloned = {
+          ...el,
+          id: newId,
+          points: el.points.map((p) => ({ x: p.x + 24, y: p.y + 24 })),
+          createdAt: Date.now(),
+        };
+      } else {
+        cloned = {
+          ...el,
+          id: newId,
+          x: el.x + 24,
+          y: el.y + 24,
+          updatedAt: Date.now(),
+        } as CanvasElement;
+      }
+      onElementCreate(cloned);
+      setSelectedElementIds(new Set([cloned.id]));
+    },
+    [onElementCreate]
+  );
 
   return (
     <div
       ref={containerRef}
       id="whiteboard-canvas-container"
       style={{
-        backgroundImage: 'radial-gradient(#cbd5e1 1.3px, transparent 1.3px)',
+        backgroundImage:
+          theme === 'dark'
+            ? 'radial-gradient(#334155 1.3px, transparent 1.3px)'
+            : 'radial-gradient(#cbd5e1 1.3px, transparent 1.3px)',
         backgroundSize: `${24 * zoom}px ${24 * zoom}px`,
         backgroundPosition: `${pan.x}px ${pan.y}px`,
       }}
-      className={`relative w-full h-screen overflow-hidden bg-white select-none ${getCursorClass()}`}
+      className={`relative w-full h-screen overflow-hidden bg-white dark:bg-[#0b0f19] select-none ${getCursorClass()}`}
       onMouseDown={handlePointerDown}
       onMouseMove={handlePointerMove}
       onMouseUp={handlePointerUp}
@@ -601,10 +908,10 @@ export const Canvas: React.FC<CanvasProps> = ({
         <div
           style={{
             transform: `translate(${eraserCursor.x}px, ${eraserCursor.y}px)`,
-            width: `${(currentSize * 2.5 + 8) * 2}px`,
-            height: `${(currentSize * 2.5 + 8) * 2}px`,
+            width: `${Math.max(16, currentSize * 3 + 12) * 2}px`,
+            height: `${Math.max(16, currentSize * 3 + 12) * 2}px`,
           }}
-          className="pointer-events-none absolute -translate-x-1/2 -translate-y-1/2 rounded-full border border-rose-400 bg-rose-200/30 z-30"
+          className="pointer-events-none absolute -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-rose-500 bg-rose-400/25 z-40 shadow-sm"
         />
       )}
 
@@ -615,7 +922,9 @@ export const Canvas: React.FC<CanvasProps> = ({
           transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
           transformOrigin: '0 0',
         }}
-        className="absolute inset-0 pointer-events-none"
+        className={`absolute inset-0 pointer-events-none ${
+          currentTool === 'eraser' ? '[&_*]:pointer-events-none' : ''
+        }`}
       >
         {/* Sticky Notes Layer */}
         {stickyNotes.map((note) => (
@@ -624,6 +933,10 @@ export const Canvas: React.FC<CanvasProps> = ({
             note={note}
             currentUserId={currentUserId}
             canWrite={canWrite}
+            zoom={zoom}
+            isSelected={selectedElementIds.has(note.id)}
+            isMultiSelection={selectedElementIds.size > 1}
+            onSelect={(isMulti) => handleSelectElement(note.id, isMulti)}
             onUpdate={onElementUpdate}
             onDelete={onElementDelete}
           />
@@ -636,8 +949,13 @@ export const Canvas: React.FC<CanvasProps> = ({
             element={el}
             currentUserId={currentUserId}
             canWrite={canWrite}
+            zoom={zoom}
+            isSelected={selectedElementIds.has(el.id)}
+            isMultiSelection={selectedElementIds.size > 1}
+            onSelect={(isMulti) => handleSelectElement(el.id, isMulti)}
             onUpdate={onElementUpdate}
             onDelete={onElementDelete}
+            onDuplicate={handleDuplicateElement}
           />
         ))}
 
@@ -648,10 +966,13 @@ export const Canvas: React.FC<CanvasProps> = ({
             element={shape}
             currentUserId={currentUserId}
             canWrite={canWrite}
-            isSelected={selectedElementId === shape.id}
-            onSelect={() => setSelectedElementId(shape.id)}
+            zoom={zoom}
+            isSelected={selectedElementIds.has(shape.id)}
+            isMultiSelection={selectedElementIds.size > 1}
+            onSelect={(isMulti) => handleSelectElement(shape.id, isMulti)}
             onUpdate={onElementUpdate}
             onDelete={onElementDelete}
+            onDuplicate={handleDuplicateElement}
           />
         ))}
 
@@ -662,12 +983,28 @@ export const Canvas: React.FC<CanvasProps> = ({
             element={icon}
             currentUserId={currentUserId}
             canWrite={canWrite}
-            isSelected={selectedElementId === icon.id}
-            onSelect={() => setSelectedElementId(icon.id)}
+            zoom={zoom}
+            isSelected={selectedElementIds.has(icon.id)}
+            isMultiSelection={selectedElementIds.size > 1}
+            onSelect={(isMulti) => handleSelectElement(icon.id, isMulti)}
             onUpdate={onElementUpdate}
             onDelete={onElementDelete}
+            onDuplicate={handleDuplicateElement}
           />
         ))}
+
+        {/* Marquee Drag Selection Box */}
+        {marqueeRect && (
+          <div
+            style={{
+              left: Math.min(marqueeRect.startX, marqueeRect.currentX),
+              top: Math.min(marqueeRect.startY, marqueeRect.currentY),
+              width: Math.abs(marqueeRect.currentX - marqueeRect.startX),
+              height: Math.abs(marqueeRect.currentY - marqueeRect.startY),
+            }}
+            className="pointer-events-none absolute border-2 border-blue-500 bg-blue-500/15 rounded-sm z-50 transition-none"
+          />
+        )}
 
         {/* Remote Multiplayer Live Cursors (projected in world space) */}
         {userList.map((user) => {
@@ -723,6 +1060,61 @@ export const Canvas: React.FC<CanvasProps> = ({
           setPan({ x: 0, y: 0 });
         }}
       />
+
+      {/* Floating Multi-Selection Action Bar (Rendered only when > 1 element selected, eliminating overlaps with single-element menus) */}
+      {selectedElementIds.size > 1 && (
+        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-40 flex items-center gap-2 px-3.5 py-2 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md rounded-2xl shadow-xl border border-slate-200/80 dark:border-slate-800 animate-in fade-in slide-in-from-top-2 duration-150 pointer-events-auto">
+          <div className="flex items-center gap-1.5 px-2.5 py-1 bg-blue-50 dark:bg-blue-950/60 rounded-lg text-blue-600 dark:text-blue-400 font-semibold text-xs border border-blue-200/80 dark:border-blue-900/50">
+            <MousePointer className="w-3.5 h-3.5" />
+            <span>{selectedElementIds.size} selected</span>
+          </div>
+
+          <div className="h-4 w-px bg-slate-200 dark:bg-slate-700 mx-0.5" />
+
+          {/* Select All */}
+          <button
+            onClick={handleSelectAll}
+            title="Select All Elements (Ctrl+A)"
+            className="px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-1.5 transition-colors cursor-pointer"
+          >
+            <CheckSquare className="w-3.5 h-3.5 text-blue-500" />
+            <span>Select All</span>
+          </button>
+
+          {/* Duplicate */}
+          {canWrite && (
+            <button
+              onClick={handleDuplicateSelected}
+              title="Duplicate Selected (Ctrl+D)"
+              className="px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-1.5 transition-colors cursor-pointer"
+            >
+              <Copy className="w-3.5 h-3.5 text-emerald-500" />
+              <span>Duplicate</span>
+            </button>
+          )}
+
+          {/* Delete */}
+          {canWrite && (
+            <button
+              onClick={handleDeleteSelected}
+              title="Delete Selected (Del / Backspace)"
+              className="px-2.5 py-1.5 rounded-lg text-xs font-medium text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 flex items-center gap-1.5 transition-colors cursor-pointer"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              <span>Delete</span>
+            </button>
+          )}
+
+          {/* Clear / Deselect */}
+          <button
+            onClick={handleClearSelection}
+            title="Deselect All (Esc)"
+            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
     </div>
   );
 };

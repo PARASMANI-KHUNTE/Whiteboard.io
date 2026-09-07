@@ -1,4 +1,4 @@
-export type ToolType = 'pen' | 'highlighter' | 'eraser' | 'sticky' | 'text' | 'shape' | 'icon' | 'hand';
+export type ToolType = 'select' | 'hand' | 'pen' | 'highlighter' | 'eraser' | 'sticky' | 'text' | 'shape' | 'icon';
 
 export type ShapeType = 'rectangle' | 'circle' | 'diamond' | 'triangle' | 'star' | 'arrow';
 
@@ -40,6 +40,11 @@ export interface TextElement {
   text: string;
   color: string;
   fontSize: number;
+  fontFamily?: string;
+  fontWeight?: 'normal' | 'bold';
+  fontStyle?: 'normal' | 'italic';
+  textDecoration?: 'none' | 'underline';
+  textAlign?: 'left' | 'center' | 'right';
   userId: string;
   userName: string;
   updatedAt: number;
@@ -56,6 +61,13 @@ export interface ShapeElement {
   color: string;
   fillColor?: string;
   strokeWidth: number;
+  strokeStyle?: 'solid' | 'dashed' | 'dotted';
+  rotation?: number; // degrees 0-360
+  opacity?: number; // 0.1 to 1.0
+  isLocked?: boolean;
+  text?: string;
+  textColor?: string;
+  fontSize?: number;
   userId: string;
   userName?: string;
   updatedAt: number;
@@ -69,6 +81,13 @@ export interface IconElement {
   y: number;
   size: number;
   color: string;
+  rotation?: number; // degrees 0-360
+  flipH?: boolean;
+  flipV?: boolean;
+  opacity?: number;
+  isLocked?: boolean;
+  bgShape?: 'none' | 'circle' | 'square' | 'rounded';
+  bgColor?: string;
   userId: string;
   userName?: string;
   updatedAt: number;

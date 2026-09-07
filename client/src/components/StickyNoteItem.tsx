@@ -6,6 +6,10 @@ interface StickyNoteItemProps {
   note: StickyNote;
   currentUserId: string;
   canWrite?: boolean;
+  zoom?: number;
+  isSelected?: boolean;
+  isMultiSelection?: boolean;
+  onSelect?: (isMulti?: boolean) => void;
   onUpdate: (updated: StickyNote) => void;
   onDelete: (id: string) => void;
 }
@@ -19,8 +23,12 @@ const STICKY_COLORS = [
 
 export const StickyNoteItem: React.FC<StickyNoteItemProps> = ({
   note,
-  currentUserId,
+  currentUserId: _currentUserId,
   canWrite = true,
+  zoom = 1,
+  isSelected = false,
+  isMultiSelection = false,
+  onSelect,
   onUpdate,
   onDelete,
 }) => {
@@ -30,7 +38,7 @@ export const StickyNoteItem: React.FC<StickyNoteItemProps> = ({
   const [localPos, setLocalPos] = useState<{ x: number; y: number }>({ x: note.x, y: note.y });
   const currentPosRef = useRef<{ x: number; y: number }>({ x: note.x, y: note.y });
   const lastEmitRef = useRef<number>(0);
-  const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const [showColorPicker, setShowColorPicker] = useState(false);
   const dragStartRef = useRef<{ mouseX: number; mouseY: number; startX: number; startY: number }>({
@@ -83,8 +91,8 @@ export const StickyNoteItem: React.FC<StickyNoteItemProps> = ({
     };
 
     const handleMouseMove = (moveEvent: MouseEvent) => {
-      const deltaX = moveEvent.clientX - dragStartRef.current.mouseX;
-      const deltaY = moveEvent.clientY - dragStartRef.current.mouseY;
+      const deltaX = (moveEvent.clientX - dragStartRef.current.mouseX) / (zoom || 1);
+      const deltaY = (moveEvent.clientY - dragStartRef.current.mouseY) / (zoom || 1);
       const newX = Math.max(0, dragStartRef.current.startX + deltaX);
       const newY = Math.max(0, dragStartRef.current.startY + deltaY);
 
@@ -172,11 +180,24 @@ export const StickyNoteItem: React.FC<StickyNoteItemProps> = ({
         borderTopColor: currentColorConfig.topBorder,
         color: currentColorConfig.text,
       }}
-      onMouseDown={(e) => e.stopPropagation()}
-      onClick={(e) => e.stopPropagation()}
-      onTouchStart={(e) => e.stopPropagation()}
-      className={`absolute top-0 left-0 w-56 rounded-xl border border-slate-200/90 border-t-4 shadow-md flex flex-col transition-shadow z-20 ${
-        isDragging ? 'shadow-2xl cursor-grabbing ring-2 ring-slate-400 opacity-95' : 'hover:shadow-lg'
+      onMouseDown={(e) => {
+        e.stopPropagation();
+        onSelect?.(e.shiftKey || e.ctrlKey || e.metaKey);
+      }}
+      onClick={(e) => {
+        e.stopPropagation();
+        onSelect?.(e.shiftKey || e.ctrlKey || e.metaKey);
+      }}
+      onTouchStart={(e) => {
+        e.stopPropagation();
+        onSelect?.(e.shiftKey || e.ctrlKey || e.metaKey);
+      }}
+      className={`absolute top-0 left-0 w-56 rounded-xl border border-slate-200/90 border-t-4 shadow-md flex flex-col transition-all z-20 pointer-events-auto ${
+        isDragging
+          ? 'shadow-2xl cursor-grabbing ring-2 ring-blue-500 opacity-95'
+          : isSelected
+          ? 'ring-2 ring-blue-500 shadow-xl'
+          : 'hover:shadow-lg'
       }`}
     >
       {/* Note Header / Drag Handle */}
@@ -189,7 +210,7 @@ export const StickyNoteItem: React.FC<StickyNoteItemProps> = ({
           <span className="truncate">{note.userName || 'Note'}</span>
         </div>
 
-        {canWrite && (
+        {canWrite && !isMultiSelection && (
           <div className="flex items-center gap-1">
             <div className="relative">
               <button
