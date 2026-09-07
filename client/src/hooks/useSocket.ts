@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { io, Socket } from 'socket.io-client';
 import { CanvasElement, RemoteUser, VoteToClearState, ToolType, Point, AuthUser } from '../types';
+import { BACKEND_URL } from '../config';
 
 const USER_COLORS = [
   '#ef4444', // Red
@@ -172,7 +173,7 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
     setIsKicked(false);
     setKickedReason(null);
 
-    const socket = io({
+    const socket = io(BACKEND_URL || undefined, {
       transports: ['polling', 'websocket'],
       upgrade: true,
       rememberUpgrade: true,

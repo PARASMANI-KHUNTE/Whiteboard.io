@@ -122,10 +122,18 @@ const ALLOWED_ORIGIN_SET = new Set([
   "http://127.0.0.1:5173",
   "http://127.0.0.1:3000",
 ]);
-if (process.env.APP_URL) {
+
+const rawAllowed = [process.env.APP_URL, process.env.CLIENT_URL, process.env.ALLOWED_ORIGINS]
+  .filter(Boolean)
+  .flatMap((val) => (val as string).split(","));
+
+for (const raw of rawAllowed) {
   try {
-    const parsed = new URL(process.env.APP_URL);
-    ALLOWED_ORIGIN_SET.add(parsed.origin);
+    const trimmed = raw.trim();
+    if (trimmed) {
+      const parsed = new URL(trimmed);
+      ALLOWED_ORIGIN_SET.add(parsed.origin);
+    }
   } catch {}
 }
 
@@ -196,6 +204,21 @@ async function startServer() {
       credentials: true,
     },
     maxHttpBufferSize: 5e6, // 5MB for dense drawing batches
+  });
+
+  // Cross-Origin Resource Sharing (CORS) Middleware for API routes
+  app.use((req, res, next) => {
+    const origin = req.headers.origin;
+    if (origin && ALLOWED_ORIGIN_SET.has(origin)) {
+      res.setHeader("Access-Control-Allow-Origin", origin);
+      res.setHeader("Access-Control-Allow-Credentials", "true");
+      res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
+      res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+    }
+    if (req.method === "OPTIONS") {
+      return res.sendStatus(204);
+    }
+    next();
   });
 
   // Security Headers Middleware

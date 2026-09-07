@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { AuthUser, SessionRoom } from '../types';
+import { BACKEND_URL } from '../config';
 
 export type { AuthUser, SessionRoom };
 
@@ -46,7 +47,7 @@ export function useAuth() {
       }
 
       try {
-        const res = await fetch('/api/auth/me', {
+        const res = await fetch(`${BACKEND_URL}/api/auth/me`, {
           headers: { Authorization: `Bearer ${currentToken}` },
         });
         const data = await res.json();
@@ -70,12 +71,19 @@ export function useAuth() {
   // Global window message listener for OAuth popups
   useEffect(() => {
     const handleOAuthMessage = (event: MessageEvent) => {
-      const allowedOrigins = [
-        window.location.origin,
+      const customAllowed = (import.meta.env.VITE_ALLOWED_ORIGINS as string | undefined)
+        ?.split(',')
+        .map((o) => o.trim())
+        .filter(Boolean) ?? [
         'http://localhost:5173',
         'http://localhost:3000',
         'http://127.0.0.1:5173',
         'http://127.0.0.1:3000',
+      ];
+      const allowedOrigins = [
+        window.location.origin,
+        ...(BACKEND_URL ? [BACKEND_URL] : []),
+        ...customAllowed,
       ];
       if (!allowedOrigins.includes(event.origin)) {
         return;
@@ -96,7 +104,7 @@ export function useAuth() {
     if (!currentToken) return;
 
     try {
-      const res = await fetch('/api/rooms/my-rooms', {
+      const res = await fetch(`${BACKEND_URL}/api/rooms/my-rooms`, {
         headers: { Authorization: `Bearer ${currentToken}` },
       });
       const data = await res.json();
@@ -117,7 +125,7 @@ export function useAuth() {
   // Login action
   const login = async (identifier: string, password: string): Promise<{ success: boolean; error?: string }> => {
     try {
-      const res = await fetch('/api/auth/login', {
+      const res = await fetch(`${BACKEND_URL}/api/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ identifier, password }),
@@ -142,7 +150,7 @@ export function useAuth() {
     color?: string;
   }): Promise<{ success: boolean; error?: string }> => {
     try {
-      const res = await fetch('/api/auth/register', {
+      const res = await fetch(`${BACKEND_URL}/api/auth/register`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(params),
@@ -161,7 +169,7 @@ export function useAuth() {
   // Continue as Guest action
   const continueAsGuest = async (name?: string, color?: string): Promise<{ success: boolean; error?: string }> => {
     try {
-      const res = await fetch('/api/auth/guest', {
+      const res = await fetch(`${BACKEND_URL}/api/auth/guest`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name, color }),
@@ -182,7 +190,7 @@ export function useAuth() {
     clearAuth();
     // Re-initialize a fresh guest identity so whiteboard continues seamlessly
     try {
-      const res = await fetch('/api/auth/guest', {
+      const res = await fetch(`${BACKEND_URL}/api/auth/guest`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({}),
@@ -204,7 +212,7 @@ export function useAuth() {
     message?: string;
   }> => {
     try {
-      const urlRes = await fetch(`/api/auth/google/url?origin=${encodeURIComponent(window.location.origin)}`);
+      const urlRes = await fetch(`${BACKEND_URL}/api/auth/google/url?origin=${encodeURIComponent(window.location.origin)}`);
       const urlData = await urlRes.json();
 
       if (urlData.configured && urlData.url) {
@@ -263,7 +271,7 @@ export function useAuth() {
   }): Promise<{ success: boolean; room?: SessionRoom; error?: string }> => {
     try {
       const currentToken = token || localStorage.getItem(TOKEN_KEY);
-      const res = await fetch('/api/rooms/create', {
+      const res = await fetch(`${BACKEND_URL}/api/rooms/create`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -285,7 +293,7 @@ export function useAuth() {
   const deleteRoom = async (roomId: string): Promise<{ success: boolean; error?: string }> => {
     const currentToken = token || localStorage.getItem(TOKEN_KEY);
     try {
-      const res = await fetch(`/api/rooms/${encodeURIComponent(roomId)}`, {
+      const res = await fetch(`${BACKEND_URL}/api/rooms/${encodeURIComponent(roomId)}`, {
         method: 'DELETE',
         headers: {
           'Content-Type': 'application/json',

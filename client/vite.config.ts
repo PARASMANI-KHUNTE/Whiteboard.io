@@ -3,6 +3,8 @@ import react from '@vitejs/plugin-react';
 import path from 'path';
 import { defineConfig } from 'vite';
 
+const backendUrl = process.env.VITE_BACKEND_URL || 'http://127.0.0.1:3000';
+
 export default defineConfig(() => {
   return {
     root: __dirname,
@@ -22,7 +24,7 @@ export default defineConfig(() => {
       watch: process.env.DISABLE_HMR === 'true' ? null : {},
       proxy: {
         '/api': {
-          target: 'http://127.0.0.1:3000',
+          target: backendUrl,
           changeOrigin: true,
           configure: (proxy) => {
             proxy.on('error', (err: any) => {
@@ -34,11 +36,11 @@ export default defineConfig(() => {
           },
         },
         '/auth': {
-          target: 'http://127.0.0.1:3000',
+          target: backendUrl,
           changeOrigin: true,
         },
         '/socket.io': {
-          target: 'http://127.0.0.1:3000',
+          target: backendUrl,
           ws: true,
           changeOrigin: true,
           configure: (proxy) => {
