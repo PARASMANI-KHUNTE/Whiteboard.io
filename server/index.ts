@@ -19,7 +19,7 @@ import {
   saveRoomElementsDebounced,
   deleteRoom,
 } from "./auth";
-import { connectDb } from "./db";
+import { connectDb, checkDbHealth } from "./db";
 import { fileURLToPath } from "url";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -239,13 +239,30 @@ async function startServer() {
     next(err);
   });
 
-  // Health check
-  app.get("/api/health", (_req, res) => {
-    res.json({
-      status: "ok",
+  // Health check endpoint (accessible via /health and /api/health)
+  app.get(["/health", "/api/health"], async (_req, res) => {
+    const dbHealth = await checkDbHealth();
+    const isHealthy = dbHealth.connected;
+
+    const healthData = {
+      status: isHealthy ? "ok" : "degraded",
+      uptimeSeconds: Math.floor(process.uptime()),
+      timestamp: new Date().toISOString(),
       activeRooms: rooms.size,
-      timestamp: Date.now(),
-    });
+      services: {
+        database: {
+          status: dbHealth.connected ? "connected" : "disconnected",
+          latencyMs: dbHealth.latencyMs,
+          error: dbHealth.error,
+        },
+        socketServer: {
+          status: "running",
+          connectedClients: io.engine?.clientsCount || 0,
+        },
+      },
+    };
+
+    res.status(isHealthy ? 200 : 503).json(healthData);
   });
 
   // Authentication Routes with Rate Limiting

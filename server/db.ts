@@ -116,6 +116,19 @@ export function getIndividualElementsCollection(): Collection<IndividualElementD
   return getDb().collection<IndividualElementDoc>('room_elements');
 }
 
+export async function checkDbHealth(): Promise<{ connected: boolean; latencyMs?: number; error?: string }> {
+  if (!db) {
+    return { connected: false, error: 'Database not initialized' };
+  }
+  const start = Date.now();
+  try {
+    await db.command({ ping: 1 });
+    return { connected: true, latencyMs: Date.now() - start };
+  } catch (err: any) {
+    return { connected: false, error: err.message || 'Database ping failed' };
+  }
+}
+
 export async function disconnectDb(): Promise<void> {
   if (client) {
     await client.close();
@@ -123,3 +136,4 @@ export async function disconnectDb(): Promise<void> {
     db = null;
   }
 }
+
