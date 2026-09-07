@@ -325,7 +325,7 @@ async function startServer() {
     const protocol = req.get("x-forwarded-proto") || req.protocol || "http";
     const host = req.get("host") || `localhost:${PORT}`;
     const serverOrigin = (process.env.SERVER_URL || `${protocol}://${host}`).replace(/\/$/, "");
-    const redirectUri = `${serverOrigin}/auth/google/callback`;
+    const redirectUri = (process.env.GOOGLE_CALLBACK_URL || `${serverOrigin}/auth/google/callback`).trim();
     const clientId = process.env.GOOGLE_CLIENT_ID?.trim();
 
     if (!clientId) {
