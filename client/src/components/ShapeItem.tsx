@@ -11,12 +11,14 @@ import {
   Sliders,
   Type,
 } from 'lucide-react';
+import { getAdaptiveDisplayColor } from '../utils/themeColors';
 
 interface ShapeItemProps {
   element: ShapeElement;
   currentUserId: string;
   canWrite?: boolean;
   zoom?: number;
+  theme?: 'light' | 'dark';
   isSelected?: boolean;
   isMultiSelection?: boolean;
   onSelect?: (isMulti?: boolean) => void;
@@ -54,6 +56,7 @@ export const ShapeItem: React.FC<ShapeItemProps> = ({
   element,
   canWrite = true,
   zoom = 1,
+  theme = 'light',
   isSelected = false,
   isMultiSelection = false,
   onSelect,
@@ -469,7 +472,7 @@ export const ShapeItem: React.FC<ShapeItemProps> = ({
 
   const { width, height } = localSize;
   const strokeWidth = element.strokeWidth || 3;
-  const strokeColor = element.color || '#0f172a';
+  const strokeColor = getAdaptiveDisplayColor(element.color, theme);
   const strokeStyle = element.strokeStyle || 'solid';
   const opacity = element.opacity ?? 1.0;
 
@@ -497,17 +500,17 @@ export const ShapeItem: React.FC<ShapeItemProps> = ({
     return false;
   };
 
-  const resolvedTextColor =
-    element.textColor ||
-    (!isTransparent && fillColor !== 'transparent'
-      ? isColorDark(fillColor)
-        ? '#ffffff'
-        : '#0f172a'
-      : strokeColor === '#ffffff'
-      ? '#ffffff'
-      : strokeColor === '#0f172a'
-      ? 'currentColor'
-      : strokeColor);
+  const getEffectiveTextColor = () => {
+    if (element.textColor) {
+      return getAdaptiveDisplayColor(element.textColor, theme);
+    }
+    if (!isTransparent && fillColor !== 'transparent') {
+      return isColorDark(fillColor) ? '#ffffff' : (theme === 'dark' ? '#ffffff' : '#0f172a');
+    }
+    return strokeColor;
+  };
+
+  const resolvedTextColor = getEffectiveTextColor();
 
   const resolvedFontSize =
     element.fontSize ||

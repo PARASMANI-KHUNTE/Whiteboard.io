@@ -14,12 +14,14 @@ import {
   AlignRight,
   ChevronDown,
 } from 'lucide-react';
+import { getAdaptiveDisplayColor } from '../utils/themeColors';
 
 interface TextItemProps {
   element: TextElement;
   currentUserId: string;
   canWrite?: boolean;
   zoom?: number;
+  theme?: 'light' | 'dark';
   isSelected?: boolean;
   isMultiSelection?: boolean;
   onSelect?: (isMulti?: boolean) => void;
@@ -59,6 +61,7 @@ export const TextItem: React.FC<TextItemProps> = ({
   element,
   canWrite = true,
   zoom = 1,
+  theme = 'light',
   isSelected = false,
   isMultiSelection = false,
   onSelect,
@@ -70,6 +73,8 @@ export const TextItem: React.FC<TextItemProps> = ({
   const [localText, setLocalText] = useState(element.text);
   const [isDragging, setIsDragging] = useState(false);
   const [localPos, setLocalPos] = useState<{ x: number; y: number }>({ x: element.x, y: element.y });
+
+  const effectiveTextColor = getAdaptiveDisplayColor(element.color, theme);
 
   // Floating controls popover states
   const [showColorPicker, setShowColorPicker] = useState(false);
@@ -449,7 +454,7 @@ export const TextItem: React.FC<TextItemProps> = ({
               <Palette className="w-3.5 h-3.5 text-slate-500 dark:text-slate-400" />
               <span
                 className="w-3 h-3 rounded-full border border-slate-300 dark:border-slate-600 shrink-0 shadow-2xs"
-                style={{ backgroundColor: element.color || '#0f172a' }}
+                style={{ backgroundColor: effectiveTextColor }}
               />
             </button>
 
@@ -622,7 +627,7 @@ export const TextItem: React.FC<TextItemProps> = ({
             fontStyle: isItalic ? 'italic' : 'normal',
             textDecoration: isUnderline ? 'underline' : 'none',
             textAlign: currentAlign,
-            color: element.color || '#0f172a',
+            color: effectiveTextColor,
           }}
           className={`w-full bg-transparent resize-none outline-none leading-normal select-text cursor-text transition-all ${
             !canWrite ? 'cursor-default' : 'placeholder:text-slate-400 dark:placeholder:text-slate-600'

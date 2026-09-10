@@ -1,5 +1,16 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
-import { ToolType, ShapeType, CanvasElement, DrawingStroke, StickyNote, TextElement, ShapeElement, IconElement } from './types';
+import {
+  ToolType,
+  ShapeType,
+  CanvasElement,
+  DrawingStroke,
+  StickyNote,
+  TextElement,
+  ShapeElement,
+  IconElement,
+  WireElement,
+  WireStyle,
+} from './types';
 import { useAuth } from './hooks/useAuth';
 import { useSocket } from './hooks/useSocket';
 import { useVoiceChat } from './hooks/useVoiceChat';
@@ -17,13 +28,19 @@ import { ConfirmModal } from './components/ConfirmModal';
 import { AiGenerateModal } from './components/AiGenerateModal';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { Info, Sparkles, AlertCircle, CheckCircle2, UserX } from 'lucide-react';
+import { isColorBlack, isColorWhite } from './utils/themeColors';
+import { routeWire } from './utils/wireGeometry';
 
 export default function App() {
+  // Theme hook
+  const { theme, toggleTheme } = useTheme();
+
   const [currentTool, setCurrentTool] = useState<ToolType>('pen');
-  const [currentColor, setCurrentColor] = useState<string>('#0f172a'); // Ink charcoal
+  const [currentColor, setCurrentColor] = useState<string>(() => (theme === 'dark' ? '#ffffff' : '#0f172a'));
   const [currentSize, setCurrentSize] = useState<number>(3); // Fine default
   const [selectedShapeType, setSelectedShapeType] = useState<ShapeType>('rectangle');
   const [selectedIconName, setSelectedIconName] = useState<string>('star');
+  const [selectedWireStyle, setSelectedWireStyle] = useState<WireStyle>('curve');
   const [myCreatedElementIds, setMyCreatedElementIds] = useState<string[]>([]);
   const [showWelcomeHint, setShowWelcomeHint] = useState<boolean>(true);
   const [hasChosenSessionMode, setHasChosenSessionMode] = useState<boolean>(false);
@@ -49,9 +66,8 @@ export default function App() {
   });
 
   const selectAllHandlerRef = useRef<(() => void) | null>(null);
-
-  // Theme hook
-  const { theme, toggleTheme } = useTheme();
+  const navigateToElementsRef = useRef<((elements: CanvasElement[]) => void) | null>(null);
+  const getWorldCenterRef = useRef<(() => { x: number; y: number }) | null>(null);
 
   // Authentication hook
   const {
@@ -142,13 +158,113 @@ export default function App() {
     addNotification(`Canvas converted to multiplayer room ${newRoomCode}!`, 'success');
   }, [convertToMultiplayerRoom, addNotification]);
 
+  // Theme-aware element and pen color adaptation
+  const handleToggleTheme = useCallback(() => {
+    const nextTheme = theme === 'dark' ? 'light' : 'dark';
+
+    // 1. Adapt active pen/tool color if it was black or white
+    if (nextTheme === 'dark') {
+      if (isColorBlack(currentColor)) {
+        setCurrentColor('#ffffff');
+      }
+    } else {
+      if (isColorWhite(currentColor)) {
+        setCurrentColor('#0f172a');
+      }
+    }
+
+    // 2. Convert all existing board elements for theme consistency
+    const updatedElements: CanvasElement[] = [];
+    Object.values(elements).forEach((el) => {
+      let updated: CanvasElement | null = null;
+
+      if (nextTheme === 'dark') {
+        // Switching to dark theme: convert black strokes/text/shapes to white
+        if (el.type === 'stroke') {
+          const s = el as DrawingStroke;
+          if (isColorBlack(s.color)) {
+            updated = { ...s, color: '#ffffff' };
+          }
+        } else if (el.type === 'text') {
+          const t = el as TextElement;
+          if (!t.color || isColorBlack(t.color)) {
+            updated = { ...t, color: '#ffffff' };
+          }
+        } else if (el.type === 'shape') {
+          const sh = el as ShapeElement;
+          const isBlackStroke = isColorBlack(sh.color);
+          const isBlackText = isColorBlack(sh.textColor);
+          if (isBlackStroke || isBlackText) {
+            updated = {
+              ...sh,
+              color: isBlackStroke ? '#ffffff' : sh.color,
+              textColor: isBlackText ? '#ffffff' : sh.textColor,
+              fillColor: sh.fillColor && sh.fillColor.includes('#0f172a') ? '#ffffff15' : sh.fillColor,
+            };
+          }
+        } else if (el.type === 'wire') {
+          const w = el as WireElement;
+          if (isColorBlack(w.color)) {
+            updated = { ...w, color: '#ffffff' };
+          }
+        }
+      } else {
+        // Switching to light theme: convert white strokes/text/shapes/wires to charcoal black
+        if (el.type === 'stroke') {
+          const s = el as DrawingStroke;
+          if (isColorWhite(s.color)) {
+            updated = { ...s, color: '#0f172a' };
+          }
+        } else if (el.type === 'text') {
+          const t = el as TextElement;
+          if (isColorWhite(t.color)) {
+            updated = { ...t, color: '#0f172a' };
+          }
+        } else if (el.type === 'shape') {
+          const sh = el as ShapeElement;
+          const isWhiteStroke = isColorWhite(sh.color);
+          const isWhiteText = isColorWhite(sh.textColor);
+          if (isWhiteStroke || isWhiteText) {
+            updated = {
+              ...sh,
+              color: isWhiteStroke ? '#0f172a' : sh.color,
+              textColor: isWhiteText ? '#0f172a' : sh.textColor,
+              fillColor: sh.fillColor && sh.fillColor.includes('#ffffff') ? '#0f172a15' : sh.fillColor,
+            };
+          }
+        } else if (el.type === 'wire') {
+          const w = el as WireElement;
+          if (isColorWhite(w.color)) {
+            updated = { ...w, color: '#0f172a' };
+          }
+        }
+      }
+
+      if (updated) {
+        updatedElements.push(updated);
+      }
+    });
+
+    if (updatedElements.length > 0) {
+      emitElementsBatchCreate(updatedElements);
+    }
+
+    // 3. Toggle theme state
+    toggleTheme();
+  }, [theme, currentColor, elements, emitElementsBatchCreate, toggleTheme]);
+
   const handleInsertAiElements = useCallback(
     (newElements: CanvasElement[], replaceBoard?: boolean) => {
       if (replaceBoard) {
         emitClearBoardDirect();
       }
       emitElementsBatchCreate(newElements);
-      addNotification(`✨ Gemini generated ${newElements.length} elements!`, 'success');
+      addNotification(`✨ Gemini generated ${newElements.length} elements! Centered on your diagram.`, 'success');
+
+      // Automatically glide viewport and center on the newly generated diagram
+      setTimeout(() => {
+        navigateToElementsRef.current?.(newElements);
+      }, 100);
     },
     [emitClearBoardDirect, emitElementsBatchCreate, addNotification]
   );
@@ -180,6 +296,19 @@ export default function App() {
     users,
     onNotification: addNotification,
   });
+
+  // Automatically convert Solo Mode to multiplayer room when connecting to voice chat
+  const handleJoinVoiceWithSoloCheck = useCallback(async () => {
+    if (isSoloMode || !roomId) {
+      const newRoomCode = convertToMultiplayerRoom();
+      addNotification(`Canvas converted to multiplayer room ${newRoomCode} to enable voice chat!`, 'success');
+      setTimeout(() => {
+        startVoiceChat();
+      }, 200);
+      return;
+    }
+    startVoiceChat();
+  }, [isSoloMode, roomId, convertToMultiplayerRoom, addNotification, startVoiceChat]);
 
   const [cursorCoords, setCursorCoords] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
 
@@ -258,11 +387,11 @@ export default function App() {
     ctx.scale(2, 2);
 
     // Background
-    ctx.fillStyle = '#ffffff';
+    ctx.fillStyle = theme === 'dark' ? '#0b0f19' : '#ffffff';
     ctx.fillRect(0, 0, width, height);
 
     // Grid
-    ctx.strokeStyle = '#f1f5f9';
+    ctx.strokeStyle = theme === 'dark' ? '#1e293b' : '#f1f5f9';
     ctx.lineWidth = 1;
     for (let x = 0; x < width; x += 24) {
       ctx.beginPath();
@@ -289,12 +418,18 @@ export default function App() {
         ctx.lineCap = 'round';
         ctx.lineJoin = 'round';
         ctx.lineWidth = stroke.isHighlighter ? stroke.size * 2.5 : stroke.size;
-        ctx.strokeStyle = stroke.color;
+        const strokeColor =
+          theme === 'dark' && isColorBlack(stroke.color)
+            ? '#ffffff'
+            : theme === 'light' && isColorWhite(stroke.color)
+            ? '#0f172a'
+            : stroke.color;
+        ctx.strokeStyle = strokeColor;
         ctx.globalAlpha = stroke.isHighlighter ? 0.35 : 1.0;
 
         if (points.length === 1) {
           ctx.arc(points[0].x, points[0].y, ctx.lineWidth / 2, 0, Math.PI * 2);
-          ctx.fillStyle = ctx.strokeStyle;
+          ctx.fillStyle = strokeColor;
           ctx.fill();
         } else {
           ctx.moveTo(points[0].x, points[0].y);
@@ -306,6 +441,83 @@ export default function App() {
           ctx.lineTo(points[points.length - 1].x, points[points.length - 1].y);
           ctx.stroke();
         }
+        ctx.restore();
+      }
+    });
+
+    // Draw wires (Line & Curve connectors between objects)
+    (Object.values(elements) as CanvasElement[]).forEach((el) => {
+      if (el.type === 'wire') {
+        const w = el as WireElement;
+        const sourceEl = elements[w.fromId];
+        const targetEl = elements[w.toId];
+        if (!sourceEl || !targetEl) return;
+        const route = routeWire(sourceEl, targetEl, w.wireType || 'curve', w.fromAnchor, w.toAnchor);
+        if (!route) return;
+
+        ctx.save();
+        const effectiveWireColor =
+          theme === 'dark' && isColorBlack(w.color)
+            ? '#ffffff'
+            : theme === 'light' && isColorWhite(w.color)
+            ? '#0f172a'
+            : w.color || '#3b82f6';
+
+        ctx.strokeStyle = effectiveWireColor;
+        ctx.fillStyle = effectiveWireColor;
+        ctx.lineWidth = w.strokeWidth || 3;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+
+        if (w.strokeStyle === 'dashed') {
+          ctx.setLineDash([9, 6]);
+        } else if (w.strokeStyle === 'dotted') {
+          ctx.setLineDash([3, 4]);
+        }
+
+        const path2d = new Path2D(route.svgPath);
+        ctx.stroke(path2d);
+
+        // Draw arrow if arrowEnd !== false
+        if (w.arrowEnd !== false) {
+          const endPt = route.toPoint;
+          let angle = 0;
+          if (route.controlPoints) {
+            const cp2 = route.controlPoints[1];
+            angle = Math.atan2(endPt.y - cp2.y, endPt.x - cp2.x);
+          } else {
+            angle = Math.atan2(endPt.y - route.fromPoint.y, endPt.x - route.fromPoint.x);
+          }
+          const headLen = Math.max(8, (w.strokeWidth || 3) * 2.5);
+          ctx.beginPath();
+          ctx.moveTo(endPt.x, endPt.y);
+          ctx.lineTo(endPt.x - headLen * Math.cos(angle - Math.PI / 6), endPt.y - headLen * Math.sin(angle - Math.PI / 6));
+          ctx.lineTo(endPt.x - headLen * Math.cos(angle + Math.PI / 6), endPt.y - headLen * Math.sin(angle + Math.PI / 6));
+          ctx.closePath();
+          ctx.fill();
+        }
+
+        // Draw midpoint label if present
+        if (w.label) {
+          ctx.setLineDash([]);
+          ctx.font = 'bold 11px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          const textMetrics = ctx.measureText(w.label);
+          const bgW = textMetrics.width + 12;
+          const bgH = 18;
+          ctx.fillStyle = theme === 'dark' ? '#0f172a' : '#ffffff';
+          ctx.beginPath();
+          ctx.roundRect(route.midpoint.x - bgW / 2, route.midpoint.y - bgH / 2, bgW, bgH, 9);
+          ctx.fill();
+          ctx.strokeStyle = effectiveWireColor;
+          ctx.lineWidth = 1;
+          ctx.stroke();
+
+          ctx.fillStyle = effectiveWireColor;
+          ctx.fillText(w.label, route.midpoint.x, route.midpoint.y);
+        }
+
         ctx.restore();
       }
     });
@@ -340,7 +552,13 @@ export default function App() {
       if (el.type === 'text') {
         const t = el as TextElement;
         ctx.save();
-        ctx.fillStyle = t.color || '#1e293b';
+        const textColor =
+          theme === 'dark' && (!t.color || isColorBlack(t.color))
+            ? '#ffffff'
+            : theme === 'light' && isColorWhite(t.color)
+            ? '#0f172a'
+            : t.color || '#0f172a';
+        ctx.fillStyle = textColor;
         ctx.font = `${t.fontSize || 18}px sans-serif`;
         ctx.fillText(t.text || '', t.x, t.y + (t.fontSize || 18));
         ctx.restore();
@@ -480,7 +698,7 @@ export default function App() {
         onSwitchRoom={switchRoom}
         onLogout={handleLogout}
         theme={theme}
-        onToggleTheme={toggleTheme}
+        onToggleTheme={handleToggleTheme}
         isVoiceConnected={isVoiceConnected}
         isMuted={isMuted}
         isDeafened={isDeafened}
@@ -493,7 +711,7 @@ export default function App() {
         error={voiceError}
         isIframeRestricted={isIframeRestricted}
         activeSpeakers={activeSpeakers}
-        onJoinVoice={startVoiceChat}
+        onJoinVoice={handleJoinVoiceWithSoloCheck}
         onLeaveVoice={leaveVoiceChat}
         onToggleMute={toggleMute}
         onToggleDeafen={toggleDeafen}
@@ -530,8 +748,15 @@ export default function App() {
         onSelectTool={setCurrentTool}
         selectedShapeType={selectedShapeType}
         selectedIconName={selectedIconName}
+        selectedWireStyle={selectedWireStyle}
         onRegisterSelectAll={(fn) => {
           selectAllHandlerRef.current = fn;
+        }}
+        onRegisterNavigateToElements={(fn) => {
+          navigateToElementsRef.current = fn;
+        }}
+        onRegisterGetWorldCenter={(fn) => {
+          getWorldCenterRef.current = fn;
         }}
       />
 
@@ -544,11 +769,13 @@ export default function App() {
         canWrite={canWrite}
         selectedShapeType={selectedShapeType}
         selectedIconName={selectedIconName}
+        selectedWireStyle={selectedWireStyle}
         onSelectTool={setCurrentTool}
         onSelectColor={setCurrentColor}
         onSelectSize={setCurrentSize}
         onSelectShape={setSelectedShapeType}
         onSelectIcon={setSelectedIconName}
+        onSelectWireStyle={setSelectedWireStyle}
         onUndo={handleUndo}
         onRequestClear={handleRequestClear}
         onExport={handleExport}
@@ -662,10 +889,14 @@ export default function App() {
         isOpen={showAiModal}
         onClose={() => setShowAiModal(false)}
         onInsertElements={handleInsertAiElements}
-        canvasCenter={{
-          x: typeof window !== 'undefined' ? Math.round(window.innerWidth / 2) : 500,
-          y: typeof window !== 'undefined' ? Math.round(window.innerHeight / 2) : 350,
-        }}
+        canvasCenter={
+          getWorldCenterRef.current
+            ? getWorldCenterRef.current()
+            : {
+                x: typeof window !== 'undefined' ? Math.round(window.innerWidth / 2) : 500,
+                y: typeof window !== 'undefined' ? Math.round(window.innerHeight / 2) : 350,
+              }
+        }
         authToken={token}
       />
 

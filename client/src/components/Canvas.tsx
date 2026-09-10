@@ -7,6 +7,9 @@ import {
   TextElement,
   ShapeElement,
   IconElement,
+  WireElement,
+  WireStyle,
+  AnchorPosition,
   ShapeType,
   RemoteUser,
   Point,
@@ -15,8 +18,11 @@ import { StickyNoteItem } from './StickyNoteItem';
 import { TextItem } from './TextItem';
 import { ShapeItem } from './ShapeItem';
 import { IconItem } from './IconItem';
+import { WireItem, WireOverlay } from './WireItem';
 import { ZoomControls } from './ZoomControls';
 import { CheckSquare, Copy, Trash2, X, MousePointer } from 'lucide-react';
+import { getAdaptiveDisplayColor, isColorBlack, isColorWhite } from '../utils/themeColors';
+import { getElementBounds, getElementAnchors, routeDraftWire } from '../utils/wireGeometry';
 
 interface CanvasProps {
   currentTool: ToolType;
@@ -28,6 +34,7 @@ interface CanvasProps {
   theme?: 'light' | 'dark';
   selectedShapeType?: ShapeType;
   selectedIconName?: string;
+  selectedWireStyle?: WireStyle;
   onRestrictedAttempt?: () => void;
   elements: Record<string, CanvasElement>;
   liveStrokes: Record<
@@ -44,6 +51,8 @@ interface CanvasProps {
   onStrokeLivePoint: (strokeId: string, point: Point) => void;
   onSelectTool?: (tool: ToolType) => void;
   onRegisterSelectAll?: (fn: () => void) => void;
+  onRegisterNavigateToElements?: (fn: (elements: CanvasElement[]) => void) => void;
+  onRegisterGetWorldCenter?: (fn: () => { x: number; y: number }) => void;
 }
 
 // Distance from point to line segment
@@ -65,6 +74,7 @@ export const Canvas: React.FC<CanvasProps> = ({
   theme = 'light',
   selectedShapeType = 'rectangle',
   selectedIconName = 'star',
+  selectedWireStyle = 'curve',
   onRestrictedAttempt,
   elements,
   liveStrokes,
@@ -78,6 +88,8 @@ export const Canvas: React.FC<CanvasProps> = ({
   onStrokeLivePoint,
   onSelectTool,
   onRegisterSelectAll,
+  onRegisterNavigateToElements,
+  onRegisterGetWorldCenter,
 }) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -88,12 +100,44 @@ export const Canvas: React.FC<CanvasProps> = ({
   const [isPanning, setIsPanning] = useState(false);
   const [spacePressed, setSpacePressed] = useState(false);
 
+  // Synchronized refs to avoid stale closures during high-frequency native touch events
+  const panRef = useRef<{ x: number; y: number }>(pan);
+  panRef.current = pan;
+  const zoomRef = useRef<number>(zoom);
+  zoomRef.current = zoom;
+
+  // Multi-touch pinch-to-zoom & two-finger pan gesture state
+  const touchPinchRef = useRef<{
+    initialDist: number;
+    initialZoom: number;
+    initialPan: { x: number; y: number };
+    initialCenter: { x: number; y: number };
+  } | null>(null);
+
   // Active object selection state (multi-select capable)
   const [selectedElementIds, setSelectedElementIds] = useState<Set<string>>(new Set());
 
   // Marquee selection box state
   const [marqueeRect, setMarqueeRect] = useState<{ startX: number; startY: number; currentX: number; currentY: number } | null>(null);
   const isMarqueeRef = useRef(false);
+
+  // Wire drafting and hover anchor state
+  const [wireDraft, setWireDraft] = useState<{
+    fromId: string;
+    fromAnchor?: AnchorPosition;
+    currentPoint: Point;
+    targetHoverId?: string;
+  } | null>(null);
+  const wireDraftStartPointRef = useRef<Point | null>(null);
+  const [wireHoveredElementId, setWireHoveredElementId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (currentTool !== 'wire') {
+      setWireDraft(null);
+      setWireHoveredElementId(null);
+      wireDraftStartPointRef.current = null;
+    }
+  }, [currentTool]);
 
   const panStartRef = useRef<{ mouseX: number; mouseY: number; panX: number; panY: number }>({
     mouseX: 0,
@@ -111,6 +155,25 @@ export const Canvas: React.FC<CanvasProps> = ({
 
   // Throttled cursor emission
   const lastCursorEmitRef = useRef<number>(0);
+
+  // Find connectable element at point for wire connections
+  const findConnectableElementAtCoords = useCallback((pt: Point): CanvasElement | null => {
+    const list = (Object.values(elementsRef.current) as CanvasElement[]).reverse();
+    for (const el of list) {
+      if (el.type === 'shape' || el.type === 'sticky' || el.type === 'text' || el.type === 'icon') {
+        const bounds = getElementBounds(el);
+        if (
+          pt.x >= bounds.x - 8 &&
+          pt.x <= bounds.x + bounds.width + 8 &&
+          pt.y >= bounds.y - 8 &&
+          pt.y <= bounds.y + bounds.height + 8
+        ) {
+          return el;
+        }
+      }
+    }
+    return null;
+  }, []);
 
   // Selection management helpers
   const handleSelectElement = useCallback((id: string, isMulti = false) => {
@@ -171,15 +234,171 @@ export const Canvas: React.FC<CanvasProps> = ({
 
   const handleDeleteSelected = useCallback(() => {
     if (selectedElementIds.size === 0) return;
-    const idsToDelete = Array.from(selectedElementIds);
-    onElementsBatchDelete(idsToDelete);
+    const idsToDeleteSet = new Set(selectedElementIds);
+    Object.values(elementsRef.current).forEach((el) => {
+      if (el.type === 'wire') {
+        const w = el as WireElement;
+        if (idsToDeleteSet.has(w.fromId) || idsToDeleteSet.has(w.toId)) {
+          idsToDeleteSet.add(w.id);
+        }
+      }
+    });
+    onElementsBatchDelete(Array.from(idsToDeleteSet));
     setSelectedElementIds(new Set());
   }, [selectedElementIds, onElementsBatchDelete]);
+
+  // When user picks a color in Toolbar while elements are selected, apply to them immediately
+  const prevColorRef = useRef(currentColor);
+  useEffect(() => {
+    if (prevColorRef.current !== currentColor) {
+      prevColorRef.current = currentColor;
+      if (selectedElementIds.size > 0 && canWrite) {
+        selectedElementIds.forEach((id) => {
+          const el = elementsRef.current[id];
+          if (el) {
+            onElementUpdate({
+              ...el,
+              color: currentColor,
+              updatedAt: Date.now(),
+            } as CanvasElement);
+          }
+        });
+      }
+    }
+  }, [currentColor, selectedElementIds, canWrite, onElementUpdate]);
+
+  // When user changes stroke size in Toolbar while wires or elements are selected, apply to them
+  const prevSizeRef = useRef(currentSize);
+  useEffect(() => {
+    if (prevSizeRef.current !== currentSize) {
+      prevSizeRef.current = currentSize;
+      if (selectedElementIds.size > 0 && canWrite) {
+        selectedElementIds.forEach((id) => {
+          const el = elementsRef.current[id];
+          if (el && el.type === 'wire') {
+            onElementUpdate({
+              ...el,
+              strokeWidth: currentSize,
+              updatedAt: Date.now(),
+            });
+          }
+        });
+      }
+    }
+  }, [currentSize, selectedElementIds, canWrite, onElementUpdate]);
+
+
+  // Cascade-delete any connected wires when an element is deleted
+  const handleElementDelete = useCallback(
+    (id: string) => {
+      const idsToDelete = [id];
+      Object.values(elementsRef.current).forEach((el) => {
+        if (el.type === 'wire') {
+          const w = el as WireElement;
+          if (w.fromId === id || w.toId === id) {
+            idsToDelete.push(w.id);
+          }
+        }
+      });
+      if (idsToDelete.length > 1) {
+        onElementsBatchDelete(idsToDelete);
+      } else {
+        onElementDelete(id);
+      }
+    },
+    [onElementDelete, onElementsBatchDelete]
+  );
 
   // Register external select-all callback
   useEffect(() => {
     onRegisterSelectAll?.(handleSelectAll);
   }, [onRegisterSelectAll, handleSelectAll]);
+
+  // Compute current screen center in world coordinates
+  const getWorldCenter = useCallback((): { x: number; y: number } => {
+    const container = containerRef.current;
+    const w = container ? container.clientWidth : window.innerWidth;
+    const h = container ? container.clientHeight : window.innerHeight;
+    return {
+      x: Math.round((w / 2 - panRef.current.x) / zoomRef.current),
+      y: Math.round((h / 2 - panRef.current.y) / zoomRef.current),
+    };
+  }, []);
+
+  // Smoothly pan & zoom viewport to fit and focus on a set of elements (e.g. newly generated AI diagram)
+  const navigateToElements = useCallback((newElements: CanvasElement[]) => {
+    if (!newElements || newElements.length === 0) return;
+
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+
+    newElements.forEach((el) => {
+      const bounds = getElementBounds(el);
+      if (bounds.x < minX) minX = bounds.x;
+      if (bounds.y < minY) minY = bounds.y;
+      if (bounds.x + bounds.width > maxX) maxX = bounds.x + bounds.width;
+      if (bounds.y + bounds.height > maxY) maxY = bounds.y + bounds.height;
+    });
+
+    if (!isFinite(minX) || !isFinite(maxX)) return;
+
+    const container = containerRef.current;
+    const viewportW = container ? container.clientWidth : window.innerWidth;
+    const viewportH = container ? container.clientHeight : window.innerHeight;
+
+    const diagramW = Math.max(120, maxX - minX);
+    const diagramH = Math.max(100, maxY - minY);
+    const diagramCenterX = minX + diagramW / 2;
+    const diagramCenterY = minY + diagramH / 2;
+
+    // Target zoom with comfortable margins around the diagram
+    const paddingX = 160;
+    const paddingY = 180;
+    const fitZoomX = (viewportW - paddingX) / diagramW;
+    const fitZoomY = (viewportH - paddingY) / diagramH;
+    const targetZoom = Math.max(0.45, Math.min(1.15, Number(Math.min(fitZoomX, fitZoomY).toFixed(2))));
+
+    const targetPanX = Math.round(viewportW / 2 - diagramCenterX * targetZoom);
+    const targetPanY = Math.round(viewportH / 2 - diagramCenterY * targetZoom);
+
+    // Smooth easeOutCubic animation over 500ms
+    const startPan = { ...panRef.current };
+    const startZoom = zoomRef.current;
+    const startTime = performance.now();
+    const duration = 520;
+
+    const animate = (now: number) => {
+      const progress = Math.min(1, (now - startTime) / duration);
+      // easeOutCubic
+      const ease = 1 - Math.pow(1 - progress, 3);
+
+      const currentPanX = Math.round(startPan.x + (targetPanX - startPan.x) * ease);
+      const currentPanY = Math.round(startPan.y + (targetPanY - startPan.y) * ease);
+      const currentZ = Number((startZoom + (targetZoom - startZoom) * ease).toFixed(3));
+
+      setPan({ x: currentPanX, y: currentPanY });
+      setZoom(currentZ);
+
+      if (progress < 1) {
+        requestAnimationFrame(animate);
+      } else {
+        // Highlight newly generated diagram elements with selection
+        setSelectedElementIds(new Set(newElements.map((e) => e.id)));
+      }
+    };
+
+    requestAnimationFrame(animate);
+  }, []);
+
+  useEffect(() => {
+    onRegisterNavigateToElements?.(navigateToElements);
+  }, [onRegisterNavigateToElements, navigateToElements]);
+
+  useEffect(() => {
+    onRegisterGetWorldCenter?.(getWorldCenter);
+  }, [onRegisterGetWorldCenter, getWorldCenter]);
 
   // Spacebar pan listener, keyboard shortcuts & selection actions
   useEffect(() => {
@@ -220,6 +439,8 @@ export const Canvas: React.FC<CanvasProps> = ({
 
       if (e.code === 'Escape') {
         handleClearSelection();
+        setWireDraft(null);
+        setWireHoveredElementId(null);
       }
     };
 
@@ -287,11 +508,38 @@ export const Canvas: React.FC<CanvasProps> = ({
     };
   }, []);
 
+  // Native non-passive touch listeners on canvas container to prevent browser scroll & pull-to-refresh
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const onNativeTouchStart = (e: TouchEvent) => {
+      if (e.touches.length >= 2 || currentTool === 'hand') {
+        e.preventDefault();
+      }
+    };
+
+    const onNativeTouchMove = (e: TouchEvent) => {
+      // Always prevent page-level scroll when interacting with whiteboard canvas
+      e.preventDefault();
+    };
+
+    container.addEventListener('touchstart', onNativeTouchStart, { passive: false });
+    container.addEventListener('touchmove', onNativeTouchMove, { passive: false });
+
+    return () => {
+      container.removeEventListener('touchstart', onNativeTouchStart);
+      container.removeEventListener('touchmove', onNativeTouchMove);
+    };
+  }, [currentTool]);
+
   // Draw helper for a single stroke in world coords
   const drawSingleStroke = useCallback(
     (ctx: CanvasRenderingContext2D, stroke: { points: Point[]; color: string; size: number; isHighlighter?: boolean }) => {
       const points = stroke.points;
       if (points.length < 1) return;
+
+      const strokeColor = getAdaptiveDisplayColor(stroke.color, theme);
 
       ctx.save();
       ctx.beginPath();
@@ -300,16 +548,16 @@ export const Canvas: React.FC<CanvasProps> = ({
       ctx.lineWidth = stroke.isHighlighter ? stroke.size * 2.5 : stroke.size;
 
       if (stroke.isHighlighter) {
-        ctx.strokeStyle = stroke.color;
+        ctx.strokeStyle = strokeColor;
         ctx.globalAlpha = 0.35;
       } else {
-        ctx.strokeStyle = stroke.color;
+        ctx.strokeStyle = strokeColor;
         ctx.globalAlpha = 1.0;
       }
 
       if (points.length === 1) {
         ctx.arc(points[0].x, points[0].y, ctx.lineWidth / 2, 0, Math.PI * 2);
-        ctx.fillStyle = ctx.strokeStyle;
+        ctx.fillStyle = strokeColor;
         ctx.fill();
         ctx.restore();
         return;
@@ -326,7 +574,7 @@ export const Canvas: React.FC<CanvasProps> = ({
       ctx.stroke();
       ctx.restore();
     },
-    []
+    [theme]
   );
 
   // Redraw all elements on canvas with Pan and Zoom transformation
@@ -386,7 +634,7 @@ export const Canvas: React.FC<CanvasProps> = ({
     }
 
     ctx.restore();
-  }, [elements, liveStrokes, currentStroke, drawSingleStroke, pan, zoom, selectedElementIds]);
+  }, [elements, liveStrokes, currentStroke, drawSingleStroke, pan, zoom, selectedElementIds, theme]);
 
   // Handle canvas sizing and DPI scaling
   useEffect(() => {
@@ -415,10 +663,10 @@ export const Canvas: React.FC<CanvasProps> = ({
     };
   }, [renderCanvas]);
 
-  // Re-render whenever strokes, pan, or zoom change
+  // Re-render whenever strokes, pan, zoom, or theme change
   useEffect(() => {
     renderCanvas();
-  }, [renderCanvas]);
+  }, [renderCanvas, theme]);
 
   // Continuous eraser collision check in world coordinates (interpolates between mouse moves)
   const checkAndEraseAlongSegment = useCallback(
@@ -523,13 +771,39 @@ export const Canvas: React.FC<CanvasProps> = ({
   };
 
   const handlePointerDown = (e: React.MouseEvent | React.TouchEvent) => {
+    // Multi-touch: If 2 or more fingers touch the screen, immediately enter pinch-to-zoom & two-finger pan
+    if ('touches' in e && e.touches.length >= 2) {
+      if ('preventDefault' in e && typeof (e as any).preventDefault === 'function') {
+        e.preventDefault();
+      }
+      // Cancel any active drawing, eraser or marquee so no accidental strokes are made
+      setIsDrawing(false);
+      setCurrentStroke(null);
+      lastEraserPointRef.current = null;
+      isMarqueeRef.current = false;
+      setMarqueeRect(null);
+
+      const t1 = e.touches[0];
+      const t2 = e.touches[1];
+      const dist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+      touchPinchRef.current = {
+        initialDist: Math.max(dist, 1),
+        initialZoom: zoomRef.current,
+        initialPan: { ...panRef.current },
+        initialCenter: { x: (t1.clientX + t2.clientX) / 2, y: (t1.clientY + t2.clientY) / 2 },
+      };
+      return;
+    }
+
     // Check if Middle Mouse Button (button === 1), Hand Tool, or Spacebar Pan
     const isMiddleClick = 'button' in e && e.button === 1;
     const isHandTool = currentTool === 'hand';
     const isSpacePan = spacePressed;
 
     if (isMiddleClick || isHandTool || isSpacePan) {
-      e.preventDefault();
+      if ('preventDefault' in e && typeof (e as any).preventDefault === 'function') {
+        e.preventDefault();
+      }
       setIsPanning(true);
       const clientX = 'clientX' in e ? e.clientX : e.touches[0].clientX;
       const clientY = 'clientY' in e ? e.clientY : e.touches[0].clientY;
@@ -588,6 +862,52 @@ export const Canvas: React.FC<CanvasProps> = ({
       return;
     }
 
+    // Handle Wire tool (connect 2 objects with line or curve)
+    if (currentTool === 'wire') {
+      if (!canWrite) {
+        onRestrictedAttempt?.();
+        return;
+      }
+      const clicked = findConnectableElementAtCoords(coords);
+      if (!wireDraft) {
+        if (clicked) {
+          setWireDraft({ fromId: clicked.id, currentPoint: coords });
+          wireDraftStartPointRef.current = coords;
+        }
+      } else {
+        // If already drafting and user clicks an element (different from source)
+        if (clicked && clicked.id !== wireDraft.fromId) {
+          const wireColor =
+            theme === 'dark' && isColorBlack(currentColor)
+              ? '#ffffff'
+              : theme === 'light' && isColorWhite(currentColor)
+              ? '#0f172a'
+              : currentColor;
+          const newWire: WireElement = {
+            id: 'wire_' + Math.random().toString(36).substring(2, 9),
+            type: 'wire',
+            fromId: wireDraft.fromId,
+            toId: clicked.id,
+            wireType: selectedWireStyle || 'curve',
+            color: wireColor,
+            strokeWidth: currentSize || 3,
+            arrowEnd: true,
+            userId: currentUserId,
+            userName: currentUserName,
+            updatedAt: Date.now(),
+          };
+          onElementCreate(newWire);
+          setSelectedElementIds(new Set([newWire.id]));
+          setWireDraft(null);
+          wireDraftStartPointRef.current = null;
+        } else if (!clicked) {
+          setWireDraft(null);
+          wireDraftStartPointRef.current = null;
+        }
+      }
+      return;
+    }
+
     // Deselect any active elements when clicking canvas background with other tools
     handleClearSelection();
 
@@ -619,13 +939,19 @@ export const Canvas: React.FC<CanvasProps> = ({
 
     // Handle Text placement
     if (currentTool === 'text') {
+      const textColor =
+        theme === 'dark' && isColorBlack(currentColor)
+          ? '#ffffff'
+          : theme === 'light' && isColorWhite(currentColor)
+          ? '#0f172a'
+          : currentColor;
       const newText: TextElement = {
         id: 'text_' + Math.random().toString(36).substring(2, 9),
         type: 'text',
         x: coords.x,
         y: coords.y,
         text: '',
-        color: currentColor,
+        color: textColor,
         fontSize: currentSize === 3 ? 16 : currentSize === 6 ? 22 : 30,
         userId: currentUserId,
         userName: currentUserName,
@@ -641,6 +967,12 @@ export const Canvas: React.FC<CanvasProps> = ({
     if (currentTool === 'shape') {
       const shapeW = 160;
       const shapeH = 120;
+      const shapeColor =
+        theme === 'dark' && isColorBlack(currentColor)
+          ? '#ffffff'
+          : theme === 'light' && isColorWhite(currentColor)
+          ? '#0f172a'
+          : currentColor;
       const newShape: ShapeElement = {
         id: 'shape_' + Math.random().toString(36).substring(2, 9),
         type: 'shape',
@@ -649,8 +981,8 @@ export const Canvas: React.FC<CanvasProps> = ({
         y: Math.max(10, coords.y - shapeH / 2),
         width: shapeW,
         height: shapeH,
-        color: currentColor,
-        fillColor: `${currentColor}15`,
+        color: shapeColor,
+        fillColor: `${shapeColor}15`,
         strokeWidth: currentSize,
         userId: currentUserId,
         userName: currentUserName,
@@ -695,11 +1027,19 @@ export const Canvas: React.FC<CanvasProps> = ({
     if (currentTool === 'pen' || currentTool === 'highlighter') {
       setIsDrawing(true);
       const strokeId = 'stroke_' + Math.random().toString(36).substring(2, 9);
+      const effectiveColor =
+        currentTool === 'pen'
+          ? theme === 'dark' && isColorBlack(currentColor)
+            ? '#ffffff'
+            : theme === 'light' && isColorWhite(currentColor)
+            ? '#0f172a'
+            : currentColor
+          : currentColor;
       const newStroke: DrawingStroke = {
         id: strokeId,
         type: 'stroke',
         points: [coords],
-        color: currentColor,
+        color: effectiveColor,
         size: currentSize,
         isHighlighter: currentTool === 'highlighter',
         userId: currentUserId,
@@ -707,12 +1047,54 @@ export const Canvas: React.FC<CanvasProps> = ({
       };
 
       setCurrentStroke(newStroke);
-      onStrokeLiveStart(strokeId, coords, currentColor, currentSize, currentTool === 'highlighter');
+      onStrokeLiveStart(strokeId, coords, effectiveColor, currentSize, currentTool === 'highlighter');
     }
   };
 
   const handlePointerMove = (e: React.MouseEvent | React.TouchEvent) => {
-    // Handle Panning / Canvas Movement
+    // Multi-touch pinch-to-zoom & two-finger pan
+    if ('touches' in e && e.touches.length >= 2) {
+      if ('preventDefault' in e && typeof (e as any).preventDefault === 'function') {
+        e.preventDefault();
+      }
+      const t1 = e.touches[0];
+      const t2 = e.touches[1];
+      const currentDist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+      const currentMidX = (t1.clientX + t2.clientX) / 2;
+      const currentMidY = (t1.clientY + t2.clientY) / 2;
+
+      if (!touchPinchRef.current) {
+        touchPinchRef.current = {
+          initialDist: Math.max(currentDist, 1),
+          initialZoom: zoomRef.current,
+          initialPan: { ...panRef.current },
+          initialCenter: { x: currentMidX, y: currentMidY },
+        };
+        return;
+      }
+
+      const container = containerRef.current;
+      if (!container) return;
+      const rect = container.getBoundingClientRect();
+
+      const { initialDist, initialZoom, initialPan, initialCenter } = touchPinchRef.current;
+      const scale = currentDist / initialDist;
+      const nextZoom = Math.max(0.25, Math.min(3.0, Number((initialZoom * scale).toFixed(3))));
+
+      // World point at initial midpoint
+      const initialWorldX = (initialCenter.x - rect.left - initialPan.x) / initialZoom;
+      const initialWorldY = (initialCenter.y - rect.top - initialPan.y) / initialZoom;
+
+      // New pan keeping the world point under the current midpoint
+      const nextPanX = (currentMidX - rect.left) - initialWorldX * nextZoom;
+      const nextPanY = (currentMidY - rect.top) - initialWorldY * nextZoom;
+
+      setZoom(nextZoom);
+      setPan({ x: nextPanX, y: nextPanY });
+      return;
+    }
+
+    // Handle Panning / Canvas Movement (Hand tool, Middle click, Spacebar pan)
     if (isPanning) {
       const clientX = 'clientX' in e ? e.clientX : e.touches[0].clientX;
       const clientY = 'clientY' in e ? e.clientY : e.touches[0].clientY;
@@ -727,6 +1109,15 @@ export const Canvas: React.FC<CanvasProps> = ({
 
     const coords = getCanvasCoords(e);
     if (!coords) return;
+
+    // In Wire tool mode: track hovered connectable elements and update drafting endpoint
+    if (currentTool === 'wire') {
+      const hovered = findConnectableElementAtCoords(coords);
+      setWireHoveredElementId(hovered ? hovered.id : null);
+      if (wireDraft) {
+        setWireDraft((prev) => (prev ? { ...prev, currentPoint: coords, targetHoverId: hovered?.id } : null));
+      }
+    }
 
     // Track cursor on screen for eraser
     if (currentTool === 'eraser') {
@@ -776,10 +1167,64 @@ export const Canvas: React.FC<CanvasProps> = ({
     onStrokeLivePoint(currentStroke.id, coords);
   };
 
-  const handlePointerUp = () => {
+  const handlePointerUp = (e?: React.MouseEvent | React.TouchEvent) => {
+    // Reset multi-touch pinch state when fingers are released
+    if (touchPinchRef.current) {
+      touchPinchRef.current = null;
+      if (e && 'touches' in e && e.touches.length === 1 && currentTool === 'hand') {
+        panStartRef.current = {
+          mouseX: e.touches[0].clientX,
+          mouseY: e.touches[0].clientY,
+          panX: panRef.current.x,
+          panY: panRef.current.y,
+        };
+        setIsPanning(true);
+        return;
+      }
+    }
+
     if (isPanning) {
       setIsPanning(false);
       return;
+    }
+
+    // Handle Wire drafting completion on drag-and-release
+    if (currentTool === 'wire' && wireDraft && wireDraftStartPointRef.current) {
+      const coords = e ? getCanvasCoords(e) : null;
+      if (coords) {
+        const dragDist = Math.hypot(
+          coords.x - wireDraftStartPointRef.current.x,
+          coords.y - wireDraftStartPointRef.current.y
+        );
+        if (dragDist > 16) {
+          const target = findConnectableElementAtCoords(coords);
+          if (target && target.id !== wireDraft.fromId) {
+            const wireColor =
+              theme === 'dark' && isColorBlack(currentColor)
+                ? '#ffffff'
+                : theme === 'light' && isColorWhite(currentColor)
+                ? '#0f172a'
+                : currentColor;
+            const newWire: WireElement = {
+              id: 'wire_' + Math.random().toString(36).substring(2, 9),
+              type: 'wire',
+              fromId: wireDraft.fromId,
+              toId: target.id,
+              wireType: selectedWireStyle || 'curve',
+              color: wireColor,
+              strokeWidth: currentSize || 3,
+              arrowEnd: true,
+              userId: currentUserId,
+              userName: currentUserName,
+              updatedAt: Date.now(),
+            };
+            onElementCreate(newWire);
+            setSelectedElementIds(new Set([newWire.id]));
+          }
+          setWireDraft(null);
+          wireDraftStartPointRef.current = null;
+        }
+      }
     }
 
     // Finalize marquee selection
@@ -833,8 +1278,9 @@ export const Canvas: React.FC<CanvasProps> = ({
     lastEraserPointRef.current = null;
   };
 
-  // Sticky, Text, Shape, and Icon items
+  // Sticky, Text, Shape, Icon, and Wire items
   const allElements = Object.values(elements) as CanvasElement[];
+  const wireElements = allElements.filter((el) => el.type === 'wire') as WireElement[];
   const stickyNotes = allElements.filter((el) => el.type === 'sticky') as StickyNote[];
   const textElements = allElements.filter((el) => el.type === 'text') as TextElement[];
   const shapeElements = allElements.filter((el) => el.type === 'shape') as ShapeElement[];
@@ -847,6 +1293,7 @@ export const Canvas: React.FC<CanvasProps> = ({
     if (!canWrite) return 'cursor-default';
     if (currentTool === 'select') return 'cursor-default';
     if (currentTool === 'eraser') return 'cursor-none';
+    if (currentTool === 'wire') return 'cursor-crosshair';
     return 'cursor-crosshair';
   };
 
@@ -888,7 +1335,7 @@ export const Canvas: React.FC<CanvasProps> = ({
         backgroundSize: `${24 * zoom}px ${24 * zoom}px`,
         backgroundPosition: `${pan.x}px ${pan.y}px`,
       }}
-      className={`relative w-full h-screen overflow-hidden bg-white dark:bg-[#0b0f19] select-none ${getCursorClass()}`}
+      className={`relative w-full h-screen overflow-hidden bg-white dark:bg-[#0b0f19] select-none touch-none ${getCursorClass()}`}
       onMouseDown={handlePointerDown}
       onMouseMove={handlePointerMove}
       onMouseUp={handlePointerUp}
@@ -899,6 +1346,7 @@ export const Canvas: React.FC<CanvasProps> = ({
       onTouchStart={handlePointerDown}
       onTouchMove={handlePointerMove}
       onTouchEnd={handlePointerUp}
+      onTouchCancel={handlePointerUp}
     >
       {/* Underlying Canvas for high-fps strokes */}
       <canvas ref={canvasRef} className="absolute inset-0 block touch-none" />
@@ -923,9 +1371,78 @@ export const Canvas: React.FC<CanvasProps> = ({
           transformOrigin: '0 0',
         }}
         className={`absolute inset-0 pointer-events-none ${
-          currentTool === 'eraser' ? '[&_*]:pointer-events-none' : ''
+          currentTool === 'eraser' || currentTool === 'wire' ? '[&_*]:pointer-events-none' : ''
         }`}
       >
+        {/* Wires Layer (Line & Curve Connectors) */}
+        <svg
+          id="whiteboard-wires-svg-layer"
+          className="absolute inset-0 w-full h-full overflow-visible pointer-events-none z-10"
+        >
+          {wireElements.map((wire) => (
+            <WireItem
+              key={wire.id}
+              wire={wire}
+              sourceEl={elements[wire.fromId]}
+              targetEl={elements[wire.toId]}
+              zoom={zoom}
+              theme={theme}
+              canWrite={canWrite}
+              isSelected={selectedElementIds.has(wire.id)}
+              onSelect={() => handleSelectElement(wire.id, false)}
+              onUpdate={onElementUpdate}
+              onDelete={handleElementDelete}
+            />
+          ))}
+
+          {/* Active Wire Drafting Preview */}
+          {wireDraft && elements[wireDraft.fromId] && (
+            <path
+              d={routeDraftWire(elements[wireDraft.fromId], wireDraft.currentPoint, selectedWireStyle || 'curve').svgPath}
+              fill="none"
+              stroke="#3b82f6"
+              strokeWidth={(currentSize || 3) + 1}
+              strokeDasharray="6,6"
+              strokeLinecap="round"
+              className="pointer-events-none animate-pulse"
+            />
+          )}
+
+          {/* Magnetic Anchor Snap Indicator Dots for Hovered Object in Wire Mode */}
+          {currentTool === 'wire' && wireHoveredElementId && elements[wireHoveredElementId] && (() => {
+            const bounds = getElementBounds(elements[wireHoveredElementId]);
+            const anchors = getElementAnchors(bounds);
+            return (
+              <g className="pointer-events-none">
+                <rect
+                  x={bounds.x - 4}
+                  y={bounds.y - 4}
+                  width={bounds.width + 8}
+                  height={bounds.height + 8}
+                  fill="none"
+                  stroke="#3b82f6"
+                  strokeWidth={1.5}
+                  strokeDasharray="4,4"
+                  rx={6}
+                  className="opacity-75"
+                />
+                {(Object.entries(anchors) as [string, Point][]).map(([name, pt]) => (
+                  <circle
+                    key={name}
+                    cx={pt.x}
+                    cy={pt.y}
+                    r={5}
+                    fill="#3b82f6"
+                    stroke="#ffffff"
+                    strokeWidth={2}
+                    className="drop-shadow-md"
+                  />
+                ))}
+              </g>
+            );
+          })()}
+        </svg>
+
         {/* Sticky Notes Layer */}
         {stickyNotes.map((note) => (
           <StickyNoteItem
@@ -938,7 +1455,7 @@ export const Canvas: React.FC<CanvasProps> = ({
             isMultiSelection={selectedElementIds.size > 1}
             onSelect={(isMulti) => handleSelectElement(note.id, isMulti)}
             onUpdate={onElementUpdate}
-            onDelete={onElementDelete}
+            onDelete={handleElementDelete}
           />
         ))}
 
@@ -950,11 +1467,12 @@ export const Canvas: React.FC<CanvasProps> = ({
             currentUserId={currentUserId}
             canWrite={canWrite}
             zoom={zoom}
+            theme={theme}
             isSelected={selectedElementIds.has(el.id)}
             isMultiSelection={selectedElementIds.size > 1}
             onSelect={(isMulti) => handleSelectElement(el.id, isMulti)}
             onUpdate={onElementUpdate}
-            onDelete={onElementDelete}
+            onDelete={handleElementDelete}
             onDuplicate={handleDuplicateElement}
           />
         ))}
@@ -967,11 +1485,12 @@ export const Canvas: React.FC<CanvasProps> = ({
             currentUserId={currentUserId}
             canWrite={canWrite}
             zoom={zoom}
+            theme={theme}
             isSelected={selectedElementIds.has(shape.id)}
             isMultiSelection={selectedElementIds.size > 1}
             onSelect={(isMulti) => handleSelectElement(shape.id, isMulti)}
             onUpdate={onElementUpdate}
-            onDelete={onElementDelete}
+            onDelete={handleElementDelete}
             onDuplicate={handleDuplicateElement}
           />
         ))}
@@ -988,10 +1507,26 @@ export const Canvas: React.FC<CanvasProps> = ({
             isMultiSelection={selectedElementIds.size > 1}
             onSelect={(isMulti) => handleSelectElement(icon.id, isMulti)}
             onUpdate={onElementUpdate}
-            onDelete={onElementDelete}
+            onDelete={handleElementDelete}
             onDuplicate={handleDuplicateElement}
           />
         ))}
+
+        {/* Wire Interactive Overlays Layer (Floating Action Bar, Color Picker, and Midpoint Label) */}
+        {wireElements.map((wire) => (
+          <WireOverlay
+            key={`wire-overlay-${wire.id}`}
+            wire={wire}
+            sourceEl={elements[wire.fromId]}
+            targetEl={elements[wire.toId]}
+            theme={theme}
+            canWrite={canWrite}
+            isSelected={selectedElementIds.has(wire.id)}
+            onUpdate={onElementUpdate}
+            onDelete={handleElementDelete}
+          />
+        ))}
+
 
         {/* Marquee Drag Selection Box */}
         {marqueeRect && (
@@ -1059,6 +1594,8 @@ export const Canvas: React.FC<CanvasProps> = ({
           setZoom(1.0);
           setPan({ x: 0, y: 0 });
         }}
+        isHandTool={currentTool === 'hand'}
+        onToggleHand={onSelectTool ? () => onSelectTool(currentTool === 'hand' ? 'pen' : 'hand') : undefined}
       />
 
       {/* Floating Multi-Selection Action Bar (Rendered only when > 1 element selected, eliminating overlaps with single-element menus) */}

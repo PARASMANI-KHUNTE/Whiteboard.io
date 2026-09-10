@@ -1,6 +1,10 @@
-export type ToolType = 'select' | 'hand' | 'pen' | 'highlighter' | 'eraser' | 'sticky' | 'text' | 'shape' | 'icon';
+export type ToolType = 'select' | 'hand' | 'pen' | 'highlighter' | 'eraser' | 'sticky' | 'text' | 'shape' | 'icon' | 'wire';
 
 export type ShapeType = 'rectangle' | 'circle' | 'diamond' | 'triangle' | 'star' | 'arrow';
+
+export type WireStyle = 'line' | 'curve';
+
+export type AnchorPosition = 'auto' | 'top' | 'right' | 'bottom' | 'left';
 
 export interface Point {
   x: number;
@@ -93,7 +97,26 @@ export interface IconElement {
   updatedAt: number;
 }
 
-export type CanvasElement = DrawingStroke | StickyNote | TextElement | ShapeElement | IconElement;
+export interface WireElement {
+  id: string;
+  type: 'wire';
+  fromId: string;
+  toId: string;
+  fromAnchor?: AnchorPosition;
+  toAnchor?: AnchorPosition;
+  wireType: WireStyle; // 'line' | 'curve'
+  color: string;
+  strokeWidth: number;
+  strokeStyle?: 'solid' | 'dashed' | 'dotted';
+  arrowStart?: boolean;
+  arrowEnd?: boolean;
+  label?: string;
+  userId: string;
+  userName?: string;
+  updatedAt: number;
+}
+
+export type CanvasElement = DrawingStroke | StickyNote | TextElement | ShapeElement | IconElement | WireElement;
 
 export interface AuthUser {
   id: string;

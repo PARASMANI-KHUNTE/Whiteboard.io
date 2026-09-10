@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { ToolType, ShapeType } from '../types';
+import { ToolType, ShapeType, WireStyle } from '../types';
 import { AVAILABLE_ICONS } from '../constants/icons';
 import {
   MousePointer,
@@ -26,6 +26,8 @@ import {
   Search,
   X,
   CheckSquare,
+  Spline,
+  Minus,
 } from 'lucide-react';
 
 interface ToolbarProps {
@@ -36,11 +38,13 @@ interface ToolbarProps {
   canWrite?: boolean;
   selectedShapeType: ShapeType;
   selectedIconName: string;
+  selectedWireStyle?: WireStyle;
   onSelectTool: (tool: ToolType) => void;
   onSelectColor: (color: string) => void;
   onSelectSize: (size: number) => void;
   onSelectShape: (shape: ShapeType) => void;
   onSelectIcon: (iconName: string) => void;
+  onSelectWireStyle?: (style: WireStyle) => void;
   onUndo: () => void;
   onRequestClear: () => void;
   onExport: () => void;
@@ -80,11 +84,13 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   canWrite = true,
   selectedShapeType,
   selectedIconName,
+  selectedWireStyle = 'curve',
   onSelectTool,
   onSelectColor,
   onSelectSize,
   onSelectShape,
   onSelectIcon,
+  onSelectWireStyle,
   onUndo,
   onRequestClear,
   onExport,
@@ -93,6 +99,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
 }) => {
   const [showShapePicker, setShowShapePicker] = useState(false);
   const [showIconPicker, setShowIconPicker] = useState(false);
+  const [showWirePicker, setShowWirePicker] = useState(false);
   const [shapeSearchQuery, setShapeSearchQuery] = useState('');
   const [iconSearchQuery, setIconSearchQuery] = useState('');
   const [isExpanded, setIsExpanded] = useState(false);
@@ -284,6 +291,63 @@ export const Toolbar: React.FC<ToolbarProps> = ({
       )}
 
 
+      {/* Floating Popover for Wire / Connector Type */}
+      {showWirePicker && canWrite && (
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xl rounded-2xl p-3 flex flex-col gap-2.5 animate-in fade-in zoom-in-95 duration-150 mb-1 z-50 w-64">
+          <div className="flex items-center justify-between px-0.5">
+            <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+              Wire Connector Type
+            </span>
+            <button
+              onClick={() => setShowWirePicker(false)}
+              className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-0.5 rounded cursor-pointer"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              onClick={() => {
+                onSelectWireStyle?.('curve');
+                onSelectTool('wire');
+                setShowWirePicker(false);
+              }}
+              className={`p-3 rounded-xl border flex flex-col items-center gap-2 transition-all cursor-pointer ${
+                selectedWireStyle === 'curve' && currentTool === 'wire'
+                  ? 'bg-blue-50 dark:bg-blue-950 border-blue-500 text-blue-600 dark:text-blue-400 font-bold shadow-xs ring-1 ring-blue-400'
+                  : 'bg-white dark:bg-slate-800/80 hover:bg-slate-50 dark:hover:bg-slate-750 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200'
+              }`}
+            >
+              <Spline className="w-5 h-5 text-blue-500" />
+              <div className="text-center">
+                <div className="text-xs font-semibold">Smooth Curve</div>
+                <div className="text-[10px] text-slate-400">Organic wire</div>
+              </div>
+            </button>
+
+            <button
+              onClick={() => {
+                onSelectWireStyle?.('line');
+                onSelectTool('wire');
+                setShowWirePicker(false);
+              }}
+              className={`p-3 rounded-xl border flex flex-col items-center gap-2 transition-all cursor-pointer ${
+                selectedWireStyle === 'line' && currentTool === 'wire'
+                  ? 'bg-blue-50 dark:bg-blue-950 border-blue-500 text-blue-600 dark:text-blue-400 font-bold shadow-xs ring-1 ring-blue-400'
+                  : 'bg-white dark:bg-slate-800/80 hover:bg-slate-50 dark:hover:bg-slate-750 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200'
+              }`}
+            >
+              <Minus className="w-5 h-5 text-blue-500" />
+              <div className="text-center">
+                <div className="text-xs font-semibold">Straight Line</div>
+                <div className="text-[10px] text-slate-400">Direct wire</div>
+              </div>
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Main Floating Toolbar */}
       <div
         id="whiteboard-floating-toolbar"
@@ -299,6 +363,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
               onSelectTool('select');
               setShowShapePicker(false);
               setShowIconPicker(false);
+              setShowWirePicker(false);
             }}
             title="Select tool (V) — Click to select, move, and edit shapes or stickers"
             className={`min-h-[40px] min-w-[40px] p-2 sm:p-2.5 rounded-xl flex items-center justify-center gap-1.5 text-xs font-medium transition-colors cursor-pointer ${
@@ -329,6 +394,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
               onSelectTool('hand');
               setShowShapePicker(false);
               setShowIconPicker(false);
+              setShowWirePicker(false);
             }}
             title="Hand / Pan tool (Move whiteboard) — Or use Middle Mouse Button"
             className={`min-h-[40px] min-w-[40px] p-2 sm:p-2.5 rounded-xl flex items-center justify-center gap-1.5 text-xs font-medium transition-colors cursor-pointer ${
@@ -348,6 +414,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
               onSelectTool('pen');
               setShowShapePicker(false);
               setShowIconPicker(false);
+              setShowWirePicker(false);
             }}
             title={canWrite ? "Pen (Draw)" : "Drawing restricted"}
             className={`min-h-[40px] min-w-[40px] p-2 sm:p-2.5 rounded-xl flex items-center justify-center gap-1.5 text-xs font-medium transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
@@ -367,6 +434,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
               onSelectTool('highlighter');
               setShowShapePicker(false);
               setShowIconPicker(false);
+              setShowWirePicker(false);
             }}
             title={canWrite ? "Highlighter" : "Drawing restricted"}
             className={`min-h-[40px] min-w-[40px] p-2 sm:p-2.5 rounded-xl flex items-center justify-center gap-1.5 text-xs font-medium transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
@@ -386,6 +454,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
               onSelectTool('eraser');
               setShowShapePicker(false);
               setShowIconPicker(false);
+              setShowWirePicker(false);
             }}
             title={canWrite ? "Eraser" : "Drawing restricted"}
             className={`min-h-[40px] min-w-[40px] p-2 sm:p-2.5 rounded-xl flex items-center justify-center gap-1.5 text-xs font-medium transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
@@ -405,6 +474,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
             onClick={() => {
               setShowShapePicker(!showShapePicker);
               setShowIconPicker(false);
+              setShowWirePicker(false);
               if (!showShapePicker) onSelectTool('shape');
             }}
             title={canWrite ? "Add Shapes (Rectangle, Circle, Triangle...)" : "Drawing restricted"}
@@ -425,6 +495,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
             onClick={() => {
               setShowIconPicker(!showIconPicker);
               setShowShapePicker(false);
+              setShowWirePicker(false);
               if (!showIconPicker) onSelectTool('icon');
             }}
             title={canWrite ? "Add Icons & Stickers" : "Drawing restricted"}
@@ -445,6 +516,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
               onSelectTool('sticky');
               setShowShapePicker(false);
               setShowIconPicker(false);
+              setShowWirePicker(false);
             }}
             title={canWrite ? "Add Sticky Note" : "Drawing restricted"}
             className={`min-h-[40px] min-w-[40px] p-2 sm:p-2.5 rounded-xl flex items-center justify-center gap-1.5 text-xs font-medium transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
@@ -464,6 +536,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
               onSelectTool('text');
               setShowShapePicker(false);
               setShowIconPicker(false);
+              setShowWirePicker(false);
             }}
             title={canWrite ? "Add Text" : "Drawing restricted"}
             className={`min-h-[40px] min-w-[40px] p-2 sm:p-2.5 rounded-xl flex items-center justify-center gap-1.5 text-xs font-medium transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
@@ -474,6 +547,35 @@ export const Toolbar: React.FC<ToolbarProps> = ({
           >
             <Type className="w-4 h-4" />
             <span className="hidden md:inline">Text</span>
+          </button>
+
+          {/* Wire / Connector Tool Button */}
+          <button
+            id="tool-wire"
+            disabled={!canWrite}
+            onClick={() => {
+              if (currentTool === 'wire') {
+                setShowWirePicker(!showWirePicker);
+              } else {
+                onSelectTool('wire');
+                setShowWirePicker(false);
+              }
+              setShowShapePicker(false);
+              setShowIconPicker(false);
+            }}
+            title={canWrite ? `Wire Connector (${selectedWireStyle === 'line' ? 'Straight Line' : 'Smooth Curve'}) — Click or drag to connect 2 objects` : "Drawing restricted"}
+            className={`min-h-[40px] min-w-[40px] p-2 sm:p-2.5 rounded-xl flex items-center justify-center gap-1.5 text-xs font-medium transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
+              (currentTool === 'wire' || showWirePicker) && canWrite
+                ? 'bg-blue-50 dark:bg-blue-950 text-blue-600 dark:text-blue-400 font-semibold ring-1 ring-blue-400'
+                : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800'
+            }`}
+          >
+            {selectedWireStyle === 'line' ? (
+              <Minus className="w-4 h-4" />
+            ) : (
+              <Spline className="w-4 h-4" />
+            )}
+            <span className="hidden md:inline">Wire</span>
           </button>
         </div>
 
