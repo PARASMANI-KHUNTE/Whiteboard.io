@@ -174,7 +174,7 @@ interface RoomElementsDoc {
 
 ## 6. Google Gemini AI Engine & 5-Layer Rate-Limit Shield
 
-Whiteboard.io includes an integrated AI diagram generation pipeline powered by **Google Gemini 2.5 Flash** (`server/gemini.ts`). Users can describe ideas in plain English and automatically receive fully styled, interactive canvas elements (mind maps, flowcharts, Kanban/SWOT boards, and architecture diagrams).
+Whiteboard.io includes an integrated AI diagram generation pipeline powered by **Google Gemini 3.8 Flash** (`server/gemini.ts`). Users can describe ideas in plain English and automatically receive fully styled, interactive canvas elements (mind maps, flowcharts, Kanban/SWOT boards, and architecture diagrams).
 
 ### AI Generation Flow
 

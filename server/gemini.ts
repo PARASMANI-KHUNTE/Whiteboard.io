@@ -130,7 +130,8 @@ const JSON_SCHEMA = {
 // 4. EXPONENTIAL BACKOFF CALLER WITH RETRIES
 // ---------------------------------------------------------------------------
 async function callGeminiWithRetry(apiKey: string, prompt: string, diagramType: DiagramType, maxRetries = 3): Promise<any> {
-  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+  const model = process.env.GEMINI_MODEL?.trim() || "gemini-3.8-flash";
+  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 
   const requestBody = {
     system_instruction: {

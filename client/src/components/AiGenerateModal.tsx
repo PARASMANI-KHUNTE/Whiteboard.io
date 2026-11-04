@@ -81,7 +81,7 @@ const TEMPLATES: TemplateOption[] = [
 ];
 
 const GENERATION_PHASES = [
-  { text: 'Consulting Gemini 2.5 Flash neural models...', icon: Brain },
+  { text: 'Consulting Gemini 3.8 Flash neural models...', icon: Brain },
   { text: 'Synthesizing visual topology & spatial node structure...', icon: Cpu },
   { text: 'Routing smart connectors, colors & responsive layout...', icon: Wand2 },
   { text: 'Finalizing diagram elements & framing viewport...', icon: Sparkles },
@@ -238,7 +238,7 @@ export const AiGenerateModal: React.FC<AiGenerateModalProps> = ({
               <h3 className="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
                 Generate with Gemini AI
                 <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700 dark:bg-indigo-900/60 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800">
-                  Gemini 2.5 Flash
+                  Gemini 3.8 Flash
                 </span>
               </h3>
               <p className="text-xs text-slate-500 dark:text-slate-400">

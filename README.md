@@ -34,7 +34,7 @@ Most existing whiteboards force compromises: either you pay heavy per-seat month
 ### Key Differentiators Explained
 
 1. **⚡ Native AI Diagram Generation with Zero Failure Rate**:
-   Unlike platforms where AI features are gated behind $20/user/month paywalls or frequently crash with `429 Too Many Requests`, Whiteboard.io integrates Google Gemini 2.5 Flash with an enterprise-grade 5-layer rate-limit shield. It paces outbound requests, caches popular structures for 2 hours, and includes an offline procedural generator that guarantees your brainstorming flow is never interrupted.
+   Unlike platforms where AI features are gated behind $20/user/month paywalls or frequently crash with `429 Too Many Requests`, Whiteboard.io integrates Google Gemini 3.8 Flash with an enterprise-grade 5-layer rate-limit shield. It paces outbound requests, caches popular structures for 2 hours, and includes an offline procedural generator that guarantees your brainstorming flow is never interrupted.
 
 2. **🎙️ No More "Can You Send the Zoom Link?"**:
    Whiteboard.io eliminates meeting tab fatigue. With native WebRTC mesh voice chat and real-time audio visualizers, participants speak directly through the whiteboard. Green audio rings pulsate around multiplayer cursors as team members talk, creating a genuine sense of co-presence.
@@ -50,7 +50,7 @@ Most existing whiteboards force compromises: either you pay heavy per-seat month
 ## 🚀 Key Features
 
 * **✨ Gemini AI Diagram & Mind Map Generator**:
-  * Generate instant visual diagrams using Google Gemini 2.5 Flash from natural language prompts.
+  * Generate instant visual diagrams using Google Gemini 3.8 Flash from natural language prompts.
   * 4 Specialized styles: 🧠 **Mind Maps** (radial hubs), 🔀 **Flowcharts** (decision diamonds & step boxes), 📋 **Sticky Boards** (SWOT / Kanban columns), and 🏗️ **System Architectures**.
   * **5-Layer Rate-Limit Shield**: Outbound request throttling queue (3s spacing), in-memory response cache (2hr TTL), exponential backoff retries, and offline procedural fallback engine.
   * Real-time batch insertion that broadcasts new elements to all connected users instantly.
@@ -84,7 +84,7 @@ Most existing whiteboards force compromises: either you pay heavy per-seat month
 | :--- | :--- |
 | **Frontend** | React 19, TypeScript, Vite, TailwindCSS, Lucide Icons |
 | **Canvas Engine** | HTML5 Canvas 2D API, Web Audio API, AnalyserNode |
-| **Artificial Intelligence**| Google Gemini 2.5 Flash, Structured JSON Schema Generation |
+| **Artificial Intelligence**| Google Gemini 3.8 Flash, Structured JSON Schema Generation |
 | **Real-Time Signaling** | Socket.io Client, WebRTC `RTCPeerConnection` (Mesh) |
 | **Backend** | Node.js (ESM), Express 4, Socket.io Server |
 | **Database** | MongoDB 7 / MongoDB Atlas Native Node Driver |

@@ -250,7 +250,7 @@ Permanently deletes a room and clears all persisted elements.
 ### AI Diagram Generation
 
 #### `POST /api/ai/generate-diagram`
-Generates structured canvas elements (shapes, sticky notes, directional connector arrows, text labels) using Google Gemini 2.5 Flash from natural language prompts. Protected by a 5-layer rate-limit shield, 2hr in-memory response caching, request pacing queue, and automatic procedural fallback.
+Generates structured canvas elements (shapes, sticky notes, directional connector arrows, text labels) using Google Gemini 3.8 Flash from natural language prompts. Protected by a 5-layer rate-limit shield, 2hr in-memory response caching, request pacing queue, and automatic procedural fallback.
 
 * **Rate limit**: 10 requests / minute per IP address.
 * **Request Body**:
