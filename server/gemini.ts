@@ -129,6 +129,19 @@ const JSON_SCHEMA = {
 // ---------------------------------------------------------------------------
 // 4. EXPONENTIAL BACKOFF CALLER WITH RETRIES
 // ---------------------------------------------------------------------------
+function getRetryDelayMs(response: Response, attempt: number): number {
+  const retryAfter = response.headers.get("retry-after");
+  if (retryAfter) {
+    const seconds = Number(retryAfter);
+    if (Number.isFinite(seconds)) {
+      return Math.min(Math.max(seconds * 1000, 1000), 30_000);
+    }
+  }
+
+  const exponentialDelay = Math.min(2 ** attempt * 1000, 15_000);
+  return exponentialDelay + Math.floor(Math.random() * 500);
+}
+
 async function callGeminiWithRetry(apiKey: string, prompt: string, diagramType: DiagramType, maxRetries = 3): Promise<any> {
   const model = process.env.GEMINI_MODEL?.trim() || "gemini-3.8-flash";
   const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
@@ -162,14 +175,15 @@ async function callGeminiWithRetry(apiKey: string, prompt: string, diagramType: 
         body: JSON.stringify(requestBody),
       });
 
-      // Handle Rate Limiting (429) or temporary server unavailability (503)
+      // Retry only transient quota and service-availability responses.
       if (response.status === 429 || response.status === 503) {
         if (attempt === maxRetries) {
-          throw new Error(`Gemini rate limit exceeded after ${maxRetries} retry attempts (HTTP ${response.status}).`);
+          const reason = response.status === 429 ? "rate limit" : "service unavailable";
+          throw new Error(`Gemini ${reason} after ${maxRetries} attempts (HTTP ${response.status}).`);
         }
-        // Exponential backoff: 2s, 4s, 8s + random jitter
-        const delayMs = Math.pow(2, attempt) * 1000 + Math.floor(Math.random() * 1000);
-        console.warn(`[Gemini Rate Limit]: Hit ${response.status}. Backing off for ${delayMs}ms before attempt ${attempt + 1}...`);
+        const delayMs = getRetryDelayMs(response, attempt);
+        const reason = response.status === 429 ? "rate limit" : "temporary unavailability";
+        console.warn(`[Gemini Retry]: Hit ${response.status} (${reason}). Retrying in ${delayMs}ms (attempt ${attempt + 1}/${maxRetries})...`);
         await new Promise((res) => setTimeout(res, delayMs));
         continue;
       }
@@ -186,7 +200,8 @@ async function callGeminiWithRetry(apiKey: string, prompt: string, diagramType: 
       if (attempt === maxRetries || err.message?.includes("not configured")) {
         throw err;
       }
-      const delayMs = 1500 * attempt;
+      const delayMs = Math.min(1500 * attempt, 5000) + Math.floor(Math.random() * 500);
+      console.warn(`[Gemini Retry]: ${err.message}. Retrying in ${delayMs}ms (attempt ${attempt + 1}/${maxRetries})...`);
       await new Promise((res) => setTimeout(res, delayMs));
     }
   }
