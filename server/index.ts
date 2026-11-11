@@ -22,7 +22,7 @@ import {
 } from "./auth";
 import { connectDb, checkDbHealth } from "./db";
 import { generateDiagram, reviseDiagram } from "./ai/generate";
-import { defaultDiagramAuthor, getProviderSummary, resolveAiProvider } from "./ai/providers";
+import { getProviderSummary } from "./ai/providers";
 import {
   coerceDiagramType,
   coerceDetailLevel,
@@ -367,9 +367,9 @@ async function startServer() {
       const authHeader = req.headers.authorization;
       const token = authHeader?.replace("Bearer ", "")?.trim();
       const user = token ? await getUserByToken(token) : null;
-      const author = user
-        ? { id: user.id, name: user.name }
-        : defaultDiagramAuthor(resolveAiProvider());
+      // Unauthenticated diagrams are credited to whichever engine actually
+      // answered, so the author is resolved after the failover chain runs.
+      const author = user ? { id: user.id, name: user.name } : undefined;
 
       const canvasCenter =
         body.canvasCenter &&
@@ -414,9 +414,9 @@ async function startServer() {
       const authHeader = req.headers.authorization;
       const token = authHeader?.replace("Bearer ", "")?.trim();
       const user = token ? await getUserByToken(token) : null;
-      const author = user
-        ? { id: user.id, name: user.name }
-        : defaultDiagramAuthor(resolveAiProvider());
+      // Unauthenticated diagrams are credited to whichever engine actually
+      // answered, so the author is resolved after the failover chain runs.
+      const author = user ? { id: user.id, name: user.name } : undefined;
 
       const history: ChatTurn[] = Array.isArray(body.history)
         ? body.history
