@@ -189,6 +189,26 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
   const usersRef = useRef<Record<string, RemoteUser>>(users);
   usersRef.current = users;
 
+  // Coalesce high-frequency element updates (drag / resize / rotate) into at
+  // most one socket message per element per ~50ms window.
+  const pendingElementUpdatesRef = useRef<Map<string, CanvasElement>>(new Map());
+  const elementUpdateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const flushElementUpdates = useCallback(() => {
+    if (elementUpdateTimerRef.current !== null) {
+      clearTimeout(elementUpdateTimerRef.current);
+      elementUpdateTimerRef.current = null;
+    }
+    const pending = pendingElementUpdatesRef.current;
+    if (pending.size === 0) return;
+    const updates = Array.from(pending.values());
+    pending.clear();
+    const socket = socketRef.current;
+    if (socket?.connected && roomId) {
+      for (const element of updates) socket.emit('element-update', element);
+    }
+  }, [roomId]);
+
   // Connect socket
   useEffect(() => {
     if (!roomId) {
@@ -403,6 +423,30 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
       addNotification(data?.message || 'Could not join the requested room.', 'warning');
     });
 
+    // Coalesce streamed live-stroke points into one React state update per
+    // animation frame. Appending in place is safe because the points array is
+    // replaced (not mutated) when handed to React.
+    const pendingLivePoints = new Map<string, Point[]>();
+    let liveFlushRaf: number | null = null;
+
+    const flushLivePoints = () => {
+      liveFlushRaf = null;
+      if (pendingLivePoints.size === 0) return;
+      const batches = Array.from(pendingLivePoints.entries());
+      pendingLivePoints.clear();
+      setLiveStrokes((prev) => {
+        let changed = false;
+        const next: typeof prev = { ...prev };
+        for (const [strokeId, points] of batches) {
+          const current = next[strokeId];
+          if (!current) continue;
+          next[strokeId] = { ...current, points: current.points.concat(points) };
+          changed = true;
+        }
+        return changed ? next : prev;
+      });
+    };
+
     // Real-time live stroke events from other users
     socket.on('stroke-live-started', (data: { userId: string; strokeId: string; point: Point; color: string; size: number; isHighlighter?: boolean }) => {
       setLiveStrokes((prev) => ({
@@ -419,17 +463,12 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
     });
 
     socket.on('stroke-live-pointed', (data: { strokeId: string; point: Point }) => {
-      setLiveStrokes((prev) => {
-        const current = prev[data.strokeId];
-        if (!current) return prev;
-        return {
-          ...prev,
-          [data.strokeId]: {
-            ...current,
-            points: [...current.points, data.point],
-          },
-        };
-      });
+      const pending = pendingLivePoints.get(data.strokeId);
+      if (pending) pending.push(data.point);
+      else pendingLivePoints.set(data.strokeId, [data.point]);
+      if (liveFlushRaf === null) {
+        liveFlushRaf = requestAnimationFrame(flushLivePoints);
+      }
     });
 
     // Persistent element events
@@ -549,6 +588,7 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
     });
 
     socket.on('board-cleared', (info: { initiatorName: string; wasVoted: boolean }) => {
+      pendingElementUpdatesRef.current.clear();
       setElements({});
       setLiveStrokes({});
       if (!info.wasVoted) {
@@ -557,10 +597,20 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
     });
 
     return () => {
+      // Flush queued element updates before tearing the old connection down,
+      // then make sure nothing leaks into the next room.
+      flushElementUpdates();
+      if (liveFlushRaf !== null) cancelAnimationFrame(liveFlushRaf);
+      pendingLivePoints.clear();
+      pendingElementUpdatesRef.current.clear();
+      if (elementUpdateTimerRef.current !== null) {
+        clearTimeout(elementUpdateTimerRef.current);
+        elementUpdateTimerRef.current = null;
+      }
       socket.disconnect();
       socketRef.current = null;
     };
-  }, [roomId, addNotification]);
+  }, [roomId, addNotification, flushElementUpdates]);
 
   // Emitters
   const emitStrokeLiveStart = useCallback((strokeId: string, point: Point, color: string, size: number, isHighlighter?: boolean) => {
@@ -589,11 +639,18 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
       [element.id]: { ...(prev[element.id] || {}), ...element },
     }));
     if (socketRef.current?.connected && roomId) {
-      socketRef.current.emit('element-update', element);
+      // Queue the latest state per element; the timer flushes at most once per
+      // 50ms so a drag emits ~20 messages/second instead of per pointer event.
+      pendingElementUpdatesRef.current.set(element.id, element);
+      if (elementUpdateTimerRef.current === null) {
+        elementUpdateTimerRef.current = setTimeout(flushElementUpdates, 50);
+      }
     }
-  }, [roomId]);
+  }, [roomId, flushElementUpdates]);
 
   const emitElementDelete = useCallback((elementId: string) => {
+    // A queued update must not be delivered after the delete and resurrect it.
+    pendingElementUpdatesRef.current.delete(elementId);
     setElements((prev) => {
       const next = { ...prev };
       delete next[elementId];
@@ -605,6 +662,7 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
   }, [roomId]);
 
   const emitElementsBatchDelete = useCallback((elementIds: string[]) => {
+    elementIds.forEach((id) => pendingElementUpdatesRef.current.delete(id));
     setElements((prev) => {
       const next = { ...prev };
       elementIds.forEach((id) => delete next[id]);
@@ -660,6 +718,7 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
   }, [roomId]);
 
   const emitClearBoardDirect = useCallback(() => {
+    pendingElementUpdatesRef.current.clear();
     setElements({});
     setLiveStrokes({});
     if (socketRef.current?.connected && roomId) {

@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useState, useCallback } from 'react';
+import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import {
   ToolType,
   CanvasElement,
@@ -23,6 +23,13 @@ import { ZoomControls } from './ZoomControls';
 import { CheckSquare, Copy, Trash2, X, MousePointer } from 'lucide-react';
 import { getAdaptiveDisplayColor, isColorBlack, isColorWhite } from '../utils/themeColors';
 import { getElementBounds, getElementAnchors, routeDraftWire } from '../utils/wireGeometry';
+import { SpatialIndex, IndexedElement } from '../utils/spatialIndex';
+import {
+  distanceToSegment,
+  segmentDistance,
+  segmentIntersectsRect,
+  simplifyStrokePoints,
+} from '../utils/strokeSimplification';
 
 interface CanvasProps {
   currentTool: ToolType;
@@ -57,13 +64,6 @@ interface CanvasProps {
 }
 
 // Distance from point to line segment
-function distanceToSegment(p: Point, v: Point, w: Point) {
-  const l2 = (w.x - v.x) ** 2 + (w.y - v.y) ** 2;
-  if (l2 === 0) return Math.hypot(p.x - v.x, p.y - v.y);
-  let t = ((p.x - v.x) * (w.x - v.x) + (p.y - v.y) * (w.y - v.y)) / l2;
-  t = Math.max(0, Math.min(1, t));
-  return Math.hypot(p.x - (v.x + t * (w.x - v.x)), p.y - (v.y + t * (w.y - v.y)));
-}
 
 export const Canvas: React.FC<CanvasProps> = ({
   currentTool,
@@ -158,24 +158,76 @@ export const Canvas: React.FC<CanvasProps> = ({
   // Throttled cursor emission
   const lastCursorEmitRef = useRef<number>(0);
 
+  // Spatial index cache: rebuilt only when the elements map identity changes,
+  // so repeated pointer events between renders reuse the same grid.
+  const spatialIndexRef = useRef<{ elements: Record<string, CanvasElement>; index: SpatialIndex } | null>(null);
+  const getSpatialIndex = useCallback((): SpatialIndex => {
+    const currentElements = elementsRef.current;
+    const cached = spatialIndexRef.current;
+    if (cached && cached.elements === currentElements) return cached.index;
+    const index = new SpatialIndex(currentElements);
+    spatialIndexRef.current = { elements: currentElements, index };
+    return index;
+  }, []);
+
   // Find connectable element at point for wire connections
-  const findConnectableElementAtCoords = useCallback((pt: Point): CanvasElement | null => {
-    const list = (Object.values(elementsRef.current) as CanvasElement[]).reverse();
-    for (const el of list) {
-      if (el.type === 'shape' || el.type === 'sticky' || el.type === 'text' || el.type === 'icon') {
-        const bounds = getElementBounds(el);
+  const findConnectableElementAtCoords = useCallback(
+    (pt: Point): CanvasElement | null => {
+      const candidates = getSpatialIndex().queryPoint(pt);
+      let best: IndexedElement | null = null;
+      for (const item of candidates) {
+        const el = item.element;
+        if (el.type !== 'shape' && el.type !== 'sticky' && el.type !== 'text' && el.type !== 'icon') {
+          continue;
+        }
+        const bounds = item.bounds;
         if (
           pt.x >= bounds.x - 8 &&
           pt.x <= bounds.x + bounds.width + 8 &&
           pt.y >= bounds.y - 8 &&
           pt.y <= bounds.y + bounds.height + 8
         ) {
-          return el;
+          // Later elements are drawn on top; prefer them like the old reverse scan.
+          if (!best || item.order > best.order) best = item;
         }
       }
-    }
-    return null;
-  }, []);
+      return best ? best.element : null;
+    },
+    [getSpatialIndex]
+  );
+
+  // Topmost element under the cursor (strokes use a widened proximity test).
+  const findElementsAtCoords = useCallback(
+    (pt: Point): CanvasElement | null => {
+      const candidates = getSpatialIndex().queryPoint(pt);
+      let best: IndexedElement | null = null;
+      for (const item of candidates) {
+        const el = item.element;
+        if (el.type === 'wire') continue;
+        if (el.type === 'stroke') {
+          const stroke = el as DrawingStroke;
+          if (!stroke.points || stroke.points.length === 0) continue;
+          const hitRadius = Math.max(12, (stroke.size || 3) * 2);
+          if (!stroke.points.some((p) => Math.hypot(p.x - pt.x, p.y - pt.y) <= hitRadius)) {
+            continue;
+          }
+        } else {
+          const bounds = item.bounds;
+          if (
+            pt.x < bounds.x ||
+            pt.x > bounds.x + bounds.width ||
+            pt.y < bounds.y ||
+            pt.y > bounds.y + bounds.height
+          ) {
+            continue;
+          }
+        }
+        if (!best || item.order > best.order) best = item;
+      }
+      return best ? best.element : null;
+    },
+    [getSpatialIndex]
+  );
 
   // Selection management helpers
   const handleSelectElement = useCallback((id: string, isMulti = false) => {
@@ -613,30 +665,42 @@ export const Canvas: React.FC<CanvasProps> = ({
     ctx.translate(pan.x, pan.y);
     ctx.scale(zoom, zoom);
 
-    // Render all persistent strokes
-    const elementList = Object.values(elements) as CanvasElement[];
-    for (const el of elementList) {
-      if (el.type === 'stroke') {
-        const stroke = el as DrawingStroke;
-        drawSingleStroke(ctx, stroke);
+    // Viewport culling: only draw strokes whose bounds intersect the visible
+    // world rectangle (plus a margin for thick strokes). The spatial index
+    // supplies candidates and `order` restores the original draw order.
+    const viewWidth = canvas.width / dpr;
+    const viewHeight = canvas.height / dpr;
+    const margin = 64;
+    const visibleRect = {
+      x: -pan.x / zoom - margin,
+      y: -pan.y / zoom - margin,
+      width: viewWidth / zoom + margin * 2,
+      height: viewHeight / zoom + margin * 2,
+    };
+    const visibleStrokes = getSpatialIndex()
+      .queryRect(visibleRect)
+      .filter((item) => item.element.type === 'stroke')
+      .sort((a, b) => a.order - b.order);
 
-        // Highlight selected stroke
-        if (selectedElementIds.has(stroke.id) && stroke.points && stroke.points.length > 0) {
-          let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-          for (const p of stroke.points) {
-            if (p.x < minX) minX = p.x;
-            if (p.x > maxX) maxX = p.x;
-            if (p.y < minY) minY = p.y;
-            if (p.y > maxY) maxY = p.y;
-          }
-          const pad = 6;
-          ctx.save();
-          ctx.strokeStyle = '#3b82f6';
-          ctx.lineWidth = 1.5 / zoom;
-          ctx.setLineDash([4 / zoom, 4 / zoom]);
-          ctx.strokeRect(minX - pad, minY - pad, Math.max(12, maxX - minX + pad * 2), Math.max(12, maxY - minY + pad * 2));
-          ctx.restore();
-        }
+    for (const item of visibleStrokes) {
+      const stroke = item.element as DrawingStroke;
+      drawSingleStroke(ctx, stroke);
+
+      // Highlight selected stroke
+      if (selectedElementIds.has(stroke.id) && stroke.points && stroke.points.length > 0) {
+        const bounds = item.bounds;
+        const pad = 6;
+        ctx.save();
+        ctx.strokeStyle = '#3b82f6';
+        ctx.lineWidth = 1.5 / zoom;
+        ctx.setLineDash([4 / zoom, 4 / zoom]);
+        ctx.strokeRect(
+          bounds.x - pad,
+          bounds.y - pad,
+          Math.max(12, bounds.width + pad * 2),
+          Math.max(12, bounds.height + pad * 2)
+        );
+        ctx.restore();
       }
     }
 
@@ -652,7 +716,7 @@ export const Canvas: React.FC<CanvasProps> = ({
     }
 
     ctx.restore();
-  }, [elements, liveStrokes, currentStroke, drawSingleStroke, pan, zoom, selectedElementIds, theme]);
+  }, [elements, liveStrokes, currentStroke, drawSingleStroke, pan, zoom, selectedElementIds, theme, getSpatialIndex]);
 
   // Handle canvas sizing and DPI scaling
   useEffect(() => {
@@ -686,89 +750,80 @@ export const Canvas: React.FC<CanvasProps> = ({
     renderCanvas();
   }, [renderCanvas, theme]);
 
-  // Continuous eraser collision check in world coordinates (interpolates between mouse moves)
+  // Continuous eraser collision check in world coordinates
   const checkAndEraseAlongSegment = useCallback(
     (from: Point, to: Point) => {
-      const allElements = elementsRef.current || {};
-      const elList = Object.values(allElements) as CanvasElement[];
-      if (elList.length === 0) return;
-
+      const index = getSpatialIndex();
       const eraserRadius = Math.max(16, currentSize * 3 + 12) / zoom;
-      const dist = Math.hypot(to.x - from.x, to.y - from.y);
-      const stepDist = Math.max(4, eraserRadius * 0.4);
-      const steps = Math.max(1, Math.ceil(dist / stepDist));
+
+      // Narrow the search to elements the eraser path can actually reach.
+      const candidates = index.queryRect({
+        x: Math.min(from.x, to.x) - eraserRadius,
+        y: Math.min(from.y, to.y) - eraserRadius,
+        width: Math.abs(to.x - from.x) + eraserRadius * 2,
+        height: Math.abs(to.y - from.y) + eraserRadius * 2,
+      });
+      if (candidates.length === 0) return;
 
       const elementsToDelete = new Set<string>();
 
-      for (let s = 0; s <= steps; s++) {
-        const t = s / steps;
-        const pt = {
-          x: from.x + t * (to.x - from.x),
-          y: from.y + t * (to.y - from.y),
-        };
+      for (const item of candidates) {
+        const el = item.element;
+        // Wires do not have their own geometry; they are cascade-deleted below
+        // when one of their endpoints is erased.
+        if (el.type === 'wire') continue;
 
-        for (const el of elList) {
-          if (elementsToDelete.has(el.id)) continue;
-          // Wires do not have their own geometry; they are cascade-deleted below
-          // when one of their endpoints is erased.
-          if (el.type === 'wire') continue;
+        const rawPoints = (el as any).points;
+        if (el.type === 'stroke' || (Array.isArray(rawPoints) && rawPoints.length > 0)) {
+          const points: Point[] = rawPoints || [];
+          if (points.length === 0) continue;
+          const strokeSize = (el as any).size || 3;
+          const effectiveR = eraserRadius + strokeSize / 2;
 
-          // Check if stroke (by type or points array presence)
-          const rawPoints = (el as any).points;
-          if (el.type === 'stroke' || (Array.isArray(rawPoints) && rawPoints.length > 0)) {
-            const points: Point[] = rawPoints || [];
-            if (!points || points.length === 0) continue;
-            const strokeSize = (el as any).size || 3;
-            const effectiveR = eraserRadius + strokeSize / 2;
-
-            // Single-dot stroke (length === 1)
-            if (points.length === 1) {
-              const d = Math.hypot(pt.x - points[0].x, pt.y - points[0].y);
-              if (d <= effectiveR) {
-                elementsToDelete.add(el.id);
-              }
-              continue;
-            }
-
-            // Multi-point stroke segments
-            for (let i = 0; i < points.length - 1; i++) {
-              const d = distanceToSegment(pt, points[i], points[i + 1]);
-              if (d <= effectiveR) {
-                elementsToDelete.add(el.id);
-                break;
-              }
-            }
-          } else {
-            // Bounding box collision check for shapes, stickies, text, icons
-            const bounds = getElementBounds(el);
-
-            if (
-              pt.x + eraserRadius >= bounds.x &&
-              pt.x - eraserRadius <= bounds.x + bounds.width &&
-              pt.y + eraserRadius >= bounds.y &&
-              pt.y - eraserRadius <= bounds.y + bounds.height
-            ) {
+          if (points.length === 1) {
+            if (distanceToSegment(points[0], from, to) <= effectiveR) {
               elementsToDelete.add(el.id);
             }
+            continue;
+          }
+
+          // Test the whole eraser path against each stroke edge with a
+          // segment-to-segment distance (O(edges)) instead of sub-sampling the
+          // path and re-walking every edge for every sample.
+          for (let i = 0; i < points.length - 1; i++) {
+            if (segmentDistance(from, to, points[i], points[i + 1]) <= effectiveR) {
+              elementsToDelete.add(el.id);
+              break;
+            }
+          }
+        } else {
+          // Bounding box collision check for shapes, stickies, text, icons
+          const bounds = item.bounds;
+          if (
+            segmentIntersectsRect(from, to, {
+              x: bounds.x - eraserRadius,
+              y: bounds.y - eraserRadius,
+              width: bounds.width + eraserRadius * 2,
+              height: bounds.height + eraserRadius * 2,
+            })
+          ) {
+            elementsToDelete.add(el.id);
           }
         }
       }
 
       // Cascade-delete wires whose endpoints are being erased
       if (elementsToDelete.size > 0) {
-        for (const el of elList) {
+        for (const el of Object.values(elementsRef.current) as CanvasElement[]) {
           if (el.type !== 'wire') continue;
           if (elementsToDelete.has(el.fromId) || elementsToDelete.has(el.toId)) {
             elementsToDelete.add(el.id);
           }
         }
-      }
-
-      if (elementsToDelete.size > 0) {
         onElementsBatchDelete(Array.from(elementsToDelete));
       }
     },
-    [currentSize, zoom, onElementsBatchDelete]
+    [currentSize, zoom, onElementsBatchDelete, getSpatialIndex]
   );
 
   // Convert screen mouse coordinates into world coordinates
@@ -853,21 +908,7 @@ export const Canvas: React.FC<CanvasProps> = ({
     // Handle Select tool (Single click selection, Shift+click multi-select, or drag marquee)
     if (currentTool === 'select') {
       const isMulti = 'shiftKey' in e && (e.shiftKey || e.ctrlKey || e.metaKey);
-      const clicked = (Object.values(elements) as CanvasElement[]).reverse().find((el) => {
-        if (el.type === 'stroke') {
-          const stroke = el as DrawingStroke;
-          if (!stroke.points) return false;
-          return stroke.points.some((p) => Math.hypot(p.x - coords.x, p.y - coords.y) <= Math.max(12, stroke.size * 2));
-        }
-        if (el.type === 'wire') return false;
-        const bounds = getElementBounds(el);
-        return (
-          coords.x >= bounds.x &&
-          coords.x <= bounds.x + bounds.width &&
-          coords.y >= bounds.y &&
-          coords.y <= bounds.y + bounds.height
-        );
-      });
+      const clicked = findElementsAtCoords(coords);
 
       if (clicked) {
         handleSelectElement(clicked.id, isMulti);
@@ -1182,11 +1223,21 @@ export const Canvas: React.FC<CanvasProps> = ({
 
     if (!currentStroke) return;
 
-    // Add point to stroke
-    const updatedPoints = [...currentStroke.points, coords];
+    // Skip points the user cannot distinguish at the current zoom level.
+    // This cuts array copies, React renders, live-stroke traffic and final
+    // persisted stroke size.
+    const minPointDistance = 1.25 / zoom;
+    const points = currentStroke.points;
+    const lastPoint = points[points.length - 1];
+    if (lastPoint) {
+      const dx = coords.x - lastPoint.x;
+      const dy = coords.y - lastPoint.y;
+      if (dx * dx + dy * dy < minPointDistance * minPointDistance) return;
+    }
+
     setCurrentStroke({
       ...currentStroke,
-      points: updatedPoints,
+      points: [...points, coords],
     });
 
     onStrokeLivePoint(currentStroke.id, coords);
@@ -1263,19 +1314,20 @@ export const Canvas: React.FC<CanvasProps> = ({
       const height = maxY - minY;
 
       if (width > 5 || height > 5) {
+        const candidates = getSpatialIndex().queryRect({ x: minX, y: minY, width, height });
         const enclosedIds: string[] = [];
-        (Object.values(elementsRef.current) as CanvasElement[]).forEach((el) => {
-          if (el.type === 'wire') return;
-          if (el.type === 'stroke' && (el as DrawingStroke).points) {
-            const hasPoint = (el as DrawingStroke).points.some(
-              (p) => p.x >= minX && p.x <= maxX && p.y >= minY && p.y <= maxY
-            );
-            if (hasPoint) {
-              enclosedIds.push(el.id);
-            }
-            return;
+        for (const item of candidates) {
+          const el = item.element;
+          if (el.type === 'wire') continue;
+          if (el.type === 'stroke') {
+            const points = (el as DrawingStroke).points;
+            const hasPoint =
+              !!points &&
+              points.some((p) => p.x >= minX && p.x <= maxX && p.y >= minY && p.y <= maxY);
+            if (hasPoint) enclosedIds.push(el.id);
+            continue;
           }
-          const bounds = getElementBounds(el);
+          const bounds = item.bounds;
           if (
             bounds.x + bounds.width >= minX &&
             bounds.x <= maxX &&
@@ -1284,7 +1336,7 @@ export const Canvas: React.FC<CanvasProps> = ({
           ) {
             enclosedIds.push(el.id);
           }
-        });
+        }
 
         setSelectedElementIds(new Set(enclosedIds));
       }
@@ -1293,20 +1345,57 @@ export const Canvas: React.FC<CanvasProps> = ({
     }
 
     if (isDrawing && currentStroke && currentStroke.points.length > 0) {
-      onElementCreate(currentStroke);
+      // Ramer–Douglas–Peucker simplification: discard points that do not change
+      // the visible line before persisting/broadcasting the stroke.
+      const simplified = simplifyStrokePoints(currentStroke.points, 0.75 / zoom);
+      onElementCreate(
+        simplified.length === currentStroke.points.length
+          ? currentStroke
+          : { ...currentStroke, points: simplified }
+      );
     }
     setIsDrawing(false);
     setCurrentStroke(null);
     lastEraserPointRef.current = null;
   };
 
-  // Sticky, Text, Shape, Icon, and Wire items
-  const allElements = Object.values(elements) as CanvasElement[];
-  const wireElements = allElements.filter((el) => el.type === 'wire') as WireElement[];
-  const stickyNotes = allElements.filter((el) => el.type === 'sticky') as StickyNote[];
-  const textElements = allElements.filter((el) => el.type === 'text') as TextElement[];
-  const shapeElements = allElements.filter((el) => el.type === 'shape') as ShapeElement[];
-  const iconElements = allElements.filter((el) => el.type === 'icon') as IconElement[];
+  // Partition elements once per update instead of running five separate
+  // full-array filters on every render.
+  const { wireElements, stickyNotes, textElements, shapeElements, iconElements } = useMemo(() => {
+    const wires: WireElement[] = [];
+    const stickies: StickyNote[] = [];
+    const texts: TextElement[] = [];
+    const shapes: ShapeElement[] = [];
+    const icons: IconElement[] = [];
+
+    for (const el of Object.values(elements) as CanvasElement[]) {
+      switch (el.type) {
+        case 'wire':
+          wires.push(el);
+          break;
+        case 'sticky':
+          stickies.push(el);
+          break;
+        case 'text':
+          texts.push(el);
+          break;
+        case 'shape':
+          shapes.push(el);
+          break;
+        case 'icon':
+          icons.push(el);
+          break;
+      }
+    }
+
+    return {
+      wireElements: wires,
+      stickyNotes: stickies,
+      textElements: texts,
+      shapeElements: shapes,
+      iconElements: icons,
+    };
+  }, [elements]);
   const userList = Object.values(remoteUsers) as RemoteUser[];
 
   const getCursorClass = () => {
