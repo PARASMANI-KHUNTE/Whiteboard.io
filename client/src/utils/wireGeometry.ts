@@ -17,10 +17,12 @@ export interface WireRoutingResult {
   controlPoints?: [Point, Point];
 }
 
-/**
- * Get the rectangular bounding box for any CanvasElement.
- */
-export function getElementBounds(el: CanvasElement): ElementBounds {
+// Element objects are treated as immutable (updates create a new object), so
+// identity-keyed caches invalidate automatically and cannot leak.
+const boundsCache = new WeakMap<CanvasElement, ElementBounds>();
+const routeCache = new WeakMap<CanvasElement, WeakMap<CanvasElement, Map<string, WireRoutingResult>>>();
+
+function computeElementBounds(el: CanvasElement): ElementBounds {
   if (el.type === 'shape') {
     return {
       x: el.x,
@@ -92,6 +94,20 @@ export function getElementBounds(el: CanvasElement): ElementBounds {
     width: (el as any).width || 100,
     height: (el as any).height || 100,
   };
+}
+
+/**
+ * Get the rectangular bounding box for any CanvasElement.
+ * Memoized by element identity: bounds are otherwise recomputed for every
+ * hit-test, cull query and wire route on every render.
+ */
+export function getElementBounds(el: CanvasElement): ElementBounds {
+  if (!el) return { x: 0, y: 0, width: 0, height: 0 };
+  const cached = boundsCache.get(el);
+  if (cached) return cached;
+  const bounds = computeElementBounds(el);
+  boundsCache.set(el, bounds);
+  return bounds;
 }
 
 /**
@@ -266,6 +282,24 @@ export function routeWire(
 ): WireRoutingResult | null {
   if (!sourceEl || !targetEl) return null;
 
+  // Wires are re-routed for every SVG render, and every drag frame replaces
+  // only the dragged element. Cache per (source object, target object, params)
+  // so unchanged wires can reuse their previous route without recomputation.
+  let byTarget = routeCache.get(sourceEl);
+  if (!byTarget) {
+    byTarget = new WeakMap();
+    routeCache.set(sourceEl, byTarget);
+  }
+  let byParams = byTarget.get(targetEl);
+  if (!byParams) {
+    byParams = new Map();
+    byTarget.set(targetEl, byParams);
+  }
+  const cacheKey = `${wireType}|${fromAnchorPref || 'auto'}|${toAnchorPref || 'auto'}`;
+  if (byParams.has(cacheKey)) {
+    return byParams.get(cacheKey) ?? null;
+  }
+
   const boundsA = getElementBounds(sourceEl);
   const boundsB = getElementBounds(targetEl);
 
@@ -284,7 +318,7 @@ export function routeWire(
     wireType
   );
 
-  return {
+  const result: WireRoutingResult = {
     fromPoint,
     toPoint,
     fromAnchor,
@@ -293,6 +327,16 @@ export function routeWire(
     midpoint,
     controlPoints,
   };
+  byParams.set(cacheKey, result);
+
+  // Defence in depth for callers that keep mutating their own option objects:
+  // cap the parameter variants stored per element pair.
+  if (byParams.size > 8) {
+    const oldest = byParams.keys().next().value;
+    if (oldest !== undefined) byParams.delete(oldest);
+  }
+
+  return result;
 }
 
 /**

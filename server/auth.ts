@@ -468,37 +468,100 @@ export async function loadRoomElements(roomId: string): Promise<Record<string, a
 const pendingElementSaves = new Map<string, { timer: NodeJS.Timeout; elements: Record<string, any> }>();
 // Serialize writes per room so an older snapshot cannot delete newer elements.
 const roomSaveChains = new Map<string, Promise<void>>();
+// Last successfully persisted snapshot per room. Element objects are replaced
+// (never mutated) on every create/update, so reference equality is enough to
+// detect which rows actually changed and skip rewriting untouched elements.
+const persistedElementsCache = new Map<string, Record<string, any>>();
+const MAX_CACHED_ROOMS = 500;
+
+function rememberPersistedElements(roomId: string, snapshot: Record<string, any>) {
+  // Delete before set so the map's insertion order stays LRU-ish and eviction
+  // never drops the snapshot we just wrote.
+  persistedElementsCache.delete(roomId);
+  persistedElementsCache.set(roomId, snapshot);
+  if (persistedElementsCache.size > MAX_CACHED_ROOMS) {
+    const oldest = persistedElementsCache.keys().next().value;
+    if (oldest !== undefined) persistedElementsCache.delete(oldest);
+  }
+}
 
 async function persistRoomElements(cleanRoomId: string, elements: Record<string, any>) {
   try {
+    // Snapshot before touching the database: the live room map can mutate while
+    // the write is in flight, and the cache must only record what this write
+    // actually persisted. A newer update schedules its own save that snapshots
+    // the latest state and writes the diff.
+    const snapshot = { ...elements };
     const individualCol = getIndividualElementsCollection();
     const elementsCol = getElementsCollection();
-    const entries = Object.entries(elements);
+    const entries = Object.entries(snapshot);
+    const previous = persistedElementsCache.get(cleanRoomId);
 
-    if (entries.length === 0) {
-      await Promise.all([
-        individualCol.deleteMany({ roomId: cleanRoomId }),
-        // Remove the legacy document too, otherwise a cleared board would
-        // resurrect its old elements on the next server restart.
-        elementsCol.deleteOne({ roomId: cleanRoomId }),
-      ]);
+    // No snapshot yet (first write since boot / after deletion) or the board is
+    // empty: do a full sync so rows that are no longer present are pruned too.
+    if (!previous || entries.length === 0) {
+      if (entries.length === 0) {
+        await Promise.all([
+          individualCol.deleteMany({ roomId: cleanRoomId }),
+          // Remove the legacy document too, otherwise a cleared board would
+          // resurrect its old elements on the next server restart.
+          elementsCol.deleteOne({ roomId: cleanRoomId }),
+        ]);
+      } else {
+        const bulkOps = entries.map(([elementId, data]) => ({
+          updateOne: {
+            filter: { roomId: cleanRoomId, elementId },
+            update: { $set: { roomId: cleanRoomId, elementId, data, updatedAt: Date.now() } },
+            upsert: true,
+          },
+        }));
+
+        const activeIds = entries.map(([id]) => id);
+        await Promise.all([
+          individualCol.bulkWrite(bulkOps, { ordered: false }),
+          individualCol.deleteMany({ roomId: cleanRoomId, elementId: { $nin: activeIds } }),
+          elementsCol.deleteOne({ roomId: cleanRoomId }),
+        ]);
+      }
+      rememberPersistedElements(cleanRoomId, snapshot);
       return;
     }
 
-    const bulkOps = entries.map(([elementId, data]) => ({
-      updateOne: {
-        filter: { roomId: cleanRoomId, elementId },
-        update: { $set: { roomId: cleanRoomId, elementId, data, updatedAt: Date.now() } },
-        upsert: true,
-      },
-    }));
+    // Incremental save: only dirty and removed rows touch MongoDB. Dragging one
+    // element in a 2,000-element room now writes one row instead of all 2,000.
+    const dirtyOps: Array<{
+      updateOne: { filter: Record<string, string>; update: Record<string, any>; upsert: boolean };
+    }> = [];
+    for (const [elementId, data] of entries) {
+      if (previous[elementId] !== data) {
+        dirtyOps.push({
+          updateOne: {
+            filter: { roomId: cleanRoomId, elementId },
+            update: { $set: { roomId: cleanRoomId, elementId, data, updatedAt: Date.now() } },
+            upsert: true,
+          },
+        });
+      }
+    }
+    const removedIds = Object.keys(previous).filter((id) => !(id in snapshot));
 
-    const activeIds = entries.map(([id]) => id);
-    await Promise.all([
-      individualCol.bulkWrite(bulkOps, { ordered: false }),
-      individualCol.deleteMany({ roomId: cleanRoomId, elementId: { $nin: activeIds } }),
-      elementsCol.deleteOne({ roomId: cleanRoomId }),
-    ]);
+    if (dirtyOps.length === 0 && removedIds.length === 0) {
+      rememberPersistedElements(cleanRoomId, snapshot);
+      return;
+    }
+
+    const tasks: Promise<unknown>[] = [];
+    if (dirtyOps.length > 0) {
+      tasks.push(individualCol.bulkWrite(dirtyOps, { ordered: false }));
+    }
+    if (removedIds.length > 0) {
+      tasks.push(individualCol.deleteMany({ roomId: cleanRoomId, elementId: { $in: removedIds } }));
+    }
+    tasks.push(elementsCol.deleteOne({ roomId: cleanRoomId }));
+
+    await Promise.all(tasks);
+    // Only trust the new snapshot once the write actually succeeded.
+    rememberPersistedElements(cleanRoomId, snapshot);
   } catch (err) {
     console.warn(`Could not persist elements to MongoDB for room ${cleanRoomId}:`, err);
   }
@@ -565,6 +628,7 @@ export async function deleteRoom(roomId: string, requestingUserId?: string): Pro
     await inFlight.catch(() => {});
     roomSaveChains.delete(cleanRoomId);
   }
+  persistedElementsCache.delete(cleanRoomId);
 
   // Delete from rooms collection
   await rooms.deleteOne({ id: cleanRoomId });
