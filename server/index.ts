@@ -64,6 +64,8 @@ interface CanvasElement {
 interface UserSession {
   id: string;
   socketId: string;
+  /** Every socket currently holding this identity (multiple tabs/windows). */
+  socketIds?: string[];
   name: string;
   color: string;
   roomId: string;
@@ -163,27 +165,29 @@ function resolveTrustedOrigin(rawOrigin?: string): string {
   return (process.env.APP_URL || "http://localhost:5173").replace(/\/$/, "");
 }
 
-// In-memory rate limiter to protect against credential stuffing / brute-force
+// In-memory rate limiter to protect against credential stuffing / brute-force.
+// Buckets are namespaced per endpoint so exhausting one limit cannot block others.
 const authRateLimitMap = new Map<string, { count: number; resetTime: number }>();
 
 // Periodic pruning of expired rate-limit records
 setInterval(() => {
   const now = Date.now();
-  for (const [ip, record] of authRateLimitMap.entries()) {
+  for (const [key, record] of authRateLimitMap.entries()) {
     if (now > record.resetTime) {
-      authRateLimitMap.delete(ip);
+      authRateLimitMap.delete(key);
     }
   }
 }, 10 * 60 * 1000);
 
-function authRateLimiter(maxRequests = 30, windowMs = 60000) {
+function authRateLimiter(maxRequests = 30, windowMs = 60000, bucket = "default") {
   return (req: express.Request, res: express.Response, next: express.NextFunction) => {
     const ip = req.ip || req.socket.remoteAddress || "unknown_ip";
+    const key = `${bucket}:${ip}`;
     const now = Date.now();
-    const record = authRateLimitMap.get(ip);
+    const record = authRateLimitMap.get(key);
 
     if (!record || now > record.resetTime) {
-      authRateLimitMap.set(ip, { count: 1, resetTime: now + windowMs });
+      authRateLimitMap.set(key, { count: 1, resetTime: now + windowMs });
       return next();
     }
 
@@ -283,7 +287,7 @@ async function startServer() {
   });
 
   // Authentication Routes with Rate Limiting
-  app.post("/api/auth/register", authRateLimiter(15, 60000), async (req, res) => {
+  app.post("/api/auth/register", authRateLimiter(15, 60000, "auth-register"), async (req, res) => {
     try {
       const { username, email, password, name, color } = req.body;
       const result = await registerUser({ username, email, password, name, color });
@@ -293,7 +297,7 @@ async function startServer() {
     }
   });
 
-  app.post("/api/auth/login", authRateLimiter(15, 60000), async (req, res) => {
+  app.post("/api/auth/login", authRateLimiter(15, 60000, "auth-login"), async (req, res) => {
     try {
       const { identifier, password } = req.body;
       const result = await loginUser(identifier, password);
@@ -303,7 +307,7 @@ async function startServer() {
     }
   });
 
-  app.post("/api/auth/guest", authRateLimiter(30, 60000), async (req, res) => {
+  app.post("/api/auth/guest", authRateLimiter(30, 60000, "auth-guest"), async (req, res) => {
     try {
       const { name, color } = req.body;
       const result = await createGuestUser(name, color);
@@ -333,7 +337,7 @@ async function startServer() {
   });
 
   // Gemini AI Diagram Generation Route (Rate limited to 10 requests / min per IP)
-  app.post("/api/ai/generate-diagram", authRateLimiter(10, 60000), async (req, res) => {
+  app.post("/api/ai/generate-diagram", authRateLimiter(10, 60000, "ai-generate"), async (req, res) => {
     try {
       const { prompt, type, canvasCenter } = req.body;
       if (!prompt || typeof prompt !== "string" || !prompt.trim()) {
@@ -792,7 +796,6 @@ async function startServer() {
       const isHost = isRoomCreator || isFirstUser;
       let canWrite = true;
       let role: 'admin' | 'editor' | 'viewer' = 'editor';
-
       if (isHost) {
         role = 'admin';
         canWrite = true;
@@ -808,9 +811,17 @@ async function startServer() {
         }
       }
 
+      const previousPresence = room.users[actualUserId];
+      const previousSocketIds = previousPresence
+        ? previousPresence.socketIds?.length
+          ? previousPresence.socketIds
+          : [previousPresence.socketId]
+        : [];
+
       currentUser = {
         id: actualUserId,
         socketId: socket.id,
+        socketIds: Array.from(new Set([...previousSocketIds.filter(Boolean), socket.id])),
         name: actualName,
         color: actualColor,
         roomId,
@@ -890,14 +901,21 @@ async function startServer() {
       const targetUser = room.users[targetUserId];
 
       if (targetUser && targetUser.socketId) {
-        const targetSocket = io.sockets.sockets.get(targetUser.socketId);
-        io.to(targetUser.socketId).emit("kicked", {
-          reason: reason || "You were removed from this room by the host.",
-        });
-        if (targetSocket) {
-          targetSocket.data.kicked = true;
-          targetSocket.leave(currentRoomId);
-          targetSocket.disconnect(true);
+        // Kick every socket holding this identity so a second tab/window cannot
+        // keep editing after the user is removed.
+        const socketsToKick = targetUser.socketIds?.length
+          ? targetUser.socketIds
+          : [targetUser.socketId];
+        for (const socketId of socketsToKick) {
+          io.to(socketId).emit("kicked", {
+            reason: reason || "You were removed from this room by the host.",
+          });
+          const targetSocket = io.sockets.sockets.get(socketId);
+          if (targetSocket) {
+            targetSocket.data.kicked = true;
+            targetSocket.leave(currentRoomId);
+            targetSocket.disconnect(true);
+          }
         }
       }
 
@@ -1258,6 +1276,19 @@ async function startServer() {
       if (!currentRoomId || !currentUser) return;
       const room = rooms.get(currentRoomId);
       if (!room) return;
+
+      // Multiple tabs/sockets can share one account identity. Hand the presence
+      // entry to a remaining socket instead of removing the user entirely.
+      const presence = room.users[currentUser.id];
+      if (presence) {
+        const sockets = presence.socketIds?.length ? presence.socketIds : [presence.socketId];
+        const remaining = sockets.filter((sid) => sid !== socket.id);
+        if (remaining.length > 0) {
+          presence.socketId = remaining[remaining.length - 1];
+          presence.socketIds = remaining;
+          return;
+        }
+      }
 
       const wasHost = !!currentUser.isHost;
       delete room.users[currentUser.id];

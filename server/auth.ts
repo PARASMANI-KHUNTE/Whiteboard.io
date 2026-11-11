@@ -465,7 +465,7 @@ export async function loadRoomElements(roomId: string): Promise<Record<string, a
   return {};
 }
 
-const pendingElementSaves = new Map<string, NodeJS.Timeout>();
+const pendingElementSaves = new Map<string, { timer: NodeJS.Timeout; elements: Record<string, any> }>();
 // Serialize writes per room so an older snapshot cannot delete newer elements.
 const roomSaveChains = new Map<string, Promise<void>>();
 
@@ -507,7 +507,7 @@ async function persistRoomElements(cleanRoomId: string, elements: Record<string,
 export async function saveRoomElements(roomId: string, elements: Record<string, any>): Promise<void> {
   const existingTimer = pendingElementSaves.get(roomId);
   if (existingTimer) {
-    clearTimeout(existingTimer);
+    clearTimeout(existingTimer.timer);
     pendingElementSaves.delete(roomId);
   }
   const cleanRoomId = sanitizeString(roomId);
@@ -526,15 +526,15 @@ export async function saveRoomElements(roomId: string, elements: Record<string, 
 }
 
 export function saveRoomElementsDebounced(roomId: string, elements: Record<string, any>, delayMs = 1000) {
-  const existingTimer = pendingElementSaves.get(roomId);
-  if (existingTimer) {
-    clearTimeout(existingTimer);
+  const existing = pendingElementSaves.get(roomId);
+  if (existing) {
+    clearTimeout(existing.timer);
   }
   const timer = setTimeout(async () => {
     pendingElementSaves.delete(roomId);
     await saveRoomElements(roomId, elements);
   }, delayMs);
-  pendingElementSaves.set(roomId, timer);
+  pendingElementSaves.set(roomId, { timer, elements });
 }
 
 export async function deleteRoom(roomId: string, requestingUserId?: string): Promise<boolean> {
@@ -555,7 +555,7 @@ export async function deleteRoom(roomId: string, requestingUserId?: string): Pro
   // Cancel any pending debounced save timer
   const existingTimer = pendingElementSaves.get(cleanRoomId);
   if (existingTimer) {
-    clearTimeout(existingTimer);
+    clearTimeout(existingTimer.timer);
     pendingElementSaves.delete(cleanRoomId);
   }
 
@@ -586,9 +586,13 @@ export async function deleteRoom(roomId: string, requestingUserId?: string): Pro
 
 /** Flush every pending debounced write. Call during graceful shutdown. */
 export async function flushAllPendingSaves(): Promise<void> {
-  const timers = Array.from(pendingElementSaves.values());
+  // Persist the snapshots behind each pending debounce before cancelling timers,
+  // otherwise the last unsaved changes would be dropped on shutdown.
+  const pending = Array.from(pendingElementSaves.entries());
   pendingElementSaves.clear();
-  timers.forEach((timer) => clearTimeout(timer));
+  pending.forEach(([, entry]) => clearTimeout(entry.timer));
+
+  await Promise.all(pending.map(([roomId, entry]) => saveRoomElements(roomId, entry.elements).catch(() => {})));
 
   const chains = Array.from(roomSaveChains.values());
   await Promise.all(chains.map((chain) => chain.catch(() => {})));
