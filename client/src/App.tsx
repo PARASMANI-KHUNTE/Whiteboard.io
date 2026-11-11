@@ -26,16 +26,41 @@ import { AdminPanelModal } from './components/AdminPanelModal';
 import { SessionLauncherModal } from './components/SessionLauncherModal';
 import { ConfirmModal } from './components/ConfirmModal';
 import { AiGenerateModal } from './components/AiGenerateModal';
+import { AiChatPanel } from './components/AiChatPanel';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { Info, Sparkles, AlertCircle, CheckCircle2, UserX } from 'lucide-react';
 import { isColorBlack, isColorWhite } from './utils/themeColors';
 import { routeWire } from './utils/wireGeometry';
+import type { AiDiagramPayload, AiSessionState } from './ai/types';
 
 /** A reversible local edit recorded for Ctrl+Z / Ctrl+Shift+Z. */
 type HistoryOperation =
   | { kind: 'create'; elements: CanvasElement[]; at: number }
   | { kind: 'delete'; elements: CanvasElement[]; at: number }
-  | { kind: 'update'; before: CanvasElement[]; after: CanvasElement[]; at: number };
+  | { kind: 'update'; before: CanvasElement[]; after: CanvasElement[]; at: number }
+  | {
+      /** A single AI turn: creations, deletions and updates applied atomically. */
+      kind: 'batch';
+      created: CanvasElement[];
+      deleted: CanvasElement[];
+      before: CanvasElement[];
+      after: CanvasElement[];
+      at: number;
+    };
+
+/**
+ * Compare two canvas elements ignoring `updatedAt`, which changes on every
+ * server revision even when the visible content is identical.
+ */
+function sameElementContent(a: CanvasElement, b: CanvasElement): boolean {
+  if (a === b) return true;
+  const normalize = (element: CanvasElement) => {
+    const copy: Record<string, unknown> = { ...(element as unknown as Record<string, unknown>) };
+    delete copy.updatedAt;
+    return JSON.stringify(copy);
+  };
+  return normalize(a) === normalize(b);
+}
 
 const HISTORY_LIMIT = 100;
 
@@ -57,6 +82,8 @@ export default function App() {
   const [showShareModal, setShowShareModal] = useState<boolean>(false);
   const [showAdminModal, setShowAdminModal] = useState<boolean>(false);
   const [showAiModal, setShowAiModal] = useState<boolean>(false);
+  const [aiSession, setAiSession] = useState<AiSessionState | null>(null);
+  const [isAiChatOpen, setIsAiChatOpen] = useState<boolean>(false);
   const [confirmModalState, setConfirmModalState] = useState<{
     isOpen: boolean;
     title: string;
@@ -331,22 +358,6 @@ export default function App() {
     toggleTheme();
   }, [theme, currentColor, elements, emitElementsBatchCreate, toggleTheme]);
 
-  const handleInsertAiElements = useCallback(
-    (newElements: CanvasElement[], replaceBoard?: boolean) => {
-      if (replaceBoard) {
-        emitClearBoardDirect();
-      }
-      emitElementsBatchCreate(newElements);
-      addNotification(`✨ Gemini generated ${newElements.length} elements! Centered on your diagram.`, 'success');
-
-      // Automatically glide viewport and center on the newly generated diagram
-      setTimeout(() => {
-        navigateToElementsRef.current?.(newElements);
-      }, 100);
-    },
-    [emitClearBoardDirect, emitElementsBatchCreate, addNotification]
-  );
-
   // Real-time Collaborative Voice Chat Engine
   const {
     isVoiceConnected,
@@ -453,9 +464,176 @@ export default function App() {
     [emitElementsBatchDelete, pushHistory]
   );
 
-  // Reset undo history on room change
+  // -------------------------------------------------------------------------
+  // AI diagram session
+  // -------------------------------------------------------------------------
+
+  /**
+   * Apply one AI payload to the canvas by diffing only that session's element
+   * group (ids start with `ai_<sessionId>_`). Everything else on the board is
+   * left untouched, and the whole turn becomes a single undo step.
+   */
+  const applyAiElements = useCallback(
+    (sessionId: string, nextElements: CanvasElement[]) => {
+      const prefix = `ai_${sessionId}_`;
+      const current = (Object.values(elementsRef.current) as CanvasElement[]).filter(
+        (element) => element && element.id.startsWith(prefix)
+      );
+
+      const currentById = new Map(current.map((element) => [element.id, element]));
+      const nextById = new Map(nextElements.map((element) => [element.id, element]));
+
+      const created = nextElements.filter((element) => !currentById.has(element.id));
+      const deleted = current.filter((element) => !nextById.has(element.id));
+      const updated = nextElements.filter((element) => {
+        const before = currentById.get(element.id);
+        return before ? !sameElementContent(before, element) : false;
+      });
+      const updatedBefore = updated
+        .map((element) => currentById.get(element.id))
+        .filter((element) => Boolean(element)) as CanvasElement[];
+
+      if (created.length === 0 && deleted.length === 0 && updated.length === 0) {
+        return;
+      }
+
+      // Delete first so a revision that reuses an id never shows a duplicate.
+      if (deleted.length > 0) {
+        emitElementsBatchDelete(deleted.map((element) => element.id));
+      }
+      if (created.length > 0) {
+        emitElementsBatchCreate(created);
+      }
+      updated.forEach((element) => emitElementUpdate(element));
+
+      pushHistory({
+        kind: 'batch',
+        created,
+        deleted,
+        before: updatedBefore,
+        after: updated,
+        at: Date.now(),
+      });
+    },
+    [emitElementsBatchCreate, emitElementsBatchDelete, emitElementUpdate, pushHistory]
+  );
+
+  const handleAiGenerated = useCallback(
+    (payload: AiDiagramPayload, options: { origin: { x: number; y: number }; replaceBoard: boolean }) => {
+      if (!canWrite) {
+        addNotification('You do not have permission to edit this board', 'warning');
+        return;
+      }
+
+      if (options.replaceBoard) {
+        emitClearBoardDirect();
+        // The clear is intentional and not undoable; the AI turn itself is.
+        resetHistory();
+      }
+
+      applyAiElements(payload.sessionId, payload.elements);
+
+      const now = Date.now();
+      setAiSession({
+        sessionId: payload.sessionId,
+        type: payload.type,
+        detail: payload.detail,
+        direction: payload.direction,
+        graph: payload.graph,
+        title: payload.title,
+        summary: payload.summary,
+        origin: options.origin,
+        suggestions: payload.suggestions,
+        messages: [
+          {
+            id: `ai-msg-${now}-0`,
+            role: 'assistant',
+            content:
+              [payload.summary, payload.notice].filter(Boolean).join('\n\n') ||
+              'Your diagram is ready. Tell me what to change.',
+            changes: payload.changes,
+            suggestions: payload.suggestions,
+            notice: payload.notice,
+            at: now,
+          },
+        ],
+      });
+      setIsAiChatOpen(true);
+
+      addNotification(
+        `✨ Gemini generated ${payload.elements.length} elements. Use the chat to refine it.`,
+        'success'
+      );
+
+      // Frame the diagram on first generation only; follow-ups keep the view steady.
+      setTimeout(() => {
+        navigateToElementsRef.current?.(payload.elements);
+      }, 120);
+    },
+    [
+      canWrite,
+      addNotification,
+      applyAiElements,
+      emitClearBoardDirect,
+      resetHistory,
+    ]
+  );
+
+  const handleAiApplyTurn = useCallback(
+    (payload: AiDiagramPayload, instruction: string) => {
+      if (!canWrite) {
+        addNotification('You do not have permission to edit this board', 'warning');
+        return;
+      }
+      if (!aiSession) return;
+
+      applyAiElements(aiSession.sessionId, payload.elements);
+
+      const now = Date.now();
+      const userMessage = {
+        id: `ai-msg-${now}-u`,
+        role: 'user' as const,
+        content: instruction,
+        at: now,
+      };
+      const assistantMessage = {
+        id: `ai-msg-${now}-a`,
+        role: 'assistant' as const,
+        content:
+          payload.summary && payload.summary !== aiSession.summary
+            ? payload.summary
+            : 'Done — the canvas is updated.',
+        changes: payload.changes,
+        suggestions: payload.suggestions,
+        notice: payload.notice,
+        at: now + 1,
+      };
+
+      setAiSession({
+        ...aiSession,
+        type: payload.type,
+        detail: payload.detail,
+        direction: payload.direction,
+        graph: payload.graph,
+        title: payload.title,
+        summary: payload.summary,
+        suggestions: payload.suggestions,
+        messages: [...aiSession.messages, userMessage, assistantMessage],
+      });
+
+      addNotification(
+        `✨ Applied: ${payload.changes[0] ?? 'diagram updated'}`,
+        'success'
+      );
+    },
+    [aiSession, canWrite, addNotification, applyAiElements]
+  );
+
+  // Reset undo history and detach the AI chat on room change
   useEffect(() => {
     resetHistory();
+    setAiSession(null);
+    setIsAiChatOpen(false);
   }, [roomId, resetHistory]);
 
   // Undo / redo the last locally initiated edit
@@ -475,6 +653,22 @@ export default function App() {
       emitElementsBatchDelete(Array.from(ids));
     } else if (operation.kind === 'delete') {
       emitElementsBatchCreate(operation.elements);
+    } else if (operation.kind === 'batch') {
+      // Drop the turn's creations (plus any connectors now dangling off them),
+      // restore anything it removed, then roll updates back.
+      const ids = new Set(operation.created.map((element) => element.id));
+      (Object.values(elementsRef.current) as CanvasElement[]).forEach((element) => {
+        if (
+          element.type === 'wire' &&
+          !ids.has(element.id) &&
+          (ids.has(element.fromId) || ids.has(element.toId))
+        ) {
+          ids.add(element.id);
+        }
+      });
+      if (ids.size > 0) emitElementsBatchDelete(Array.from(ids));
+      if (operation.deleted.length > 0) emitElementsBatchCreate(operation.deleted);
+      operation.before.forEach((element) => emitElementUpdate(element));
     } else {
       operation.before.forEach((element) => emitElementUpdate(element));
     }
@@ -492,6 +686,12 @@ export default function App() {
       emitElementsBatchCreate(operation.elements);
     } else if (operation.kind === 'delete') {
       emitElementsBatchDelete(operation.elements.map((element) => element.id));
+    } else if (operation.kind === 'batch') {
+      if (operation.created.length > 0) emitElementsBatchCreate(operation.created);
+      if (operation.deleted.length > 0) {
+        emitElementsBatchDelete(operation.deleted.map((element) => element.id));
+      }
+      operation.after.forEach((element) => emitElementUpdate(element));
     } else {
       operation.after.forEach((element) => emitElementUpdate(element));
     }
@@ -1229,7 +1429,7 @@ export default function App() {
       <AiGenerateModal
         isOpen={showAiModal}
         onClose={() => setShowAiModal(false)}
-        onInsertElements={handleInsertAiElements}
+        onGenerated={handleAiGenerated}
         canvasCenter={
           getWorldCenterRef.current
             ? getWorldCenterRef.current()
@@ -1240,6 +1440,31 @@ export default function App() {
         }
         authToken={token}
       />
+
+      {/* Docked follow-up chat for the active AI diagram */}
+      {aiSession && (
+        <AiChatPanel
+          isOpen={isAiChatOpen}
+          session={aiSession}
+          onClose={() => setIsAiChatOpen(false)}
+          onNewDiagram={() => setShowAiModal(true)}
+          onApplyTurn={handleAiApplyTurn}
+          authToken={token}
+        />
+      )}
+
+      {/* Reopen the AI chat after it has been minimized */}
+      {aiSession && !isAiChatOpen && (
+        <button
+          type="button"
+          onClick={() => setIsAiChatOpen(true)}
+          title="Open AI diagram chat"
+          className="fixed bottom-5 right-5 z-30 inline-flex items-center gap-2 rounded-full bg-gradient-to-tr from-indigo-600 to-violet-600 px-4 py-3 text-xs font-semibold text-white shadow-xl shadow-indigo-500/30 hover:from-indigo-500 hover:to-violet-500 active:scale-95 transition-all cursor-pointer"
+        >
+          <Sparkles className="w-4 h-4" />
+          AI chat
+        </button>
+      )}
 
       {/* Kicked from Room Dialog */}
       {isKicked && (
