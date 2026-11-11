@@ -24,7 +24,7 @@ interface ShapeItemProps {
   onSelect?: (isMulti?: boolean) => void;
   onUpdate: (updated: ShapeElement) => void;
   onDelete: (id: string) => void;
-  onDuplicate?: (element: ShapeElement) => void;
+  onDuplicate?: (element: ShapeElement, offset?: { dx: number; dy: number }) => ShapeElement | void;
 }
 
 const PALETTE_COLORS = [
@@ -165,6 +165,15 @@ export const ShapeItem: React.FC<ShapeItemProps> = ({
     if (!canWrite || isLocked) return;
     e.stopPropagation();
     onSelect?.();
+
+    // Alt-drag: create a copy at the same spot and drag that instead, leaving
+    // the original element where it was.
+    let dragElement = element;
+    if (e.altKey && onDuplicate) {
+      const duplicated = onDuplicate(element, { dx: 0, dy: 0 });
+      if (duplicated) dragElement = duplicated;
+    }
+
     setIsDragging(true);
 
     const startX = e.clientX;
@@ -184,7 +193,7 @@ export const ShapeItem: React.FC<ShapeItemProps> = ({
       if (now - lastEmitRef.current > 40) {
         lastEmitRef.current = now;
         onUpdate({
-          ...element,
+          ...dragElement,
           x: newX,
           y: newY,
           updatedAt: now,
@@ -197,7 +206,7 @@ export const ShapeItem: React.FC<ShapeItemProps> = ({
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
       onUpdate({
-        ...element,
+        ...dragElement,
         x: currentPosRef.current.x,
         y: currentPosRef.current.y,
         updatedAt: Date.now(),

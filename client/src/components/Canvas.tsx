@@ -20,10 +20,26 @@ import { ShapeItem } from './ShapeItem';
 import { IconItem } from './IconItem';
 import { WireItem, WireOverlay } from './WireItem';
 import { ZoomControls } from './ZoomControls';
-import { CheckSquare, Copy, Trash2, X, MousePointer } from 'lucide-react';
+import { ContextMenu, ContextMenuEntry } from './ContextMenu';
+import { ShortcutsModal } from './ShortcutsModal';
+import {
+  CheckSquare,
+  Copy,
+  Scissors,
+  ClipboardPaste,
+  Trash2,
+  X,
+  MousePointer,
+  Keyboard,
+  ChevronsUp,
+  ChevronUp,
+  ChevronDown,
+  ChevronsDown,
+} from 'lucide-react';
 import { getAdaptiveDisplayColor, isColorBlack, isColorWhite } from '../utils/themeColors';
 import { getElementBounds, getElementAnchors, routeDraftWire } from '../utils/wireGeometry';
 import { SpatialIndex, IndexedElement } from '../utils/spatialIndex';
+import { writeClipboard, readClipboard, cloneElementsForPaste, hasClipboardContent } from '../utils/clipboard';
 import {
   distanceToSegment,
   segmentDistance,
@@ -53,6 +69,10 @@ interface CanvasProps {
   onElementUpdate: (element: CanvasElement) => void;
   onElementDelete: (id: string) => void;
   onElementsBatchDelete: (ids: string[]) => void;
+  onElementsBatchCreate?: (elements: CanvasElement[]) => void;
+  onUndo?: () => void;
+  onRedo?: () => void;
+  onNotify?: (message: string, type?: 'info' | 'success' | 'warning') => void;
   onCursorMove: (cursor: { x: number; y: number; tool?: ToolType; isDrawing?: boolean }) => void;
   onStrokeLiveStart: (strokeId: string, point: Point, color: string, size: number, isHighlighter?: boolean) => void;
   onStrokeLivePoint: (strokeId: string, point: Point) => void;
@@ -64,6 +84,25 @@ interface CanvasProps {
 }
 
 // Distance from point to line segment
+
+const TOOL_KEY_MAP: Record<string, ToolType> = {
+  v: 'select',
+  h: 'hand',
+  p: 'pen',
+  y: 'highlighter',
+  e: 'eraser',
+  s: 'sticky',
+  t: 'text',
+  r: 'shape',
+  i: 'icon',
+  w: 'wire',
+};
+
+/** Render order within a layer: explicit zIndex wins, insertion order is the fallback. */
+const getElementZ = (element: CanvasElement, fallbackOrder: number): number =>
+  typeof (element as { zIndex?: number }).zIndex === 'number'
+    ? (element as { zIndex: number }).zIndex
+    : fallbackOrder;
 
 export const Canvas: React.FC<CanvasProps> = ({
   currentTool,
@@ -84,6 +123,10 @@ export const Canvas: React.FC<CanvasProps> = ({
   onElementUpdate,
   onElementDelete,
   onElementsBatchDelete,
+  onElementsBatchCreate,
+  onUndo,
+  onRedo,
+  onNotify,
   onCursorMove,
   onStrokeLiveStart,
   onStrokeLivePoint,
@@ -118,6 +161,14 @@ export const Canvas: React.FC<CanvasProps> = ({
 
   // Active object selection state (multi-select capable)
   const [selectedElementIds, setSelectedElementIds] = useState<Set<string>>(new Set());
+
+  // Right-click / long-press context menu (fixed viewport coordinates)
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
+  const longPressTimerRef = useRef<number | null>(null);
+  const longPressStartRef = useRef<{ x: number; y: number } | null>(null);
+
+  // Keyboard shortcut cheat sheet
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
 
   // Marquee selection box state
   const [marqueeRect, setMarqueeRect] = useState<{ startX: number; startY: number; currentX: number; currentY: number } | null>(null);
@@ -188,7 +239,7 @@ export const Canvas: React.FC<CanvasProps> = ({
           pt.y <= bounds.y + bounds.height + 8
         ) {
           // Later elements are drawn on top; prefer them like the old reverse scan.
-          if (!best || item.order > best.order) best = item;
+          if (!best || getElementZ(item.element, item.order) >= getElementZ(best.element, best.order)) best = item;
         }
       }
       return best ? best.element : null;
@@ -222,7 +273,7 @@ export const Canvas: React.FC<CanvasProps> = ({
             continue;
           }
         }
-        if (!best || item.order > best.order) best = item;
+        if (!best || getElementZ(item.element, item.order) >= getElementZ(best.element, best.order)) best = item;
       }
       return best ? best.element : null;
     },
@@ -270,6 +321,7 @@ export const Canvas: React.FC<CanvasProps> = ({
       x: el.x + dx,
       y: el.y + dy,
       updatedAt: Date.now(),
+      zIndex: Date.now(),
     } as CanvasElement;
   }, []);
 
@@ -304,6 +356,305 @@ export const Canvas: React.FC<CanvasProps> = ({
     onElementsBatchDelete(Array.from(idsToDeleteSet));
     setSelectedElementIds(new Set());
   }, [selectedElementIds, onElementsBatchDelete]);
+
+  // ---------------------------------------------------------------------------
+  // Clipboard, nudging and stacking order
+  // ---------------------------------------------------------------------------
+
+  const handleCopySelected = useCallback(() => {
+    if (selectedElementIds.size === 0) return;
+    const selected: CanvasElement[] = [];
+    selectedElementIds.forEach((id) => {
+      const el = elementsRef.current[id];
+      if (el) selected.push(el);
+    });
+
+    // Include wires whose both endpoints are part of the selection so a copied
+    // diagram keeps its connectors.
+    const wireIds = new Set(selected.map((el) => el.id));
+    const connectedWires = (Object.values(elementsRef.current) as CanvasElement[]).filter(
+      (el): el is WireElement =>
+        el.type === 'wire' && wireIds.has(el.fromId) && wireIds.has(el.toId)
+    );
+
+    const payload = [...selected, ...connectedWires];
+    writeClipboard(payload);
+    onNotify?.(
+      `Copied ${selected.length} object${selected.length === 1 ? '' : 's'}${
+        connectedWires.length > 0 ? ` and ${connectedWires.length} connector${connectedWires.length === 1 ? '' : 's'}` : ''
+      }`,
+      'success'
+    );
+  }, [selectedElementIds, onNotify]);
+
+  const handleCutSelected = useCallback(() => {
+    if (selectedElementIds.size === 0) return;
+    handleCopySelected();
+    handleDeleteSelected();
+  }, [selectedElementIds.size, handleCopySelected, handleDeleteSelected]);
+
+  // Cascade repeated pastes so stacked copies don't land exactly on top of each
+  // other. The counter resets whenever the clipboard content changes.
+  const pasteCascadeRef = useRef<{ signature: string; count: number }>({ signature: '', count: 0 });
+
+  const handlePaste = useCallback(() => {
+    const clipboard = readClipboard();
+    if (clipboard.length === 0) {
+      onNotify?.('Clipboard is empty — copy something first', 'info');
+      return;
+    }
+
+    const signature = clipboard.map((el) => el.id).join('|');
+    if (pasteCascadeRef.current.signature !== signature) {
+      pasteCascadeRef.current = { signature, count: 0 };
+    }
+    const step = 32 * (Math.min(pasteCascadeRef.current.count, 11) + 1);
+    pasteCascadeRef.current.count += 1;
+
+    const pasted = cloneElementsForPaste(clipboard, step, step);
+    if (pasted.length === 0) {
+      onNotify?.('Clipboard has no pasteable objects', 'warning');
+      return;
+    }
+
+    if (onElementsBatchCreate) {
+      onElementsBatchCreate(pasted);
+    } else {
+      pasted.forEach((el) => onElementCreate(el));
+    }
+    setSelectedElementIds(new Set(pasted.map((el) => el.id)));
+    onNotify?.(`Pasted ${pasted.length} object${pasted.length === 1 ? '' : 's'}`, 'success');
+  }, [onElementsBatchCreate, onElementCreate, onNotify]);
+
+  const handleNudgeSelected = useCallback(
+    (dx: number, dy: number) => {
+      if (!canWrite || selectedElementIds.size === 0) return;
+      selectedElementIds.forEach((id) => {
+        const el = elementsRef.current[id];
+        if (!el) return;
+        if (el.type === 'stroke') {
+          onElementUpdate({
+            ...el,
+            points: el.points.map((point) => ({ x: point.x + dx, y: point.y + dy })),
+            createdAt: el.createdAt,
+          });
+        } else if (el.type !== 'wire') {
+          onElementUpdate({
+            ...el,
+            x: el.x + dx,
+            y: el.y + dy,
+            updatedAt: Date.now(),
+          } as CanvasElement);
+        }
+      });
+    },
+    [canWrite, selectedElementIds, onElementUpdate]
+  );
+
+  const handleZOrder = useCallback(
+    (action: 'front' | 'forward' | 'backward' | 'back') => {
+      if (!canWrite || selectedElementIds.size === 0) return;
+      const selected = new Set(selectedElementIds);
+      const byType = new Map<string, { element: CanvasElement; order: number }[]>();
+      let order = 0;
+
+      for (const element of Object.values(elementsRef.current) as CanvasElement[]) {
+        if (element.type === 'wire' || element.type === 'stroke') continue;
+        const list = byType.get(element.type) ?? [];
+        list.push({ element, order: order++ });
+        byType.set(element.type, list);
+      }
+
+      byType.forEach((entries) => {
+        const arranged = entries
+          .slice()
+          .sort((a, b) => getElementZ(a.element, a.order) - getElementZ(b.element, b.order))
+          .map((entry) => entry.element);
+
+        if (action === 'front' || action === 'back') {
+          const moving = arranged.filter((el) => selected.has(el.id));
+          const rest = arranged.filter((el) => !selected.has(el.id));
+          arranged.length = 0;
+          arranged.push(...(action === 'front' ? [...rest, ...moving] : [...moving, ...rest]));
+        } else if (action === 'forward') {
+          for (let i = arranged.length - 2; i >= 0; i--) {
+            if (selected.has(arranged[i].id) && !selected.has(arranged[i + 1].id)) {
+              [arranged[i], arranged[i + 1]] = [arranged[i + 1], arranged[i]];
+            }
+          }
+        } else {
+          for (let i = 1; i < arranged.length; i++) {
+            if (selected.has(arranged[i].id) && !selected.has(arranged[i - 1].id)) {
+              [arranged[i], arranged[i - 1]] = [arranged[i - 1], arranged[i]];
+            }
+          }
+        }
+
+        arranged.forEach((element, index) => {
+          if ((element as { zIndex?: number }).zIndex !== index) {
+            onElementUpdate({
+              ...element,
+              zIndex: index,
+              updatedAt: Date.now(),
+            } as CanvasElement);
+          }
+        });
+      });
+    },
+    [canWrite, selectedElementIds, onElementUpdate]
+  );
+
+  // ---------------------------------------------------------------------------
+  // Context menu (right-click + touch long-press)
+  // ---------------------------------------------------------------------------
+
+  const selectedHasStackable = useMemo(() => {
+    let stackable = false;
+    selectedElementIds.forEach((id) => {
+      const el = elementsRef.current[id];
+      if (el && el.type !== 'wire' && el.type !== 'stroke') stackable = true;
+    });
+    return stackable;
+  }, [selectedElementIds, elements]);
+
+  const cancelLongPress = useCallback(() => {
+    if (longPressTimerRef.current !== null) {
+      window.clearTimeout(longPressTimerRef.current);
+    }
+    longPressTimerRef.current = null;
+    longPressStartRef.current = null;
+  }, []);
+
+  useEffect(() => cancelLongPress, [cancelLongPress]);
+
+  const openContextMenuAt = useCallback(
+    (clientX: number, clientY: number) => {
+      const container = containerRef.current;
+      if (!container) return;
+      const rect = container.getBoundingClientRect();
+      const world = {
+        x: (clientX - rect.left - panRef.current.x) / zoomRef.current,
+        y: (clientY - rect.top - panRef.current.y) / zoomRef.current,
+      };
+      const hit = findElementsAtCoords(world);
+      if (hit) {
+        setSelectedElementIds((prev) => (prev.has(hit.id) ? prev : new Set([hit.id])));
+      } else {
+        setSelectedElementIds(new Set());
+      }
+      setContextMenu({ x: clientX, y: clientY });
+    },
+    [findElementsAtCoords]
+  );
+
+  const contextMenuItems = useMemo<ContextMenuEntry[]>(() => {
+    const hasSelection = selectedElementIds.size > 0;
+    // Only touch localStorage while the menu is actually visible.
+    const clipboardReady = contextMenu ? hasClipboardContent() : false;
+
+    return [
+      {
+        type: 'item',
+        id: 'copy',
+        label: 'Copy',
+        shortcut: 'Ctrl C',
+        icon: <Copy className="w-3.5 h-3.5" />,
+        disabled: !hasSelection,
+        onSelect: handleCopySelected,
+      },
+      {
+        type: 'item',
+        id: 'cut',
+        label: 'Cut',
+        shortcut: 'Ctrl X',
+        icon: <Scissors className="w-3.5 h-3.5" />,
+        disabled: !hasSelection || !canWrite,
+        onSelect: handleCutSelected,
+      },
+      {
+        type: 'item',
+        id: 'paste',
+        label: 'Paste',
+        shortcut: 'Ctrl V',
+        icon: <ClipboardPaste className="w-3.5 h-3.5" />,
+        disabled: !clipboardReady || !canWrite,
+        onSelect: handlePaste,
+      },
+      { type: 'separator' },
+      {
+        type: 'item',
+        id: 'duplicate',
+        label: 'Duplicate',
+        shortcut: 'Ctrl D',
+        icon: <Copy className="w-3.5 h-3.5" />,
+        disabled: !hasSelection || !canWrite,
+        onSelect: handleDuplicateSelected,
+      },
+      {
+        type: 'item',
+        id: 'delete',
+        label: 'Delete',
+        shortcut: 'Del',
+        danger: true,
+        icon: <Trash2 className="w-3.5 h-3.5" />,
+        disabled: !hasSelection || !canWrite,
+        onSelect: handleDeleteSelected,
+      },
+      { type: 'separator' },
+      {
+        type: 'item',
+        id: 'bring-front',
+        label: 'Bring to front',
+        icon: <ChevronsUp className="w-3.5 h-3.5" />,
+        disabled: !selectedHasStackable || !canWrite,
+        onSelect: () => handleZOrder('front'),
+      },
+      {
+        type: 'item',
+        id: 'bring-forward',
+        label: 'Bring forward',
+        icon: <ChevronUp className="w-3.5 h-3.5" />,
+        disabled: !selectedHasStackable || !canWrite,
+        onSelect: () => handleZOrder('forward'),
+      },
+      {
+        type: 'item',
+        id: 'send-backward',
+        label: 'Send backward',
+        icon: <ChevronDown className="w-3.5 h-3.5" />,
+        disabled: !selectedHasStackable || !canWrite,
+        onSelect: () => handleZOrder('backward'),
+      },
+      {
+        type: 'item',
+        id: 'send-back',
+        label: 'Send to back',
+        icon: <ChevronsDown className="w-3.5 h-3.5" />,
+        disabled: !selectedHasStackable || !canWrite,
+        onSelect: () => handleZOrder('back'),
+      },
+      { type: 'separator' },
+      {
+        type: 'item',
+        id: 'shortcuts',
+        label: 'Keyboard shortcuts',
+        shortcut: '?',
+        icon: <Keyboard className="w-3.5 h-3.5" />,
+        onSelect: () => setShortcutsOpen(true),
+      },
+    ];
+  }, [
+    contextMenu,
+    selectedElementIds,
+    selectedHasStackable,
+    canWrite,
+    handleCopySelected,
+    handleCutSelected,
+    handlePaste,
+    handleDuplicateSelected,
+    handleDeleteSelected,
+    handleZOrder,
+  ]);
 
   // When user picks a color in Toolbar while elements are selected, apply to them immediately
   const prevColorRef = useRef(currentColor);
@@ -470,47 +821,156 @@ export const Canvas: React.FC<CanvasProps> = ({
     onRegisterGetViewport?.(getViewport);
   }, [onRegisterGetViewport, getViewport]);
 
-  // Spacebar pan listener, keyboard shortcuts & selection actions
+  // Zoom helpers shared by keyboard shortcuts and the floating controls
+  const zoomIn = useCallback(() => {
+    setZoom((z) => Math.min(3.0, Number((z + 0.2).toFixed(2))));
+  }, []);
+
+  const zoomOut = useCallback(() => {
+    setZoom((z) => Math.max(0.25, Number((z - 0.2).toFixed(2))));
+  }, []);
+
+  const resetView = useCallback(() => {
+    setZoom(1.0);
+    setPan({ x: 0, y: 0 });
+  }, []);
+
+  // Keyboard shortcuts, spacebar pan & selection actions
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      const isInput = ['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement).tagName);
-      if (!isInput) {
-        if (e.code === 'Space') {
-          setSpacePressed(true);
-        } else if (e.key === 'v' || e.key === 'V') {
-          onSelectTool?.('select');
-        } else if (e.key === 'h' || e.key === 'H') {
-          onSelectTool?.('hand');
-        }
+      const target = e.target as HTMLElement | null;
+      const tagName = target?.tagName ?? '';
+      const isEditable =
+        !!target && (['INPUT', 'TEXTAREA', 'SELECT'].includes(tagName) || target.isContentEditable);
 
-        // Select All: Ctrl+A / Cmd+A
-        if ((e.ctrlKey || e.metaKey) && (e.key === 'a' || e.key === 'A')) {
-          e.preventDefault();
-          handleSelectAll();
-          return;
-        }
+      // Never hijack typing inside notes, text elements or search fields.
+      if (isEditable) return;
 
-        // Duplicate: Ctrl+D / Cmd+D
-        if ((e.ctrlKey || e.metaKey) && (e.key === 'd' || e.key === 'D')) {
-          e.preventDefault();
-          handleDuplicateSelected();
-          return;
-        }
-
-        // Delete selected: Delete or Backspace
-        if (e.key === 'Delete' || e.key === 'Backspace') {
-          if (selectedElementIds.size > 0) {
-            e.preventDefault();
-            handleDeleteSelected();
-            return;
-          }
-        }
+      // Shortcut cheat sheet
+      if (e.key === '?' || (e.shiftKey && e.key === '/')) {
+        e.preventDefault();
+        setShortcutsOpen(true);
+        return;
       }
 
-      if (e.code === 'Escape') {
+      if (e.key === 'Escape') {
+        if (shortcutsOpen) {
+          setShortcutsOpen(false);
+          return;
+        }
+        if (contextMenu) {
+          setContextMenu(null);
+          return;
+        }
         handleClearSelection();
         setWireDraft(null);
         setWireHoveredElementId(null);
+        return;
+      }
+
+      if (shortcutsOpen) return;
+
+      const mod = e.ctrlKey || e.metaKey;
+      const key = e.key.toLowerCase();
+
+      // Undo / redo
+      if (mod && key === 'z') {
+        e.preventDefault();
+        if (e.shiftKey) onRedo?.();
+        else onUndo?.();
+        return;
+      }
+      if (mod && key === 'y') {
+        e.preventDefault();
+        onRedo?.();
+        return;
+      }
+
+      // Selection, clipboard and duplication
+      if (mod && key === 'a') {
+        e.preventDefault();
+        handleSelectAll();
+        return;
+      }
+      if (mod && key === 'd') {
+        e.preventDefault();
+        handleDuplicateSelected();
+        return;
+      }
+      if (mod && key === 'c') {
+        e.preventDefault();
+        handleCopySelected();
+        return;
+      }
+      if (mod && key === 'x') {
+        e.preventDefault();
+        handleCutSelected();
+        return;
+      }
+      if (mod && key === 'v') {
+        e.preventDefault();
+        handlePaste();
+        return;
+      }
+      if (mod) return;
+
+      // Hold space to pan
+      if (e.code === 'Space') {
+        if (!['BUTTON', 'A'].includes(tagName)) e.preventDefault();
+        setSpacePressed(true);
+        return;
+      }
+
+      // Delete / Backspace
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        if (selectedElementIds.size > 0) {
+          e.preventDefault();
+          handleDeleteSelected();
+          return;
+        }
+      }
+
+      // Arrow-key nudging (Shift = 10px)
+      if (e.key.startsWith('Arrow') && selectedElementIds.size > 0) {
+        const step = e.shiftKey ? 10 : 1;
+        const delta =
+          e.key === 'ArrowUp'
+            ? { dx: 0, dy: -step }
+            : e.key === 'ArrowDown'
+              ? { dx: 0, dy: step }
+              : e.key === 'ArrowLeft'
+                ? { dx: -step, dy: 0 }
+                : e.key === 'ArrowRight'
+                  ? { dx: step, dy: 0 }
+                  : null;
+        if (delta) {
+          e.preventDefault();
+          handleNudgeSelected(delta.dx, delta.dy);
+          return;
+        }
+      }
+
+      // Zoom / reset view
+      if (key === '+' || key === '=') {
+        e.preventDefault();
+        zoomIn();
+        return;
+      }
+      if (key === '-') {
+        e.preventDefault();
+        zoomOut();
+        return;
+      }
+      if (key === '0') {
+        e.preventDefault();
+        resetView();
+        return;
+      }
+
+      // Single-key tool switching (V, H, P, Y, E, S, T, R, I, W)
+      const tool = TOOL_KEY_MAP[key];
+      if (tool && !e.altKey) {
+        onSelectTool?.(tool);
       }
     };
 
@@ -534,7 +994,25 @@ export const Canvas: React.FC<CanvasProps> = ({
       window.removeEventListener('keyup', handleKeyUp);
       window.removeEventListener('auxclick', handleAuxClick);
     };
-  }, [handleSelectAll, handleDuplicateSelected, handleDeleteSelected, handleClearSelection, selectedElementIds, onSelectTool]);
+  }, [
+    handleSelectAll,
+    handleDuplicateSelected,
+    handleDeleteSelected,
+    handleClearSelection,
+    handleCopySelected,
+    handleCutSelected,
+    handlePaste,
+    handleNudgeSelected,
+    selectedElementIds,
+    onSelectTool,
+    onUndo,
+    onRedo,
+    zoomIn,
+    zoomOut,
+    resetView,
+    shortcutsOpen,
+    contextMenu,
+  ]);
 
   // Native Wheel listener for Zooming (Ctrl+Wheel / Pinch) and Panning
   useEffect(() => {
@@ -878,6 +1356,19 @@ export const Canvas: React.FC<CanvasProps> = ({
       return;
     }
 
+    // Touch long-press opens the context menu on selectable objects
+    if ('touches' in e && e.touches.length === 1 && currentTool === 'select') {
+      cancelLongPress();
+      const touch = e.touches[0];
+      longPressStartRef.current = { x: touch.clientX, y: touch.clientY };
+      const touchX = touch.clientX;
+      const touchY = touch.clientY;
+      longPressTimerRef.current = window.setTimeout(() => {
+        openContextMenuAt(touchX, touchY);
+        longPressTimerRef.current = null;
+      }, 520);
+    }
+
     // Check if Middle Mouse Button (button === 1), Hand Tool, or Spacebar Pan
     const isMiddleClick = 'button' in e && e.button === 1;
     const isHandTool = currentTool === 'hand';
@@ -996,6 +1487,7 @@ export const Canvas: React.FC<CanvasProps> = ({
         userId: currentUserId,
         userName: currentUserName,
         updatedAt: Date.now(),
+        zIndex: Date.now(),
       };
       onElementCreate(newSticky);
       setSelectedElementIds(new Set([newSticky.id]));
@@ -1022,6 +1514,7 @@ export const Canvas: React.FC<CanvasProps> = ({
         userId: currentUserId,
         userName: currentUserName,
         updatedAt: Date.now(),
+        zIndex: Date.now(),
       };
       onElementCreate(newText);
       setSelectedElementIds(new Set([newText.id]));
@@ -1053,6 +1546,7 @@ export const Canvas: React.FC<CanvasProps> = ({
         userId: currentUserId,
         userName: currentUserName,
         updatedAt: Date.now(),
+        zIndex: Date.now(),
       };
       onElementCreate(newShape);
       setSelectedElementIds(new Set([newShape.id]));
@@ -1074,6 +1568,7 @@ export const Canvas: React.FC<CanvasProps> = ({
         userId: currentUserId,
         userName: currentUserName,
         updatedAt: Date.now(),
+        zIndex: Date.now(),
       };
       onElementCreate(newIcon);
       setSelectedElementIds(new Set([newIcon.id]));
@@ -1118,6 +1613,13 @@ export const Canvas: React.FC<CanvasProps> = ({
   };
 
   const handlePointerMove = (e: React.MouseEvent | React.TouchEvent) => {
+    // A moving finger is a drag, not a long-press
+    if (longPressStartRef.current && 'touches' in e && e.touches[0]) {
+      const dx = e.touches[0].clientX - longPressStartRef.current.x;
+      const dy = e.touches[0].clientY - longPressStartRef.current.y;
+      if (Math.hypot(dx, dy) > 8) cancelLongPress();
+    }
+
     // Multi-touch pinch-to-zoom & two-finger pan
     if ('touches' in e && e.touches.length >= 2) {
       if ('preventDefault' in e && typeof (e as any).preventDefault === 'function') {
@@ -1244,6 +1746,8 @@ export const Canvas: React.FC<CanvasProps> = ({
   };
 
   const handlePointerUp = (e?: React.MouseEvent | React.TouchEvent) => {
+    cancelLongPress();
+
     // Reset multi-touch pinch state when fingers are released
     if (touchPinchRef.current) {
       touchPinchRef.current = null;
@@ -1388,6 +1892,17 @@ export const Canvas: React.FC<CanvasProps> = ({
       }
     }
 
+    // Stable sort keeps the insertion order for legacy elements without an
+    // explicit zIndex while honouring stacking changes from the context menu.
+    const byZ = (a: CanvasElement, b: CanvasElement, order: Map<string, number>) =>
+      getElementZ(a, order.get(a.id) ?? 0) - getElementZ(b, order.get(b.id) ?? 0);
+    const order = new Map<string, number>();
+    Object.keys(elements).forEach((id, index) => order.set(id, index));
+    stickies.sort((a, b) => byZ(a, b, order));
+    texts.sort((a, b) => byZ(a, b, order));
+    shapes.sort((a, b) => byZ(a, b, order));
+    icons.sort((a, b) => byZ(a, b, order));
+
     return {
       wireElements: wires,
       stickyNotes: stickies,
@@ -1409,30 +1924,36 @@ export const Canvas: React.FC<CanvasProps> = ({
   };
 
   const handleDuplicateElement = useCallback(
-    (el: CanvasElement) => {
+    <T extends CanvasElement>(el: T, offset?: { dx: number; dy: number }): T | undefined => {
+      if (el.type === 'wire') {
+        // Duplicating a wire is not meaningful without also duplicating its endpoints.
+        return undefined;
+      }
+
+      const dx = offset?.dx ?? 24;
+      const dy = offset?.dy ?? 24;
       let cloned: CanvasElement;
       const newId = `${el.type}_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
       if (el.type === 'stroke') {
         cloned = {
           ...el,
           id: newId,
-          points: el.points.map((p) => ({ x: p.x + 24, y: p.y + 24 })),
+          points: el.points.map((p) => ({ x: p.x + dx, y: p.y + dy })),
           createdAt: Date.now(),
         };
-      } else if (el.type === 'wire') {
-        // Duplicating a wire is not meaningful without also duplicating its endpoints.
-        return;
       } else {
         cloned = {
           ...el,
           id: newId,
-          x: el.x + 24,
-          y: el.y + 24,
+          x: el.x + dx,
+          y: el.y + dy,
           updatedAt: Date.now(),
+          zIndex: Date.now(),
         } as CanvasElement;
       }
       onElementCreate(cloned);
       setSelectedElementIds(new Set([cloned.id]));
+      return cloned as T;
     },
     [onElementCreate]
   );
@@ -1453,6 +1974,10 @@ export const Canvas: React.FC<CanvasProps> = ({
       onMouseDown={handlePointerDown}
       onMouseMove={handlePointerMove}
       onMouseUp={handlePointerUp}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        openContextMenuAt(e.clientX, e.clientY);
+      }}
       onMouseLeave={() => {
         handlePointerUp();
         setEraserCursor(null);
@@ -1570,6 +2095,7 @@ export const Canvas: React.FC<CanvasProps> = ({
             onSelect={(isMulti) => handleSelectElement(note.id, isMulti)}
             onUpdate={onElementUpdate}
             onDelete={handleElementDelete}
+            onDuplicate={handleDuplicateElement}
           />
         ))}
 
@@ -1702,34 +2228,54 @@ export const Canvas: React.FC<CanvasProps> = ({
       {/* Floating Zoom & Pan Navigation Controls */}
       <ZoomControls
         zoom={zoom}
-        onZoomIn={() => setZoom((z) => Math.min(3.0, Number((z + 0.2).toFixed(2))))}
-        onZoomOut={() => setZoom((z) => Math.max(0.25, Number((z - 0.2).toFixed(2))))}
-        onResetZoom={() => {
-          setZoom(1.0);
-          setPan({ x: 0, y: 0 });
-        }}
+        onZoomIn={zoomIn}
+        onZoomOut={zoomOut}
+        onResetZoom={resetView}
         isHandTool={currentTool === 'hand'}
         onToggleHand={onSelectTool ? () => onSelectTool(currentTool === 'hand' ? 'pen' : 'hand') : undefined}
       />
 
-      {/* Floating Multi-Selection Action Bar (Rendered only when > 1 element selected, eliminating overlaps with single-element menus) */}
-      {selectedElementIds.size > 1 && (
-        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-40 flex items-center gap-2 px-3.5 py-2 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md rounded-2xl shadow-xl border border-slate-200/80 dark:border-slate-800 animate-in fade-in slide-in-from-top-2 duration-150 pointer-events-auto">
-          <div className="flex items-center gap-1.5 px-2.5 py-1 bg-blue-50 dark:bg-blue-950/60 rounded-lg text-blue-600 dark:text-blue-400 font-semibold text-xs border border-blue-200/80 dark:border-blue-900/50">
+      {/* Shortcut cheat-sheet launcher */}
+      <button
+        type="button"
+        onClick={() => setShortcutsOpen(true)}
+        title="Keyboard shortcuts (?)"
+        aria-label="Open keyboard shortcuts"
+        className="fixed right-3 bottom-[calc(env(safe-area-inset-bottom,0px)+5.25rem)] sm:bottom-6 z-40 flex items-center gap-1.5 px-2.5 sm:px-3 py-2 rounded-2xl bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border border-slate-200/90 dark:border-slate-800 shadow-lg text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+      >
+        <Keyboard className="w-4 h-4" />
+        <span className="hidden sm:inline text-xs font-semibold">Shortcuts</span>
+        <kbd className="hidden sm:inline-flex kbd-chip">?</kbd>
+      </button>
+
+      {/* Floating Selection Action Bar (single and multi-selection) */}
+      {selectedElementIds.size > 0 && (
+        <div className="fixed top-16 sm:top-20 left-1/2 -translate-x-1/2 z-40 flex items-center gap-1 sm:gap-2 px-2 sm:px-3.5 py-1.5 sm:py-2 max-w-[96vw] overflow-x-auto bg-white/95 dark:bg-slate-900/95 backdrop-blur-md rounded-2xl shadow-xl border border-slate-200/80 dark:border-slate-800 animate-pop-in pointer-events-auto">
+          <div className="flex items-center gap-1.5 px-2 sm:px-2.5 py-1 bg-blue-50 dark:bg-blue-950/60 rounded-lg text-blue-600 dark:text-blue-400 font-semibold text-xs border border-blue-200/80 dark:border-blue-900/50 shrink-0">
             <MousePointer className="w-3.5 h-3.5" />
             <span>{selectedElementIds.size} selected</span>
           </div>
 
-          <div className="h-4 w-px bg-slate-200 dark:bg-slate-700 mx-0.5" />
+          <div className="h-4 w-px bg-slate-200 dark:bg-slate-700 mx-0.5 shrink-0" />
 
           {/* Select All */}
           <button
             onClick={handleSelectAll}
             title="Select All Elements (Ctrl+A)"
-            className="px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-1.5 transition-colors cursor-pointer"
+            className="px-2 sm:px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-1.5 transition-colors cursor-pointer shrink-0"
           >
             <CheckSquare className="w-3.5 h-3.5 text-blue-500" />
-            <span>Select All</span>
+            <span className="hidden sm:inline">Select All</span>
+          </button>
+
+          {/* Copy */}
+          <button
+            onClick={handleCopySelected}
+            title="Copy Selected (Ctrl+C)"
+            className="px-2 sm:px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-1.5 transition-colors cursor-pointer shrink-0"
+          >
+            <Copy className="w-3.5 h-3.5 text-sky-500" />
+            <span className="hidden sm:inline">Copy</span>
           </button>
 
           {/* Duplicate */}
@@ -1737,10 +2283,10 @@ export const Canvas: React.FC<CanvasProps> = ({
             <button
               onClick={handleDuplicateSelected}
               title="Duplicate Selected (Ctrl+D)"
-              className="px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-1.5 transition-colors cursor-pointer"
+              className="px-2 sm:px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-1.5 transition-colors cursor-pointer shrink-0"
             >
               <Copy className="w-3.5 h-3.5 text-emerald-500" />
-              <span>Duplicate</span>
+              <span className="hidden sm:inline">Duplicate</span>
             </button>
           )}
 
@@ -1749,10 +2295,10 @@ export const Canvas: React.FC<CanvasProps> = ({
             <button
               onClick={handleDeleteSelected}
               title="Delete Selected (Del / Backspace)"
-              className="px-2.5 py-1.5 rounded-lg text-xs font-medium text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 flex items-center gap-1.5 transition-colors cursor-pointer"
+              className="px-2 sm:px-2.5 py-1.5 rounded-lg text-xs font-medium text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 flex items-center gap-1.5 transition-colors cursor-pointer shrink-0"
             >
               <Trash2 className="w-3.5 h-3.5" />
-              <span>Delete</span>
+              <span className="hidden sm:inline">Delete</span>
             </button>
           )}
 
@@ -1760,12 +2306,31 @@ export const Canvas: React.FC<CanvasProps> = ({
           <button
             onClick={handleClearSelection}
             title="Deselect All (Esc)"
-            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer shrink-0"
           >
             <X className="w-3.5 h-3.5" />
           </button>
         </div>
       )}
+
+      {/* Right-click / long-press actions */}
+      {contextMenu && (
+        <ContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          items={contextMenuItems}
+          onClose={() => setContextMenu(null)}
+          header={
+            selectedElementIds.size > 1
+              ? `${selectedElementIds.size} objects`
+              : selectedElementIds.size === 1
+                ? 'Object'
+                : 'Canvas'
+          }
+        />
+      )}
+
+      <ShortcutsModal isOpen={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
     </div>
   );
 };

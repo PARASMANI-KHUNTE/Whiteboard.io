@@ -34,6 +34,8 @@ export interface StickyNote {
   userId: string;
   userName: string;
   updatedAt: number;
+  /** Explicit stacking order within the element's own layer. */
+  zIndex?: number;
 }
 
 export interface TextElement {
@@ -52,6 +54,7 @@ export interface TextElement {
   userId: string;
   userName: string;
   updatedAt: number;
+  zIndex?: number;
 }
 
 export interface ShapeElement {
@@ -75,6 +78,7 @@ export interface ShapeElement {
   userId: string;
   userName?: string;
   updatedAt: number;
+  zIndex?: number;
 }
 
 export interface IconElement {
@@ -95,6 +99,7 @@ export interface IconElement {
   userId: string;
   userName?: string;
   updatedAt: number;
+  zIndex?: number;
 }
 
 export interface WireElement {

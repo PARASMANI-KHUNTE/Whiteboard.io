@@ -18,6 +18,7 @@ import {
   Smile,
   Hand,
   Undo2,
+  Redo2,
   Trash2,
   Download,
   Lock,
@@ -35,6 +36,7 @@ interface ToolbarProps {
   currentColor: string;
   currentSize: number;
   canUndo: boolean;
+  canRedo?: boolean;
   canWrite?: boolean;
   selectedShapeType: ShapeType;
   selectedIconName: string;
@@ -46,6 +48,7 @@ interface ToolbarProps {
   onSelectIcon: (iconName: string) => void;
   onSelectWireStyle?: (style: WireStyle) => void;
   onUndo: () => void;
+  onRedo?: () => void;
   onRequestClear: () => void;
   onExport: () => void;
   onSelectAll?: () => void;
@@ -81,6 +84,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   currentColor,
   currentSize,
   canUndo,
+  canRedo = false,
   canWrite = true,
   selectedShapeType,
   selectedIconName,
@@ -92,6 +96,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   onSelectIcon,
   onSelectWireStyle,
   onUndo,
+  onRedo,
   onRequestClear,
   onExport,
   onSelectAll,
@@ -396,7 +401,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
               setShowIconPicker(false);
               setShowWirePicker(false);
             }}
-            title="Hand / Pan tool (Move whiteboard) — Or use Middle Mouse Button"
+            title="Hand / Pan tool (H) — Or use Middle Mouse Button / hold Space"
             className={`min-h-[40px] min-w-[40px] p-2 sm:p-2.5 rounded-xl flex items-center justify-center gap-1.5 text-xs font-medium transition-colors cursor-pointer ${
               currentTool === 'hand'
                 ? 'bg-blue-50 dark:bg-blue-950 text-blue-600 dark:text-blue-400 font-semibold ring-1 ring-blue-400'
@@ -416,7 +421,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
               setShowIconPicker(false);
               setShowWirePicker(false);
             }}
-            title={canWrite ? "Pen (Draw)" : "Drawing restricted"}
+            title={canWrite ? "Pen (P) — Freehand drawing" : "Drawing restricted"}
             className={`min-h-[40px] min-w-[40px] p-2 sm:p-2.5 rounded-xl flex items-center justify-center gap-1.5 text-xs font-medium transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
               currentTool === 'pen' && canWrite
                 ? 'bg-blue-50 dark:bg-blue-950 text-blue-600 dark:text-blue-400 font-semibold ring-1 ring-blue-400'
@@ -436,7 +441,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
               setShowIconPicker(false);
               setShowWirePicker(false);
             }}
-            title={canWrite ? "Highlighter" : "Drawing restricted"}
+            title={canWrite ? "Highlighter (Y)" : "Drawing restricted"}
             className={`min-h-[40px] min-w-[40px] p-2 sm:p-2.5 rounded-xl flex items-center justify-center gap-1.5 text-xs font-medium transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
               currentTool === 'highlighter' && canWrite
                 ? 'bg-blue-50 dark:bg-blue-950 text-blue-600 dark:text-blue-400 font-semibold ring-1 ring-blue-400'
@@ -456,7 +461,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
               setShowIconPicker(false);
               setShowWirePicker(false);
             }}
-            title={canWrite ? "Eraser" : "Drawing restricted"}
+            title={canWrite ? "Eraser (E)" : "Drawing restricted"}
             className={`min-h-[40px] min-w-[40px] p-2 sm:p-2.5 rounded-xl flex items-center justify-center gap-1.5 text-xs font-medium transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
               currentTool === 'eraser' && canWrite
                 ? 'bg-blue-50 dark:bg-blue-950 text-blue-600 dark:text-blue-400 font-semibold ring-1 ring-blue-400'
@@ -477,7 +482,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
               setShowWirePicker(false);
               if (!showShapePicker) onSelectTool('shape');
             }}
-            title={canWrite ? "Add Shapes (Rectangle, Circle, Triangle...)" : "Drawing restricted"}
+            title={canWrite ? "Add Shapes (R) — Rectangle, Circle, Triangle..." : "Drawing restricted"}
             className={`min-h-[40px] min-w-[40px] p-2 sm:p-2.5 rounded-xl flex items-center justify-center gap-1.5 text-xs font-medium transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
               (currentTool === 'shape' || showShapePicker) && canWrite
                 ? 'bg-blue-50 dark:bg-blue-950 text-blue-600 dark:text-blue-400 font-semibold ring-1 ring-blue-400'
@@ -498,7 +503,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
               setShowWirePicker(false);
               if (!showIconPicker) onSelectTool('icon');
             }}
-            title={canWrite ? "Add Icons & Stickers" : "Drawing restricted"}
+            title={canWrite ? "Add Icons & Stickers (I)" : "Drawing restricted"}
             className={`min-h-[40px] min-w-[40px] p-2 sm:p-2.5 rounded-xl flex items-center justify-center gap-1.5 text-xs font-medium transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
               (currentTool === 'icon' || showIconPicker) && canWrite
                 ? 'bg-blue-50 dark:bg-blue-950 text-blue-600 dark:text-blue-400 font-semibold ring-1 ring-blue-400'
@@ -518,7 +523,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
               setShowIconPicker(false);
               setShowWirePicker(false);
             }}
-            title={canWrite ? "Add Sticky Note" : "Drawing restricted"}
+            title={canWrite ? "Add Sticky Note (S) — Hold Alt while dragging to duplicate" : "Drawing restricted"}
             className={`min-h-[40px] min-w-[40px] p-2 sm:p-2.5 rounded-xl flex items-center justify-center gap-1.5 text-xs font-medium transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
               currentTool === 'sticky' && canWrite
                 ? 'bg-blue-50 dark:bg-blue-950 text-blue-600 dark:text-blue-400 font-semibold ring-1 ring-blue-400'
@@ -538,7 +543,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
               setShowIconPicker(false);
               setShowWirePicker(false);
             }}
-            title={canWrite ? "Add Text" : "Drawing restricted"}
+            title={canWrite ? "Add Text (T)" : "Drawing restricted"}
             className={`min-h-[40px] min-w-[40px] p-2 sm:p-2.5 rounded-xl flex items-center justify-center gap-1.5 text-xs font-medium transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
               currentTool === 'text' && canWrite
                 ? 'bg-blue-50 dark:bg-blue-950 text-blue-600 dark:text-blue-400 font-semibold ring-1 ring-blue-400'
@@ -563,7 +568,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
               setShowShapePicker(false);
               setShowIconPicker(false);
             }}
-            title={canWrite ? `Wire Connector (${selectedWireStyle === 'line' ? 'Straight Line' : 'Smooth Curve'}) — Click or drag to connect 2 objects` : "Drawing restricted"}
+            title={canWrite ? `Wire Connector (W) (${selectedWireStyle === 'line' ? 'Straight Line' : 'Smooth Curve'}) — Click or drag to connect 2 objects` : "Drawing restricted"}
             className={`min-h-[40px] min-w-[40px] p-2 sm:p-2.5 rounded-xl flex items-center justify-center gap-1.5 text-xs font-medium transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
               (currentTool === 'wire' || showWirePicker) && canWrite
                 ? 'bg-blue-50 dark:bg-blue-950 text-blue-600 dark:text-blue-400 font-semibold ring-1 ring-blue-400'
@@ -666,11 +671,23 @@ export const Toolbar: React.FC<ToolbarProps> = ({
             id="undo-btn"
             onClick={onUndo}
             disabled={!canUndo || !canWrite}
-            title="Undo your last action"
+            title="Undo (Ctrl+Z)"
             className="p-2 sm:p-2.5 min-h-[38px] min-w-[38px] flex items-center justify-center text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800 rounded-xl disabled:opacity-20 disabled:pointer-events-none transition-colors cursor-pointer"
           >
             <Undo2 className="w-4 h-4" />
           </button>
+
+          {onRedo && (
+            <button
+              id="redo-btn"
+              onClick={onRedo}
+              disabled={!canRedo || !canWrite}
+              title="Redo (Ctrl+Shift+Z)"
+              className="p-2 sm:p-2.5 min-h-[38px] min-w-[38px] flex items-center justify-center text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800 rounded-xl disabled:opacity-20 disabled:pointer-events-none transition-colors cursor-pointer"
+            >
+              <Redo2 className="w-4 h-4" />
+            </button>
+          )}
 
           <button
             id="export-btn"
