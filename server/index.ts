@@ -21,7 +21,13 @@ import {
   flushAllPendingSaves,
 } from "./auth";
 import { connectDb, checkDbHealth } from "./db";
-import { generateDiagramWithGemini, DiagramType } from "./gemini";
+import { generateDiagram, reviseDiagram } from "./ai/generate";
+import {
+  coerceDiagramType,
+  coerceDetailLevel,
+  coerceDirection,
+} from "./ai/types";
+import type { ChatTurn, DiagramGraph } from "./ai/types";
 import { fileURLToPath } from "url";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -339,8 +345,9 @@ async function startServer() {
   // Gemini AI Diagram Generation Route (Rate limited to 10 requests / min per IP)
   app.post("/api/ai/generate-diagram", authRateLimiter(10, 60000, "ai-generate"), async (req, res) => {
     try {
-      const { prompt, type, canvasCenter } = req.body;
-      if (!prompt || typeof prompt !== "string" || !prompt.trim()) {
+      const body = req.body ?? {};
+      const prompt = typeof body.prompt === "string" ? body.prompt.trim() : "";
+      if (!prompt) {
         res.status(400).json({ success: false, error: "Prompt is required" });
         return;
       }
@@ -350,20 +357,89 @@ async function startServer() {
       const user = token ? await getUserByToken(token) : null;
       const author = user ? { id: user.id, name: user.name } : { id: "ai_gemini", name: "Gemini AI" };
 
-      const validTypes = ["mindmap", "flowchart", "brainstorm", "architecture"];
-      const diagramType = validTypes.includes(type) ? type : "mindmap";
+      const canvasCenter =
+        body.canvasCenter &&
+        Number.isFinite(Number(body.canvasCenter.x)) &&
+        Number.isFinite(Number(body.canvasCenter.y))
+          ? { x: Number(body.canvasCenter.x), y: Number(body.canvasCenter.y) }
+          : { x: 0, y: 0 };
 
-      const result = await generateDiagramWithGemini(
-        prompt.trim(),
-        diagramType as DiagramType,
-        canvasCenter || { x: 0, y: 0 },
-        author
-      );
+      const result = await generateDiagram({
+        prompt: prompt.slice(0, 1200),
+        type: coerceDiagramType(body.type),
+        detail: coerceDetailLevel(body.detail),
+        direction: coerceDirection(body.direction),
+        canvasCenter,
+        author,
+        sessionId: typeof body.sessionId === "string" ? body.sessionId : undefined,
+      });
 
       res.json({ success: true, ...result });
     } catch (err: any) {
       console.error("[Gemini AI Error]:", err.message);
       res.status(500).json({ success: false, error: err.message || "Failed to generate diagram" });
+    }
+  });
+
+  // AI Follow-up Revision Route (stateless: client sends the current graph)
+  app.post("/api/ai/revise-diagram", authRateLimiter(20, 60000, "ai-revise"), async (req, res) => {
+    try {
+      const body = req.body ?? {};
+      const instruction = typeof body.instruction === "string" ? body.instruction.trim() : "";
+      if (!instruction) {
+        res.status(400).json({ success: false, error: "Instruction is required" });
+        return;
+      }
+
+      const graph = body.graph as DiagramGraph | undefined;
+      if (!graph || !Array.isArray(graph.nodes) || !Array.isArray(graph.edges)) {
+        res.status(400).json({ success: false, error: "A valid diagram graph is required" });
+        return;
+      }
+
+      const authHeader = req.headers.authorization;
+      const token = authHeader?.replace("Bearer ", "")?.trim();
+      const user = token ? await getUserByToken(token) : null;
+      const author = user ? { id: user.id, name: user.name } : { id: "ai_gemini", name: "Gemini AI" };
+
+      const history: ChatTurn[] = Array.isArray(body.history)
+        ? body.history
+            .filter(
+              (turn: any) =>
+                turn &&
+                (turn.role === "user" || turn.role === "assistant") &&
+                typeof turn.content === "string"
+            )
+            .slice(-10)
+            .map((turn: any) => ({
+              role: turn.role,
+              content: turn.content.slice(0, 600),
+            }))
+        : [];
+
+      const canvasCenter =
+        body.canvasCenter &&
+        Number.isFinite(Number(body.canvasCenter.x)) &&
+        Number.isFinite(Number(body.canvasCenter.y))
+          ? { x: Number(body.canvasCenter.x), y: Number(body.canvasCenter.y) }
+          : { x: 0, y: 0 };
+
+      const result = await reviseDiagram({
+        instruction: instruction.slice(0, 1200),
+        graph,
+        history,
+        type: coerceDiagramType(body.type),
+        detail: coerceDetailLevel(body.detail),
+        direction: coerceDirection(body.direction),
+        canvasCenter,
+        author,
+        sessionId: typeof body.sessionId === "string" ? body.sessionId : undefined,
+      });
+
+      res.json({ success: true, ...result });
+    } catch (err: any) {
+      console.error("[AI Revision Error]:", err.message);
+      res.status(500).json({ success: false, error: err.message || "Failed to revise diagram" });
     }
   });
 

@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { BACKEND_URL } from '../config';
-import { CanvasElement } from '../types';
+import type { AiDiagramPayload, DetailLevel, DiagramDirection, DiagramType } from '../ai/types';
+import { requestDiagram } from '../ai/api';
 import {
   Sparkles,
   Brain,
@@ -13,17 +13,21 @@ import {
   Lightbulb,
   CheckCircle2,
   Cpu,
+  ArrowDown,
+  ArrowRight,
+  ListChecks,
 } from 'lucide-react';
 
 interface AiGenerateModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onInsertElements: (elements: CanvasElement[], replaceBoard?: boolean) => void;
+  onGenerated: (
+    payload: AiDiagramPayload,
+    options: { origin: { x: number; y: number }; replaceBoard: boolean }
+  ) => void;
   canvasCenter: { x: number; y: number };
   authToken?: string | null;
 }
-
-type DiagramType = 'mindmap' | 'flowchart' | 'brainstorm' | 'architecture';
 
 interface TemplateOption {
   id: DiagramType;
@@ -38,18 +42,18 @@ const TEMPLATES: TemplateOption[] = [
     id: 'mindmap',
     label: 'Mind Map',
     icon: <Brain className="w-5 h-5 text-indigo-500" />,
-    description: 'Central topic radiating into core concepts, branches, and actionable details.',
+    description: 'Central topic branching into connected concepts and concrete details.',
     examples: [
       'Product Launch Strategy for AI App',
       'Personal Productivity & Habits System',
-      'Cybersecurity Zero-Trust Architecture',
+      'Cybersecurity Zero-Trust Roadmap',
     ],
   },
   {
     id: 'flowchart',
     label: 'Flowchart',
     icon: <GitFork className="w-5 h-5 text-emerald-500" />,
-    description: 'Step-by-step logic with start/end pills, process boxes, decision diamonds, and arrows.',
+    description: 'Start/end, process steps, decision diamonds and labelled branches.',
     examples: [
       'User Authentication & 2FA Flow',
       'E-Commerce Order Fulfillment & Returns',
@@ -60,7 +64,7 @@ const TEMPLATES: TemplateOption[] = [
     id: 'brainstorm',
     label: 'Sticky Board',
     icon: <StickyIcon className="w-5 h-5 text-amber-500" />,
-    description: 'Categorized sticky notes organized in neat columns (SWOT, Retro, or Kanban).',
+    description: 'Categorized sticky notes with a goal and grouped idea clusters.',
     examples: [
       'SWOT Analysis for Electric Vehicle Startup',
       'Sprint Retrospective: What went well, what to improve',
@@ -71,7 +75,7 @@ const TEMPLATES: TemplateOption[] = [
     id: 'architecture',
     label: 'Architecture',
     icon: <Layers className="w-5 h-5 text-sky-500" />,
-    description: 'High-level cloud topology (Clients, CDN, API Gateway, Microservices, DB).',
+    description: 'Layered services, data stores, async workers and data-flow arrows.',
     examples: [
       'Real-Time Video Streaming Service Architecture',
       'Event-Driven IoT Telemetry System',
@@ -81,20 +85,22 @@ const TEMPLATES: TemplateOption[] = [
 ];
 
 const GENERATION_PHASES = [
-  { text: 'Consulting Gemini 3.8 Flash neural models...', icon: Brain },
-  { text: 'Synthesizing visual topology & spatial node structure...', icon: Cpu },
-  { text: 'Routing smart connectors, colors & responsive layout...', icon: Wand2 },
-  { text: 'Finalizing diagram elements & framing viewport...', icon: Sparkles },
+  { text: 'Designing the graph — nodes, branches and relationships...', icon: Brain },
+  { text: 'Adding domain detail, error paths and edge labels...', icon: Cpu },
+  { text: 'Computing layout and routing real connectors...', icon: Wand2 },
+  { text: 'Finalizing elements and framing the viewport...', icon: Sparkles },
 ];
 
 export const AiGenerateModal: React.FC<AiGenerateModalProps> = ({
   isOpen,
   onClose,
-  onInsertElements,
+  onGenerated,
   canvasCenter,
   authToken,
 }) => {
   const [selectedType, setSelectedType] = useState<DiagramType>('mindmap');
+  const [detail, setDetail] = useState<DetailLevel>('detailed');
+  const [direction, setDirection] = useState<DiagramDirection>('vertical');
   const [prompt, setPrompt] = useState<string>('');
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
   const [phaseIndex, setPhaseIndex] = useState<number>(0);
@@ -105,7 +111,6 @@ export const AiGenerateModal: React.FC<AiGenerateModalProps> = ({
 
   const abortControllerRef = useRef<AbortController | null>(null);
 
-  // Reliable cancel and abort handler
   const handleCancel = () => {
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
@@ -119,7 +124,6 @@ export const AiGenerateModal: React.FC<AiGenerateModalProps> = ({
     onClose();
   };
 
-  // Keyboard Escape listener to close/cancel
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
@@ -132,7 +136,6 @@ export const AiGenerateModal: React.FC<AiGenerateModalProps> = ({
     }
   }, [isOpen]);
 
-  // Phase & progress animation timer during active generation
   useEffect(() => {
     if (!isGenerating || isReady) {
       return;
@@ -163,6 +166,7 @@ export const AiGenerateModal: React.FC<AiGenerateModalProps> = ({
   if (!isOpen) return null;
 
   const currentTemplate = TEMPLATES.find((t) => t.id === selectedType) || TEMPLATES[0];
+  const CurrentPhaseIcon = GENERATION_PHASES[phaseIndex]?.icon || Sparkles;
 
   const handleGenerate = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -176,50 +180,35 @@ export const AiGenerateModal: React.FC<AiGenerateModalProps> = ({
     abortControllerRef.current = controller;
 
     try {
-      const res = await fetch(`${BACKEND_URL}/api/ai/generate-diagram`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
-        },
-        body: JSON.stringify({
-          prompt: prompt.trim(),
-          type: selectedType,
-          canvasCenter,
-        }),
+      const payload = await requestDiagram({
+        prompt: prompt.trim(),
+        type: selectedType,
+        detail,
+        direction,
+        canvasCenter,
+        authToken,
         signal: controller.signal,
       });
 
-      const data = await res.json();
-      if (!res.ok || !data.success || !Array.isArray(data.elements)) {
-        throw new Error(data.error || 'Failed to generate diagram from Gemini');
-      }
-
-      // Show completion stage
       setLoaderProgress(100);
       setIsReady(true);
       await new Promise((resolve) => setTimeout(resolve, 380));
 
-      // The user may have cancelled while the completion stage was shown.
       if (controller.signal.aborted) return;
 
-      onInsertElements(data.elements, replaceBoard);
+      onGenerated(payload, { origin: canvasCenter, replaceBoard });
       onClose();
       setPrompt('');
       setIsReady(false);
     } catch (err: any) {
-      if (err.name === 'AbortError') {
-        return;
-      }
+      if (err.name === 'AbortError') return;
       console.error('[AI Diagram Generation Error]:', err);
-      setError(err.message || 'Error communicating with the Gemini API server.');
+      setError(err.message || 'Error communicating with the AI server.');
     } finally {
       setIsGenerating(false);
       abortControllerRef.current = null;
     }
   };
-
-  const CurrentPhaseIcon = GENERATION_PHASES[phaseIndex]?.icon || Sparkles;
 
   return (
     <div
@@ -246,8 +235,8 @@ export const AiGenerateModal: React.FC<AiGenerateModalProps> = ({
               </h3>
               <p className="text-xs text-slate-500 dark:text-slate-400">
                 {isGenerating
-                  ? 'Crafting visual diagram elements and preparing camera glide...'
-                  : 'Turn your thoughts, workflows, or meeting notes into interactive whiteboard diagrams instantly.'}
+                  ? 'Designing a connected, domain-aware diagram...'
+                  : 'Describe a system or workflow. You will get real connectors, branches and detail lines — then a chat to refine it.'}
               </p>
             </div>
           </div>
@@ -263,21 +252,16 @@ export const AiGenerateModal: React.FC<AiGenerateModalProps> = ({
         {/* CUSTOM ANIMATED LOADER VIEW */}
         {isGenerating ? (
           <div className="p-8 sm:p-12 flex flex-col items-center justify-center text-center animate-in fade-in zoom-in-95 duration-200">
-            {/* Animated AI Core Pulse Visual */}
             <div className="relative w-32 h-32 mb-7 flex items-center justify-center">
-              {/* Outer pulsing neon ripple */}
               <div className="absolute inset-0 rounded-full bg-gradient-to-tr from-indigo-500/30 to-violet-500/30 animate-ping opacity-50" />
               <div className="absolute inset-2 rounded-full bg-indigo-500/15 dark:bg-indigo-500/25 animate-pulse" />
 
-              {/* High-tech spinning gradient ring */}
               <div className="absolute inset-1 rounded-full border-2 border-transparent border-t-indigo-500 border-r-violet-500 border-b-fuchsia-500 animate-spin [animation-duration:1.4s]" />
 
-              {/* Orbiting particles */}
               <div className="absolute w-3 h-3 rounded-full bg-indigo-400 shadow-lg shadow-indigo-500/80 -top-1 left-1/2 -translate-x-1/2 animate-bounce" />
               <div className="absolute w-2.5 h-2.5 rounded-full bg-emerald-400 shadow-md shadow-emerald-500/80 -bottom-1 left-6 animate-pulse" />
               <div className="absolute w-2.5 h-2.5 rounded-full bg-violet-400 shadow-md shadow-violet-500/80 top-8 -right-1.5 animate-pulse" />
 
-              {/* Central Hex/Rounded Badge */}
               <div className="relative w-16 h-16 rounded-2xl bg-gradient-to-tr from-indigo-600 via-violet-600 to-fuchsia-600 flex items-center justify-center shadow-xl shadow-indigo-500/40 text-white transform hover:scale-105 transition-transform">
                 {isReady ? (
                   <CheckCircle2 className="w-8 h-8 text-white animate-in zoom-in-75 duration-200" />
@@ -287,21 +271,18 @@ export const AiGenerateModal: React.FC<AiGenerateModalProps> = ({
               </div>
             </div>
 
-            {/* Stage Title */}
             <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-2 tracking-tight">
               {isReady ? 'Diagram Ready!' : 'Synthesizing Your Diagram'}
             </h3>
 
-            {/* Dynamic Status Ticker */}
             <div className="h-6 flex items-center justify-center mb-6">
               <p className="text-sm font-medium text-indigo-600 dark:text-indigo-400 animate-in fade-in slide-in-from-bottom-1 duration-200">
                 {isReady
-                  ? 'Navigating to your new diagram on the canvas...'
+                  ? 'Framing the diagram and opening follow-up chat...'
                   : GENERATION_PHASES[phaseIndex].text}
               </p>
             </div>
 
-            {/* Shimmering Dynamic Progress Bar */}
             <div className="w-full max-w-sm h-3 bg-slate-100 dark:bg-slate-800/80 rounded-full overflow-hidden mb-3 relative border border-slate-200/80 dark:border-slate-700/80 p-0.5">
               <div
                 className="h-full bg-gradient-to-r from-indigo-500 via-violet-500 to-fuchsia-500 rounded-full transition-all duration-300 relative overflow-hidden"
@@ -312,11 +293,12 @@ export const AiGenerateModal: React.FC<AiGenerateModalProps> = ({
             </div>
 
             <div className="flex items-center justify-between w-full max-w-sm text-xs font-semibold text-slate-400 dark:text-slate-500 mb-8 px-1">
-              <span>{currentTemplate.label} Topology</span>
+              <span>
+                {currentTemplate.label} · {detail === 'detailed' ? 'Detailed' : 'Standard'}
+              </span>
               <span>{Math.round(loaderProgress)}%</span>
             </div>
 
-            {/* Cancel Button */}
             <button
               type="button"
               onClick={handleCancel}
@@ -376,7 +358,7 @@ export const AiGenerateModal: React.FC<AiGenerateModalProps> = ({
                 >
                   <span>Describe Your Diagram</span>
                   <span className="text-[11px] font-normal lowercase text-slate-400">
-                    Be specific for best visual results
+                    Name the system, users and failure cases
                   </span>
                 </label>
                 <textarea
@@ -413,6 +395,67 @@ export const AiGenerateModal: React.FC<AiGenerateModalProps> = ({
                 </div>
               </div>
 
+              {/* Detail + Orientation */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <div className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
+                    <ListChecks className="w-3.5 h-3.5 text-indigo-500" />
+                    Detail level
+                  </div>
+                  <div className="grid grid-cols-2 gap-1.5 p-1 rounded-xl bg-slate-100 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700/70">
+                    {(['standard', 'detailed'] as DetailLevel[]).map((level) => (
+                      <button
+                        key={level}
+                        type="button"
+                        onClick={() => setDetail(level)}
+                        className={`px-3 py-2 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                          detail === level
+                            ? 'bg-white dark:bg-slate-900 text-indigo-700 dark:text-indigo-300 shadow-sm'
+                            : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'
+                        }`}
+                      >
+                        {level === 'standard' ? 'Standard' : 'Detailed'}
+                        <span className="block text-[10px] font-normal opacity-70">
+                          {level === 'standard' ? '8–14 nodes' : '14–26 nodes'}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <div className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                    Orientation
+                  </div>
+                  <div className="grid grid-cols-2 gap-1.5 p-1 rounded-xl bg-slate-100 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700/70">
+                    <button
+                      type="button"
+                      onClick={() => setDirection('vertical')}
+                      className={`px-3 py-2 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                        direction === 'vertical'
+                          ? 'bg-white dark:bg-slate-900 text-indigo-700 dark:text-indigo-300 shadow-sm'
+                          : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'
+                      }`}
+                    >
+                      <ArrowDown className="w-3.5 h-3.5" />
+                      Vertical
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDirection('horizontal')}
+                      className={`px-3 py-2 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                        direction === 'horizontal'
+                          ? 'bg-white dark:bg-slate-900 text-indigo-700 dark:text-indigo-300 shadow-sm'
+                          : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'
+                      }`}
+                    >
+                      <ArrowRight className="w-3.5 h-3.5" />
+                      Horizontal
+                    </button>
+                  </div>
+                </div>
+              </div>
+
               {/* Error Message */}
               {error && (
                 <div className="p-3.5 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/60 text-rose-700 dark:text-rose-300 text-xs flex items-start space-x-2.5">
@@ -421,7 +464,12 @@ export const AiGenerateModal: React.FC<AiGenerateModalProps> = ({
                     <p className="font-semibold">{error}</p>
                     {error.includes('GEMINI_API_KEY') && (
                       <p className="text-[11px] text-rose-600 dark:text-rose-400">
-                        To fix this, add <code className="px-1 py-0.5 bg-rose-100 dark:bg-rose-900/50 rounded font-mono">GEMINI_API_KEY=your_key_here</code> to your <code className="font-mono">server/.env</code> file (or hosting dashboard) and restart the backend.
+                        To fix this, add{' '}
+                        <code className="px-1 py-0.5 bg-rose-100 dark:bg-rose-900/50 rounded font-mono">
+                          GEMINI_API_KEY=your_key_here
+                        </code>{' '}
+                        to your <code className="font-mono">server/.env</code> file (or hosting
+                        dashboard) and restart the backend.
                       </p>
                     )}
                   </div>
@@ -454,7 +502,7 @@ export const AiGenerateModal: React.FC<AiGenerateModalProps> = ({
                     className="px-5 py-2.5 text-xs font-bold rounded-xl text-white bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 shadow-md shadow-indigo-500/25 disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-2 transition-all transform active:scale-95 cursor-pointer"
                   >
                     <Wand2 className="w-4 h-4" />
-                    <span>Generate Elements</span>
+                    <span>Generate Diagram</span>
                   </button>
                 </div>
               </div>
