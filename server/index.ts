@@ -17,6 +17,9 @@ import {
   loadRoomElements,
   saveRoomElements,
   saveRoomElementsDebounced,
+  saveRoomAccessState,
+  claimRoomCreator,
+  transferRoomOwnership,
   deleteRoom,
   flushAllPendingSaves,
 } from "./auth";
@@ -128,8 +131,8 @@ async function getOrCreateRoom(roomId: string): Promise<RoomData> {
       creatorName: meta?.creatorName || '',
       createdAt: meta?.createdAt || Date.now(),
       isLocked: meta?.isLocked || false,
-      kickedUserIds: new Set<string>(),
-      userPermissions: {},
+      kickedUserIds: new Set<string>(meta?.kickedUserIds || []),
+      userPermissions: meta?.userPermissions || {},
       elements: persistedElements || {},
       users: {},
       voteToClear: null,
@@ -138,6 +141,25 @@ async function getOrCreateRoom(roomId: string): Promise<RoomData> {
     rooms.set(roomId, room);
   }
   return room;
+}
+
+/** Fire-and-forget persistence of a room's moderation state. */
+function persistRoomAccess(room: RoomData) {
+  void saveRoomAccessState(
+    {
+      id: room.id,
+      name: room.name,
+      creatorId: room.creatorId,
+      creatorName: room.creatorName,
+      createdAt: room.createdAt,
+      isLocked: room.isLocked,
+    },
+    {
+      isLocked: room.isLocked,
+      kickedUserIds: Array.from(room.kickedUserIds),
+      userPermissions: room.userPermissions,
+    }
+  );
 }
 
 const ALLOWED_ORIGIN_SET = new Set([
@@ -679,16 +701,28 @@ async function startServer() {
       let roomId = customCode ? customCode.trim().toUpperCase().replace(/[^A-Z0-9_-]/g, "-") : generateRoomCode();
       if (!roomId || roomId.length < 2) roomId = generateRoomCode();
 
-      const creatorId = user ? user.id : req.body.creatorId || "guest_" + Math.random().toString(36).substring(2, 8);
-      const creatorName = user ? user.name : req.body.creatorName || "Session Host";
+      // Anonymous creators send their stable guest identity so host rights
+      // survive reloads. Authenticated callers are always resolved server-side.
+      const requestedCreatorId =
+        typeof req.body?.creatorId === "string" ? req.body.creatorId.trim().slice(0, 128) : "";
+      const requestedCreatorName =
+        typeof req.body?.creatorName === "string" ? req.body.creatorName.trim().slice(0, 48) : "";
+      const creatorId = user
+        ? user.id
+        : requestedCreatorId || "guest_" + Math.random().toString(36).substring(2, 8);
+      const creatorName = user
+        ? user.name
+        : requestedCreatorName || "Session Host";
 
       const roomMeta = {
         id: roomId,
-        name: name?.trim() || `Session ${roomId}`,
+        name: (typeof name === "string" && name.trim().slice(0, 80)) || `Session ${roomId}`,
         creatorId,
         creatorName,
         createdAt: Date.now(),
         isLocked: !!isLocked,
+        kickedUserIds: [],
+        userPermissions: {},
       };
 
       await saveRoomMeta(roomMeta);
@@ -759,14 +793,19 @@ async function startServer() {
       const roomData = rooms.get(roomId);
       const meta = await getRoomMeta(roomId);
       const creatorId = roomData?.creatorId || meta?.creatorId;
+      // Anonymous hosts prove ownership with the stable guest identity they
+      // also use for sockets; authenticated callers are resolved from the token.
+      const requestedCreatorId =
+        typeof req.body?.creatorId === "string" ? req.body.creatorId.trim().slice(0, 128) : "";
+      const requesterId = user?.id || requestedCreatorId;
 
       // Verify authorization: only the room creator may delete a room
-      if (creatorId && (!user || creatorId !== user.id)) {
+      if (creatorId && creatorId !== requesterId) {
         res.status(403).json({ success: false, error: "Only the room creator can delete this room" });
         return;
       }
 
-      const success = await deleteRoom(roomId, user?.id);
+      const success = await deleteRoom(roomId, requesterId);
 
       // Notify and clean up active socket room
       if (rooms.has(roomId)) {
@@ -852,7 +891,25 @@ async function startServer() {
         return;
       }
 
-      // Same socket changing identity (login/logout): drop the previous entry
+      // Same socket changing identity (login/logout): hand host rights to the
+      // new identity before dropping the old presence so the person who created
+      // the room does not lose ownership simply because they signed in.
+      const previousPermission =
+        currentUser && currentUser.id !== actualUserId
+          ? room.userPermissions[currentUser.id]
+          : undefined;
+      const previousIdentityWasHost = Boolean(
+        currentUser &&
+          currentUser.id !== actualUserId &&
+          currentRoomId === roomId &&
+          currentUser.isHost
+      );
+      if (previousIdentityWasHost) {
+        room.creatorId = accountId || actualUserId;
+        room.creatorName = actualName;
+        void transferRoomOwnership(roomId, room.creatorId, room.creatorName);
+      }
+
       if (currentUser && currentUser.id !== actualUserId && currentRoomId === roomId) {
         delete room.users[currentUser.id];
         socket.to(roomId).emit("user-left", { userId: currentUser.id });
@@ -883,6 +940,18 @@ async function startServer() {
       if (isFirstUser && !room.creatorId) {
         room.creatorId = accountId || actualUserId;
         room.creatorName = actualName;
+        // Persist the claim so the room is not left ownerless after a restart
+        // (and so invite-code rooms show up in the creator's saved rooms).
+        void claimRoomCreator({
+          id: room.id,
+          name: room.name,
+          creatorId: room.creatorId,
+          creatorName: room.creatorName,
+          createdAt: room.createdAt,
+          isLocked: room.isLocked,
+          kickedUserIds: Array.from(room.kickedUserIds),
+          userPermissions: room.userPermissions,
+        });
       }
 
       const isHost = isRoomCreator || isFirstUser;
@@ -892,10 +961,19 @@ async function startServer() {
         role = 'admin';
         canWrite = true;
       } else {
-        const userPerm = room.userPermissions[actualUserId] || (accountId ? room.userPermissions[accountId] : undefined);
+        const storedPerm =
+          room.userPermissions[actualUserId] ||
+          (accountId ? room.userPermissions[accountId] : undefined);
+        const userPerm = storedPerm || previousPermission;
         if (userPerm) {
           canWrite = userPerm.canWrite;
           role = userPerm.role;
+          // Carry a restriction across an in-place login so signing in cannot
+          // be used to shed a host-revoked view-only state.
+          if (!storedPerm) {
+            room.userPermissions[actualUserId] = { canWrite, role };
+            persistRoomAccess(room);
+          }
         } else {
           canWrite = !room.isLocked;
           role = room.isLocked ? 'viewer' : 'editor';
@@ -979,6 +1057,8 @@ async function startServer() {
         canWrite,
         role,
       });
+
+      persistRoomAccess(room);
     });
 
     // Admin: Kick / Remove User from Room
@@ -1019,6 +1099,8 @@ async function startServer() {
         reason: reason || "Removed by room administrator",
       });
       io.to(currentRoomId).emit("user-left", { userId: targetUserId });
+
+      persistRoomAccess(room);
     });
 
     // Admin: Toggle Lock Whiteboard
@@ -1028,12 +1110,19 @@ async function startServer() {
       if (!room) return;
       room.isLocked = payload.isLocked;
 
-      // Update non-host users
+      // Update live participants and persisted permissions, including users who
+      // are currently offline, so a restart/unlock does not leave stale viewers.
+      const nextRole: 'editor' | 'viewer' = payload.isLocked ? 'viewer' : 'editor';
+      const nextCanWrite = !payload.isLocked;
+      Object.keys(room.userPermissions).forEach((userId) => {
+        if (userId === room.creatorId) return;
+        room.userPermissions[userId] = { canWrite: nextCanWrite, role: nextRole };
+      });
       Object.values(room.users).forEach((u) => {
         if (!u.isHost) {
-          u.canWrite = !payload.isLocked;
-          u.role = payload.isLocked ? 'viewer' : 'editor';
-          room.userPermissions[u.id] = { canWrite: u.canWrite, role: u.role };
+          u.canWrite = nextCanWrite;
+          u.role = nextRole;
+          room.userPermissions[u.id] = { canWrite: nextCanWrite, role: nextRole };
         }
       });
 
@@ -1041,6 +1130,8 @@ async function startServer() {
         isLocked: room.isLocked,
         users: room.users,
       });
+
+      persistRoomAccess(room);
     });
 
     // Admin: Delete Room
@@ -1406,6 +1497,9 @@ async function startServer() {
           room.creatorName = nextHost.name;
           room.userPermissions[nextHost.id] = { canWrite: true, role: 'admin' };
 
+          void transferRoomOwnership(currentRoomId, nextHost.id, nextHost.name);
+          persistRoomAccess(room);
+
           io.to(currentRoomId).emit("room-host-migrated", {
             newHostId: nextHost.id,
             newHostName: nextHost.name,
@@ -1428,12 +1522,15 @@ async function startServer() {
         }
       }
 
-      // Clean up empty rooms after 1 hour if no one is in them
+      // Clean up empty rooms after 1 hour if no one is in them. Capture the id
+      // now: the closure below outlives this socket, so `currentRoomId` may
+      // already point at a different room by the time it runs.
       if (remainingUserIds.length === 0) {
+        const roomIdToCleanup = currentRoomId;
         setTimeout(() => {
-          const r = rooms.get(currentRoomId!);
+          const r = rooms.get(roomIdToCleanup);
           if (r && Object.keys(r.users).length === 0) {
-            rooms.delete(currentRoomId!);
+            rooms.delete(roomIdToCleanup);
           }
         }, 3600000);
       }

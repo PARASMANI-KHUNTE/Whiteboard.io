@@ -33,6 +33,10 @@ export interface SessionRoomDoc {
   creatorName: string;
   createdAt: number;
   isLocked: boolean;
+  /** Identities banned from the room; survives server restarts. */
+  kickedUserIds?: string[];
+  /** Explicit host-granted/revoked permissions keyed by user id. */
+  userPermissions?: Record<string, { canWrite: boolean; role: 'admin' | 'editor' | 'viewer' }>;
 }
 
 export interface RoomElementsDoc {

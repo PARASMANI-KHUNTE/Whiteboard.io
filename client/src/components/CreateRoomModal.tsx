@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { X, Plus, Lock, Unlock, Hash, ArrowRight, Trash2 } from 'lucide-react';
+import { X, Plus, Lock, Unlock, Hash, ArrowRight, Trash2, Clock } from 'lucide-react';
 import { SessionRoom } from '../types';
+import { getRecentRooms, RecentRoom } from '../utils/recentRooms';
 
 interface CreateRoomModalProps {
   isOpen: boolean;
@@ -33,6 +34,7 @@ export const CreateRoomModal: React.FC<CreateRoomModalProps> = ({
   const [isDeletingId, setIsDeletingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [recentRooms, setRecentRooms] = useState<RecentRoom[]>([]);
 
   // Clear the form each time the modal opens so stale input/errors are not shown.
   useEffect(() => {
@@ -43,6 +45,7 @@ export const CreateRoomModal: React.FC<CreateRoomModalProps> = ({
       setConfirmDeleteId(null);
       setError(null);
       setIsSubmitting(false);
+      setRecentRooms(getRecentRooms());
     }
   }, [isOpen]);
 
@@ -246,6 +249,50 @@ export const CreateRoomModal: React.FC<CreateRoomModalProps> = ({
                     </div>
                   </div>
                 ))}
+              </div>
+            </div>
+          )}
+          {/* Recent sessions joined from this browser (works for guests too) */}
+          {recentRooms.filter((r) => !myRooms.some((m) => m.id === r.id)).length > 0 && (
+            <div className="pt-4 border-t border-slate-100 dark:border-slate-800">
+              <h3 className="text-xs font-semibold text-slate-700 dark:text-slate-300 mb-2 flex items-center gap-1.5">
+                <Clock className="w-3.5 h-3.5 text-slate-400" />
+                <span>Recent Sessions</span>
+              </h3>
+              <div className="space-y-2 max-h-40 overflow-y-auto pr-1">
+                {recentRooms
+                  .filter((r) => !myRooms.some((m) => m.id === r.id))
+                  .map((r) => (
+                    <div
+                      key={r.id}
+                      className={`flex items-center justify-between p-2.5 rounded-xl border text-xs transition-colors ${
+                        currentRoomId === r.id
+                          ? 'bg-blue-50/70 dark:bg-blue-950/50 border-blue-200 dark:border-blue-900'
+                          : 'bg-slate-50 dark:bg-slate-800/60 hover:bg-slate-100/80 dark:hover:bg-slate-800 border-slate-200/80 dark:border-slate-700/80'
+                      }`}
+                    >
+                      <div className="min-w-0 pr-2">
+                        <div className="font-medium text-slate-900 dark:text-white truncate">{r.name}</div>
+                        <div className="font-mono text-[11px] text-slate-500 dark:text-slate-400">Code: {r.id}</div>
+                      </div>
+                      {currentRoomId === r.id ? (
+                        <span className="text-[10px] font-semibold text-blue-700 dark:text-blue-300 bg-blue-100 dark:bg-blue-900/60 px-2 py-0.5 rounded-full">
+                          Current
+                        </span>
+                      ) : (
+                        <button
+                          onClick={() => {
+                            (onSelectRoom || onJoinRoom)?.(r.id);
+                            onClose();
+                          }}
+                          className="px-2.5 py-1 bg-white dark:bg-slate-700 hover:bg-slate-100 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-600 rounded-lg text-xs font-medium flex items-center gap-1 cursor-pointer transition-colors shrink-0"
+                        >
+                          <span>Rejoin</span>
+                          <ArrowRight className="w-3 h-3" />
+                        </button>
+                      )}
+                    </div>
+                  ))}
               </div>
             </div>
           )}
