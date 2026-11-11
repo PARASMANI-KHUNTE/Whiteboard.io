@@ -53,6 +53,7 @@ interface CanvasProps {
   onRegisterSelectAll?: (fn: () => void) => void;
   onRegisterNavigateToElements?: (fn: (elements: CanvasElement[]) => void) => void;
   onRegisterGetWorldCenter?: (fn: () => { x: number; y: number }) => void;
+  onRegisterGetViewport?: (fn: () => { pan: { x: number; y: number }; zoom: number }) => void;
 }
 
 // Distance from point to line segment
@@ -90,6 +91,7 @@ export const Canvas: React.FC<CanvasProps> = ({
   onRegisterSelectAll,
   onRegisterNavigateToElements,
   onRegisterGetWorldCenter,
+  onRegisterGetViewport,
 }) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -197,7 +199,10 @@ export const Canvas: React.FC<CanvasProps> = ({
     setSelectedElementIds(new Set());
   }, []);
 
-  const cloneElementWithOffset = useCallback((el: CanvasElement, dx = 24, dy = 24): CanvasElement => {
+  const cloneElementWithOffset = useCallback((el: CanvasElement, dx = 24, dy = 24): CanvasElement | null => {
+    // Wires reference other elements by id; duplicating them in place would be
+    // meaningless (and the endpoints are not duplicated), so skip them.
+    if (el.type === 'wire') return null;
     const newId = `${el.type}_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
     if (el.type === 'stroke') {
       return {
@@ -223,6 +228,7 @@ export const Canvas: React.FC<CanvasProps> = ({
       const el = elementsRef.current[id];
       if (el) {
         const cloned = cloneElementWithOffset(el, 24, 24);
+        if (!cloned) return;
         onElementCreate(cloned);
         newIds.push(cloned.id);
       }
@@ -399,6 +405,18 @@ export const Canvas: React.FC<CanvasProps> = ({
   useEffect(() => {
     onRegisterGetWorldCenter?.(getWorldCenter);
   }, [onRegisterGetWorldCenter, getWorldCenter]);
+
+  const getViewport = useCallback(
+    (): { pan: { x: number; y: number }; zoom: number } => ({
+      pan: { ...panRef.current },
+      zoom: zoomRef.current,
+    }),
+    []
+  );
+
+  useEffect(() => {
+    onRegisterGetViewport?.(getViewport);
+  }, [onRegisterGetViewport, getViewport]);
 
   // Spacebar pan listener, keyboard shortcuts & selection actions
   useEffect(() => {
@@ -691,6 +709,9 @@ export const Canvas: React.FC<CanvasProps> = ({
 
         for (const el of elList) {
           if (elementsToDelete.has(el.id)) continue;
+          // Wires do not have their own geometry; they are cascade-deleted below
+          // when one of their endpoints is erased.
+          if (el.type === 'wire') continue;
 
           // Check if stroke (by type or points array presence)
           const rawPoints = (el as any).points;
@@ -719,19 +740,26 @@ export const Canvas: React.FC<CanvasProps> = ({
             }
           } else {
             // Bounding box collision check for shapes, stickies, text, icons
-            const w = (el as any).width || (el as any).size || (el.type === 'sticky' ? 224 : el.type === 'text' ? 180 : 100);
-            const h = (el as any).height || (el as any).size || (el.type === 'sticky' ? 150 : el.type === 'text' ? 60 : 100);
-            const elX = (el as any).x ?? 0;
-            const elY = (el as any).y ?? 0;
+            const bounds = getElementBounds(el);
 
             if (
-              pt.x + eraserRadius >= elX &&
-              pt.x - eraserRadius <= elX + w &&
-              pt.y + eraserRadius >= elY &&
-              pt.y - eraserRadius <= elY + h
+              pt.x + eraserRadius >= bounds.x &&
+              pt.x - eraserRadius <= bounds.x + bounds.width &&
+              pt.y + eraserRadius >= bounds.y &&
+              pt.y - eraserRadius <= bounds.y + bounds.height
             ) {
               elementsToDelete.add(el.id);
             }
+          }
+        }
+      }
+
+      // Cascade-delete wires whose endpoints are being erased
+      if (elementsToDelete.size > 0) {
+        for (const el of elList) {
+          if (el.type !== 'wire') continue;
+          if (elementsToDelete.has(el.fromId) || elementsToDelete.has(el.toId)) {
+            elementsToDelete.add(el.id);
           }
         }
       }
@@ -826,22 +854,19 @@ export const Canvas: React.FC<CanvasProps> = ({
     if (currentTool === 'select') {
       const isMulti = 'shiftKey' in e && (e.shiftKey || e.ctrlKey || e.metaKey);
       const clicked = (Object.values(elements) as CanvasElement[]).reverse().find((el) => {
-        if (el.type === 'shape' || el.type === 'icon') {
-          const w = (el as any).width || (el as any).size || 100;
-          const h = (el as any).height || (el as any).size || 100;
-          return coords.x >= el.x && coords.x <= el.x + w && coords.y >= el.y && coords.y <= el.y + h;
-        }
-        if (el.type === 'sticky') {
-          return coords.x >= el.x && coords.x <= el.x + 224 && coords.y >= el.y && coords.y <= el.y + 150;
-        }
-        if (el.type === 'text') {
-          return coords.x >= el.x && coords.x <= el.x + 200 && coords.y >= el.y && coords.y <= el.y + 60;
-        }
-        if (el.type === 'stroke' && (el as DrawingStroke).points) {
+        if (el.type === 'stroke') {
           const stroke = el as DrawingStroke;
+          if (!stroke.points) return false;
           return stroke.points.some((p) => Math.hypot(p.x - coords.x, p.y - coords.y) <= Math.max(12, stroke.size * 2));
         }
-        return false;
+        if (el.type === 'wire') return false;
+        const bounds = getElementBounds(el);
+        return (
+          coords.x >= bounds.x &&
+          coords.x <= bounds.x + bounds.width &&
+          coords.y >= bounds.y &&
+          coords.y <= bounds.y + bounds.height
+        );
       });
 
       if (clicked) {
@@ -1240,27 +1265,24 @@ export const Canvas: React.FC<CanvasProps> = ({
       if (width > 5 || height > 5) {
         const enclosedIds: string[] = [];
         (Object.values(elementsRef.current) as CanvasElement[]).forEach((el) => {
-          if (el.type === 'shape' || el.type === 'icon') {
-            const w = (el as any).width || (el as any).size || 100;
-            const h = (el as any).height || (el as any).size || 100;
-            if (el.x + w >= minX && el.x <= maxX && el.y + h >= minY && el.y <= maxY) {
-              enclosedIds.push(el.id);
-            }
-          } else if (el.type === 'sticky') {
-            if (el.x + 224 >= minX && el.x <= maxX && el.y + 150 >= minY && el.y <= maxY) {
-              enclosedIds.push(el.id);
-            }
-          } else if (el.type === 'text') {
-            if (el.x + 200 >= minX && el.x <= maxX && el.y + 60 >= minY && el.y <= maxY) {
-              enclosedIds.push(el.id);
-            }
-          } else if (el.type === 'stroke' && (el as DrawingStroke).points) {
+          if (el.type === 'wire') return;
+          if (el.type === 'stroke' && (el as DrawingStroke).points) {
             const hasPoint = (el as DrawingStroke).points.some(
               (p) => p.x >= minX && p.x <= maxX && p.y >= minY && p.y <= maxY
             );
             if (hasPoint) {
               enclosedIds.push(el.id);
             }
+            return;
+          }
+          const bounds = getElementBounds(el);
+          if (
+            bounds.x + bounds.width >= minX &&
+            bounds.x <= maxX &&
+            bounds.y + bounds.height >= minY &&
+            bounds.y <= maxY
+          ) {
+            enclosedIds.push(el.id);
           }
         });
 
@@ -1308,6 +1330,9 @@ export const Canvas: React.FC<CanvasProps> = ({
           points: el.points.map((p) => ({ x: p.x + 24, y: p.y + 24 })),
           createdAt: Date.now(),
         };
+      } else if (el.type === 'wire') {
+        // Duplicating a wire is not meaningful without also duplicating its endpoints.
+        return;
       } else {
         cloned = {
           ...el,

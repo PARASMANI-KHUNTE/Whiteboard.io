@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useRef, useState, useEffect } from 'react';
 import { WireElement, CanvasElement, WireStyle } from '../types';
 import { routeWire } from '../utils/wireGeometry';
 import { getAdaptiveDisplayColor } from '../utils/themeColors';
@@ -197,6 +197,7 @@ export const WireOverlay: React.FC<WireOverlayProps> = ({
   const [showStyleMenu, setShowStyleMenu] = useState(false);
   const [isEditingLabel, setIsEditingLabel] = useState(false);
   const [labelText, setLabelText] = useState(wire.label || '');
+  const labelCancelRef = useRef(false);
 
   useEffect(() => {
     setLabelText(wire.label || '');
@@ -241,13 +242,14 @@ export const WireOverlay: React.FC<WireOverlayProps> = ({
   const handleCycleArrowStyle = (e: React.MouseEvent) => {
     e.stopPropagation();
     if (!canWrite) return;
+    const hasEnd = wire.arrowEnd !== false;
     let nextStart = false;
     let nextEnd = true;
 
-    if (wire.arrowEnd && !wire.arrowStart) {
+    if (hasEnd && !wire.arrowStart) {
       nextStart = true;
       nextEnd = true;
-    } else if (wire.arrowEnd && wire.arrowStart) {
+    } else if (hasEnd && wire.arrowStart) {
       nextStart = false;
       nextEnd = false;
     } else {
@@ -293,6 +295,11 @@ export const WireOverlay: React.FC<WireOverlayProps> = ({
 
   const handleLabelSubmit = () => {
     setIsEditingLabel(false);
+    if (labelCancelRef.current) {
+      labelCancelRef.current = false;
+      setLabelText(wire.label || '');
+      return;
+    }
     onUpdate({
       ...wire,
       label: labelText.trim(),
@@ -325,8 +332,14 @@ export const WireOverlay: React.FC<WireOverlayProps> = ({
                 onChange={(e) => setLabelText(e.target.value)}
                 onBlur={handleLabelSubmit}
                 onKeyDown={(e) => {
-                  if (e.key === 'Enter') handleLabelSubmit();
-                  if (e.key === 'Escape') setIsEditingLabel(false);
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    (e.target as HTMLInputElement).blur();
+                  }
+                  if (e.key === 'Escape') {
+                    labelCancelRef.current = true;
+                    (e.target as HTMLInputElement).blur();
+                  }
                 }}
                 className="px-2 py-0.5 text-xs rounded-lg border-2 border-blue-500 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 shadow-lg outline-none text-center min-w-[80px]"
               />
@@ -335,7 +348,11 @@ export const WireOverlay: React.FC<WireOverlayProps> = ({
             <div
               onClick={(e) => {
                 e.stopPropagation();
-                if (canWrite) setIsEditingLabel(true);
+                if (canWrite) {
+                  labelCancelRef.current = false;
+                  setLabelText(wire.label || '');
+                  setIsEditingLabel(true);
+                }
               }}
               className="group/lbl mx-auto w-fit max-w-[160px] truncate px-3 py-1 rounded-full bg-white/95 dark:bg-slate-900/95 border border-slate-200/90 dark:border-slate-700/90 text-slate-700 dark:text-slate-200 text-xs font-semibold shadow-md hover:border-blue-500 hover:shadow-lg transition-all cursor-pointer text-center"
             >

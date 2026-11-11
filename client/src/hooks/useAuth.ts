@@ -7,6 +7,41 @@ export type { AuthUser, SessionRoom };
 const TOKEN_KEY = 'whiteboard_auth_token';
 const USER_KEY = 'whiteboard_cached_user';
 
+/** Origins that are allowed to deliver OAuth credentials via postMessage. */
+function getTrustedOAuthOrigins(): Set<string> {
+  const allowed = new Set<string>();
+  if (typeof window === 'undefined') return allowed;
+
+  allowed.add(window.location.origin);
+  allowed.add('http://localhost:5173');
+  allowed.add('http://localhost:3000');
+  allowed.add('http://127.0.0.1:5173');
+  allowed.add('http://127.0.0.1:3000');
+
+  if (BACKEND_URL) {
+    try {
+      allowed.add(new URL(BACKEND_URL, window.location.origin).origin);
+    } catch {}
+  }
+
+  const customAllowed = (import.meta.env.VITE_ALLOWED_ORIGINS as string | undefined)
+    ?.split(',')
+    .map((o) => o.trim())
+    .filter(Boolean) || [];
+  customAllowed.forEach((o) => {
+    try {
+      allowed.add(new URL(o, window.location.origin).origin);
+    } catch {}
+  });
+
+  return allowed;
+}
+
+function isTrustedOAuthOrigin(origin: string): boolean {
+  if (!origin) return false;
+  return getTrustedOAuthOrigins().has(origin);
+}
+
 export function useAuth() {
   const [user, setUser] = useState<AuthUser | null>(() => {
     try {
@@ -111,34 +146,8 @@ export function useAuth() {
         return;
       }
 
-      // Check allowed origins
-      const allowedOrigins = new Set([
-        window.location.origin,
-        'http://localhost:5173',
-        'http://localhost:3000',
-        'http://127.0.0.1:5173',
-        'http://127.0.0.1:3000',
-      ]);
-
-      if (BACKEND_URL) {
-        try {
-          allowedOrigins.add(new URL(BACKEND_URL, window.location.origin).origin);
-        } catch {}
-      }
-
-      const customAllowed = (import.meta.env.VITE_ALLOWED_ORIGINS as string | undefined)
-        ?.split(',')
-        .map((o) => o.trim())
-        .filter(Boolean) || [];
-      customAllowed.forEach((o) => {
-        try {
-          allowedOrigins.add(new URL(o, window.location.origin).origin);
-        } catch {}
-      });
-
-      // Accept if origin is in allowed set or matches backend host
-      const isTrusted = !event.origin || allowedOrigins.has(event.origin) || event.origin.includes('onrender.com');
-      if (!isTrusted) {
+      // Only accept credentials from explicitly trusted origins.
+      if (!isTrustedOAuthOrigin(event.origin)) {
         return;
       }
 
@@ -290,6 +299,9 @@ export function useAuth() {
           }, 120000);
 
           const handleMsg = (event: MessageEvent) => {
+            if (!isTrustedOAuthOrigin(event.origin)) {
+              return;
+            }
             if (event.data?.type === 'GOOGLE_OAUTH_SUCCESS') {
               clearTimeout(timeout);
               window.removeEventListener('message', handleMsg);

@@ -27,9 +27,19 @@ export const ConfirmModal: React.FC<ConfirmModalProps> = ({
     if (!isOpen) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.repeat) return;
       if (e.key === 'Escape') {
+        e.preventDefault();
         onCancel();
       } else if (e.key === 'Enter') {
+        const target = e.target as HTMLElement | null;
+        const tag = target?.tagName;
+        // Let focused interactive controls handle Enter themselves to avoid
+        // confirming when the user activated Cancel.
+        if (tag === 'BUTTON' || tag === 'A' || tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') {
+          return;
+        }
+        e.preventDefault();
         onConfirm();
       }
     };

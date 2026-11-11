@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { X, Plus, Lock, Unlock, Hash, ArrowRight, Trash2 } from 'lucide-react';
 import { SessionRoom } from '../types';
@@ -33,6 +33,18 @@ export const CreateRoomModal: React.FC<CreateRoomModalProps> = ({
   const [isDeletingId, setIsDeletingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Clear the form each time the modal opens so stale input/errors are not shown.
+  useEffect(() => {
+    if (isOpen) {
+      setRoomName('');
+      setCustomCode('');
+      setIsLocked(false);
+      setConfirmDeleteId(null);
+      setError(null);
+      setIsSubmitting(false);
+    }
+  }, [isOpen]);
 
   if (!isOpen) return null;
 

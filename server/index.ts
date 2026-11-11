@@ -18,6 +18,7 @@ import {
   saveRoomElements,
   saveRoomElementsDebounced,
   deleteRoom,
+  flushAllPendingSaves,
 } from "./auth";
 import { connectDb, checkDbHealth } from "./db";
 import { generateDiagramWithGemini, DiagramType } from "./gemini";
@@ -41,6 +42,19 @@ function escapeHtml(str: string): string {
     .replace(/'/g, "&#039;");
 }
 
+/**
+ * Serialize a value for safe embedding inside an inline <script> block.
+ * Prevents `</script>` breakouts and JS line-separator injection.
+ */
+function safeJsonForScript(value: unknown): string {
+  return JSON.stringify(value ?? null)
+    .replace(/</g, "\\u003c")
+    .replace(/>/g, "\\u003e")
+    .replace(/&/g, "\\u0026")
+    .replace(/\u2028/g, "\\u2028")
+    .replace(/\u2029/g, "\\u2029");
+}
+
 interface CanvasElement {
   id: string;
   type: 'stroke' | 'sticky' | 'text';
@@ -50,6 +64,8 @@ interface CanvasElement {
 interface UserSession {
   id: string;
   socketId: string;
+  /** Every socket currently holding this identity (multiple tabs/windows). */
+  socketIds?: string[];
   name: string;
   color: string;
   roomId: string;
@@ -149,27 +165,29 @@ function resolveTrustedOrigin(rawOrigin?: string): string {
   return (process.env.APP_URL || "http://localhost:5173").replace(/\/$/, "");
 }
 
-// In-memory rate limiter to protect against credential stuffing / brute-force
+// In-memory rate limiter to protect against credential stuffing / brute-force.
+// Buckets are namespaced per endpoint so exhausting one limit cannot block others.
 const authRateLimitMap = new Map<string, { count: number; resetTime: number }>();
 
 // Periodic pruning of expired rate-limit records
 setInterval(() => {
   const now = Date.now();
-  for (const [ip, record] of authRateLimitMap.entries()) {
+  for (const [key, record] of authRateLimitMap.entries()) {
     if (now > record.resetTime) {
-      authRateLimitMap.delete(ip);
+      authRateLimitMap.delete(key);
     }
   }
 }, 10 * 60 * 1000);
 
-function authRateLimiter(maxRequests = 30, windowMs = 60000) {
+function authRateLimiter(maxRequests = 30, windowMs = 60000, bucket = "default") {
   return (req: express.Request, res: express.Response, next: express.NextFunction) => {
     const ip = req.ip || req.socket.remoteAddress || "unknown_ip";
+    const key = `${bucket}:${ip}`;
     const now = Date.now();
-    const record = authRateLimitMap.get(ip);
+    const record = authRateLimitMap.get(key);
 
     if (!record || now > record.resetTime) {
-      authRateLimitMap.set(ip, { count: 1, resetTime: now + windowMs });
+      authRateLimitMap.set(key, { count: 1, resetTime: now + windowMs });
       return next();
     }
 
@@ -188,6 +206,8 @@ function authRateLimiter(maxRequests = 30, windowMs = 60000) {
 async function startServer() {
   await connectDb();
   const app = express();
+  // Respect a single reverse proxy (Render/Railway/nginx) for client IPs.
+  app.set("trust proxy", 1);
   const server = http.createServer(app);
   const io = new SocketIOServer(server, {
     cors: {
@@ -267,7 +287,7 @@ async function startServer() {
   });
 
   // Authentication Routes with Rate Limiting
-  app.post("/api/auth/register", authRateLimiter(15, 60000), async (req, res) => {
+  app.post("/api/auth/register", authRateLimiter(15, 60000, "auth-register"), async (req, res) => {
     try {
       const { username, email, password, name, color } = req.body;
       const result = await registerUser({ username, email, password, name, color });
@@ -277,7 +297,7 @@ async function startServer() {
     }
   });
 
-  app.post("/api/auth/login", authRateLimiter(15, 60000), async (req, res) => {
+  app.post("/api/auth/login", authRateLimiter(15, 60000, "auth-login"), async (req, res) => {
     try {
       const { identifier, password } = req.body;
       const result = await loginUser(identifier, password);
@@ -287,7 +307,7 @@ async function startServer() {
     }
   });
 
-  app.post("/api/auth/guest", authRateLimiter(30, 60000), async (req, res) => {
+  app.post("/api/auth/guest", authRateLimiter(30, 60000, "auth-guest"), async (req, res) => {
     try {
       const { name, color } = req.body;
       const result = await createGuestUser(name, color);
@@ -317,7 +337,7 @@ async function startServer() {
   });
 
   // Gemini AI Diagram Generation Route (Rate limited to 10 requests / min per IP)
-  app.post("/api/ai/generate-diagram", authRateLimiter(10, 60000), async (req, res) => {
+  app.post("/api/ai/generate-diagram", authRateLimiter(10, 60000, "ai-generate"), async (req, res) => {
     try {
       const { prompt, type, canvasCenter } = req.body;
       if (!prompt || typeof prompt !== "string" || !prompt.trim()) {
@@ -406,6 +426,8 @@ async function startServer() {
     if (error || !code) {
       const rawErrMsg = (error as string) || "Authorization was cancelled or code was not returned";
       const safeErrMsg = escapeHtml(rawErrMsg);
+      const safeErrMsgJs = safeJsonForScript(rawErrMsg);
+      const safeTargetOriginJs = safeJsonForScript(targetOrigin);
       res.send(`
         <!DOCTYPE html>
         <html>
@@ -415,7 +437,7 @@ async function startServer() {
             <p>${safeErrMsg}</p>
             <script>
               if (window.opener) {
-                window.opener.postMessage({ type: 'GOOGLE_OAUTH_ERROR', error: ${JSON.stringify(rawErrMsg)} }, ${JSON.stringify(targetOrigin)});
+                window.opener.postMessage({ type: 'GOOGLE_OAUTH_ERROR', error: ${safeErrMsgJs} }, ${safeTargetOriginJs});
                 setTimeout(() => window.close(), 1500);
               } else {
                 setTimeout(() => { window.location.href = '/'; }, 2000);
@@ -482,6 +504,9 @@ async function startServer() {
       });
 
       // Send postMessage to main window with validated targetOrigin and close popup
+      const safeTokenJs = safeJsonForScript(result.token);
+      const safeUserJs = safeJsonForScript(result.user);
+      const safeTargetOriginJs = safeJsonForScript(targetOrigin);
       res.send(`
         <!DOCTYPE html>
         <html>
@@ -490,9 +515,9 @@ async function startServer() {
             <h3>Connected with Google</h3>
             <p>Completing sign in...</p>
             <script>
-              const token = ${JSON.stringify(result.token)};
-              const user = ${JSON.stringify(result.user)};
-              const targetOrigin = ${JSON.stringify(targetOrigin)};
+              const token = ${safeTokenJs};
+              const user = ${safeUserJs};
+              const targetOrigin = ${safeTargetOriginJs};
 
               // 1. Save directly into localStorage for same-origin sessions
               try {
@@ -508,7 +533,7 @@ async function startServer() {
                     type: 'GOOGLE_OAUTH_SUCCESS',
                     token: token,
                     user: user
-                  }, '*');
+                  }, targetOrigin);
                   notifiedOpener = true;
                   setTimeout(() => window.close(), 400);
                 } catch (err) {
@@ -530,6 +555,8 @@ async function startServer() {
     } catch (err: any) {
       const rawErrMsg = err.message || "OAuth exchange error";
       const safeErrMsg = escapeHtml(rawErrMsg);
+      const safeErrMsgJs = safeJsonForScript(rawErrMsg);
+      const safeTargetOriginJs = safeJsonForScript(targetOrigin);
       res.send(`
         <!DOCTYPE html>
         <html>
@@ -539,7 +566,7 @@ async function startServer() {
             <p>${safeErrMsg}</p>
             <script>
               if (window.opener) {
-                window.opener.postMessage({ type: 'GOOGLE_OAUTH_ERROR', error: ${JSON.stringify(rawErrMsg)} }, ${JSON.stringify(targetOrigin)});
+                window.opener.postMessage({ type: 'GOOGLE_OAUTH_ERROR', error: ${safeErrMsgJs} }, ${safeTargetOriginJs});
                 setTimeout(() => window.close(), 2500);
               }
             </script>
@@ -641,8 +668,8 @@ async function startServer() {
       const meta = await getRoomMeta(roomId);
       const creatorId = roomData?.creatorId || meta?.creatorId;
 
-      // Verify authorization: if user token exists and creator is known, require ownership
-      if (user && creatorId && creatorId !== user.id) {
+      // Verify authorization: only the room creator may delete a room
+      if (creatorId && (!user || creatorId !== user.id)) {
         res.status(403).json({ success: false, error: "Only the room creator can delete this room" });
         return;
       }
@@ -690,34 +717,73 @@ async function startServer() {
     };
 
     // Join room
-    socket.on("join-room", async (data: { roomId: string; user: { id: string; name: string; color: string; username?: string }; token?: string }) => {
-      const { roomId, user, token } = data;
+    socket.on("join-room", async (rawData: { roomId: string; user: { id: string; name: string; color: string; username?: string }; token?: string }) => {
+      const data = rawData || ({} as any);
+      const rawRoomId = typeof data.roomId === "string" ? data.roomId : "";
+      const roomId = rawRoomId
+        .trim()
+        .toUpperCase()
+        .replace(/[^A-Z0-9_-]/g, "-")
+        .slice(0, 64);
+
+      if (!roomId || roomId.length < 2) {
+        socket.emit("room-error", { message: "Invalid room code." });
+        return;
+      }
+
+      // Resolve identity server-side whenever a valid token is supplied so that
+      // guests cannot spoof another account's id or host privileges.
+      const authenticatedUser = typeof data.token === "string" && data.token
+        ? await getUserByToken(data.token)
+        : null;
+      const accountId = authenticatedUser ? authenticatedUser.id : null;
+      const providedUser = data.user && typeof data.user === "object" ? data.user : ({} as any);
+      const actualUserId = (accountId || String(providedUser.id || socket.id)).slice(0, 128);
+      const requestedName = String(providedUser.name || "").trim().slice(0, 48);
+      const accountName = authenticatedUser ? String(authenticatedUser.name || "").trim().slice(0, 48) : "";
+      const actualName = requestedName || accountName || "Guest";
+      const requestedColor = typeof providedUser.color === "string" ? providedUser.color : "";
+      const actualColorCandidate = /^#[0-9a-fA-F]{3,8}$/.test(requestedColor)
+        ? requestedColor
+        : authenticatedUser
+        ? authenticatedUser.color
+        : requestedColor;
+      const actualColor = actualColorCandidate || "#3b82f6";
+
       const room = await getOrCreateRoom(roomId);
 
       // Verify if user was kicked by the host
-      if (room.kickedUserIds.has(user.id)) {
+      if (room.kickedUserIds.has(actualUserId)) {
         socket.emit("kicked", {
           reason: "You have been removed from this room by the host.",
         });
         return;
       }
 
+      // Same socket changing identity (login/logout): drop the previous entry
+      if (currentUser && currentUser.id !== actualUserId && currentRoomId === roomId) {
+        delete room.users[currentUser.id];
+        socket.to(roomId).emit("user-left", { userId: currentUser.id });
+      }
+
+      // Leave the previously joined room when switching rooms
+      if (currentRoomId && currentRoomId !== roomId) {
+        const previousRoom = rooms.get(currentRoomId);
+        if (previousRoom && currentUser) {
+          delete previousRoom.users[currentUser.id];
+          socket.to(currentRoomId).emit("user-left", { userId: currentUser.id });
+        }
+        socket.leave(currentRoomId);
+      }
+
       currentRoomId = roomId;
       socket.join(roomId);
-
-      // Authenticated user resolution
-      const authenticatedUser = token ? await getUserByToken(token) : null;
-      const actualUserId = user.id || socket.id;
-      const actualName = authenticatedUser ? authenticatedUser.name : user.name;
-      const actualColor = authenticatedUser ? authenticatedUser.color : user.color;
-      const accountId = authenticatedUser ? authenticatedUser.id : null;
 
       // Determine Host / Admin status
       const isRoomCreator = Boolean(
         room.creatorId && (
           (accountId && room.creatorId === accountId) ||
-          room.creatorId === actualUserId ||
-          room.creatorId === user.id
+          room.creatorId === actualUserId
         )
       );
       const isFirstUser = !room.creatorId && Object.keys(room.users).length === 0;
@@ -730,7 +796,6 @@ async function startServer() {
       const isHost = isRoomCreator || isFirstUser;
       let canWrite = true;
       let role: 'admin' | 'editor' | 'viewer' = 'editor';
-
       if (isHost) {
         role = 'admin';
         canWrite = true;
@@ -746,9 +811,17 @@ async function startServer() {
         }
       }
 
+      const previousPresence = room.users[actualUserId];
+      const previousSocketIds = previousPresence
+        ? previousPresence.socketIds?.length
+          ? previousPresence.socketIds
+          : [previousPresence.socketId]
+        : [];
+
       currentUser = {
         id: actualUserId,
         socketId: socket.id,
+        socketIds: Array.from(new Set([...previousSocketIds.filter(Boolean), socket.id])),
         name: actualName,
         color: actualColor,
         roomId,
@@ -828,14 +901,21 @@ async function startServer() {
       const targetUser = room.users[targetUserId];
 
       if (targetUser && targetUser.socketId) {
-        const targetSocket = io.sockets.sockets.get(targetUser.socketId);
-        io.to(targetUser.socketId).emit("kicked", {
-          reason: reason || "You were removed from this room by the host.",
-        });
-        if (targetSocket) {
-          targetSocket.data.kicked = true;
-          targetSocket.leave(currentRoomId);
-          targetSocket.disconnect(true);
+        // Kick every socket holding this identity so a second tab/window cannot
+        // keep editing after the user is removed.
+        const socketsToKick = targetUser.socketIds?.length
+          ? targetUser.socketIds
+          : [targetUser.socketId];
+        for (const socketId of socketsToKick) {
+          io.to(socketId).emit("kicked", {
+            reason: reason || "You were removed from this room by the host.",
+          });
+          const targetSocket = io.sockets.sockets.get(socketId);
+          if (targetSocket) {
+            targetSocket.data.kicked = true;
+            targetSocket.leave(currentRoomId);
+            targetSocket.disconnect(true);
+          }
         }
       }
 
@@ -876,10 +956,15 @@ async function startServer() {
       const targetRoomId = payload?.roomId || currentRoomId;
       if (!targetRoomId || !currentUser) return;
       const room = rooms.get(targetRoomId);
+
+      // Only the host of the room being deleted may delete it. Falls back to a
+      // creator check for authenticated accounts that are not in the room.
+      const isRoomHost = Boolean(currentRoomId === targetRoomId && currentUser.isHost);
       const meta = await getRoomMeta(targetRoomId);
       const creatorId = room?.creatorId || meta?.creatorId;
+      const isCreator = Boolean(creatorId && creatorId === currentUser.id);
 
-      if (!currentUser.isHost && creatorId && creatorId !== currentUser.id) {
+      if (!isRoomHost && !isCreator) {
         socket.emit("permission-denied", {
           message: "Only the room host or creator can delete this room.",
         });
@@ -1059,7 +1144,7 @@ async function startServer() {
       // If only 1 user, clear immediately
       if (userIds.length <= 1) {
         room.elements = {};
-        saveRoomElements(targetRoomId, {});
+        void saveRoomElements(targetRoomId, {});
         io.to(targetRoomId).emit("board-cleared", {
           initiatorName: currentUser.name,
           wasVoted: false,
@@ -1101,7 +1186,7 @@ async function startServer() {
 
         if (passed) {
           currentRoom.elements = {};
-          saveRoomElements(targetRoomId, {});
+          void saveRoomElements(targetRoomId, {});
           io.to(targetRoomId).emit("board-cleared", {
             initiatorName: currentRoom.voteToClear.initiatorName,
             wasVoted: true,
@@ -1129,7 +1214,6 @@ async function startServer() {
 
       const userIds = Object.keys(room.users);
       const yesCount = Object.values(room.voteToClear.votes).filter(Boolean).length;
-      const noCount = Object.values(room.voteToClear.votes).filter((v) => v === false).length;
       const totalEligible = userIds.length;
 
       // Broadcast updated votes
@@ -1139,7 +1223,7 @@ async function startServer() {
       if (yesCount > totalEligible / 2) {
         if (room.voteTimer) clearTimeout(room.voteTimer);
         room.elements = {};
-        saveRoomElements(currentRoomId, {});
+        void saveRoomElements(currentRoomId, {});
         io.to(currentRoomId).emit("board-cleared", {
           initiatorName: room.voteToClear.initiatorName,
           wasVoted: true,
@@ -1153,19 +1237,6 @@ async function startServer() {
         room.voteToClear = null;
         room.voteTimer = null;
         return;
-      }
-
-      // If impossible to pass (noCount >= totalEligible / 2)
-      if (noCount >= totalEligible / 2 && totalEligible > 2) {
-        if (room.voteTimer) clearTimeout(room.voteTimer);
-        io.to(currentRoomId).emit("vote-clear-ended", {
-          passed: false,
-          yesCount,
-          totalEligible,
-          reason: "rejected",
-        });
-        room.voteToClear = null;
-        room.voteTimer = null;
       }
     });
 
@@ -1193,7 +1264,7 @@ async function startServer() {
       const room = rooms.get(currentRoomId);
       if (!room) return;
       room.elements = {};
-      saveRoomElements(currentRoomId, {});
+      void saveRoomElements(currentRoomId, {});
       io.to(currentRoomId).emit("board-cleared", {
         initiatorName: currentUser.name,
         wasVoted: false,
@@ -1205,6 +1276,19 @@ async function startServer() {
       if (!currentRoomId || !currentUser) return;
       const room = rooms.get(currentRoomId);
       if (!room) return;
+
+      // Multiple tabs/sockets can share one account identity. Hand the presence
+      // entry to a remaining socket instead of removing the user entirely.
+      const presence = room.users[currentUser.id];
+      if (presence) {
+        const sockets = presence.socketIds?.length ? presence.socketIds : [presence.socketId];
+        const remaining = sockets.filter((sid) => sid !== socket.id);
+        if (remaining.length > 0) {
+          presence.socketId = remaining[remaining.length - 1];
+          presence.socketIds = remaining;
+          return;
+        }
+      }
 
       const wasHost = !!currentUser.isHost;
       delete room.users[currentUser.id];
@@ -1290,6 +1374,22 @@ async function startServer() {
   server.listen(PORT, "0.0.0.0", () => {
     console.log(`Collaborative Whiteboard server running on port ${PORT}`);
   });
+
+  const shutdown = async (signal: string) => {
+    console.log(`[Shutdown] Received ${signal}, flushing pending saves...`);
+    try {
+      await flushAllPendingSaves();
+    } catch (err) {
+      console.warn("[Shutdown] Failed to flush pending saves:", err);
+    }
+    io.close();
+    server.close(() => process.exit(0));
+    // Force-exit if connections refuse to close.
+    setTimeout(() => process.exit(0), 5000).unref();
+  };
+
+  process.once("SIGTERM", () => void shutdown("SIGTERM"));
+  process.once("SIGINT", () => void shutdown("SIGINT"));
 }
 
 startServer().catch((err) => {

@@ -200,6 +200,9 @@ export const AiGenerateModal: React.FC<AiGenerateModalProps> = ({
       setIsReady(true);
       await new Promise((resolve) => setTimeout(resolve, 380));
 
+      // The user may have cancelled while the completion stage was shown.
+      if (controller.signal.aborted) return;
+
       onInsertElements(data.elements, replaceBoard);
       onClose();
       setPrompt('');

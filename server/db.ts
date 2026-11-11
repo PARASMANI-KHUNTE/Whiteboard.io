@@ -13,6 +13,8 @@ export interface StoredUserDoc {
   isGuest?: boolean;
   googleId?: string;
   picture?: string;
+  /** TTL anchor for guest accounts (BSON Date required by MongoDB TTL indexes). */
+  expiresAt?: Date;
 }
 
 export interface SessionTokenDoc {
@@ -20,6 +22,8 @@ export interface SessionTokenDoc {
   userId: string;
   createdAt: number;
   updatedAt: number;
+  /** TTL anchor for session tokens. */
+  expiresAt?: Date;
 }
 
 export interface SessionRoomDoc {
@@ -46,47 +50,94 @@ export interface IndividualElementDoc {
 
 let client: MongoClient | null = null;
 let db: Db | null = null;
+let connectPromise: Promise<Db> | null = null;
+
+function redactMongoUri(uri: string): string {
+  try {
+    const parsed = new URL(uri);
+    if (parsed.password) parsed.password = '***';
+    return parsed.toString();
+  } catch {
+    return '<configured MongoDB URI>';
+  }
+}
 
 export async function connectDb(): Promise<Db> {
   if (db && client) {
     return db;
   }
+  if (connectPromise) {
+    return connectPromise;
+  }
 
-  const uri = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/whiteboard';
-  console.log(`[MongoDB] Connecting to ${uri}...`);
+  connectPromise = (async () => {
+    const uri = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/whiteboard';
+    console.log(`[MongoDB] Connecting to ${redactMongoUri(uri)}...`);
 
-  client = new MongoClient(uri, {
-    connectTimeoutMS: 10000,
-    serverSelectionTimeoutMS: 10000,
-  });
+    const newClient = new MongoClient(uri, {
+      connectTimeoutMS: 10000,
+      serverSelectionTimeoutMS: 10000,
+    });
+    client = newClient;
 
-  await client.connect();
-  db = client.db();
-  console.log(`[MongoDB] Connected successfully to database: ${db.databaseName}`);
+    try {
+      await newClient.connect();
+      const connectedDb = newClient.db();
+      db = connectedDb;
+      console.log(`[MongoDB] Connected successfully to database: ${connectedDb.databaseName}`);
 
-  // Create required indexes
-  const users = db.collection<StoredUserDoc>('users');
-  const tokens = db.collection<SessionTokenDoc>('tokens');
-  const rooms = db.collection<SessionRoomDoc>('rooms');
-  const elements = db.collection<RoomElementsDoc>('elements');
-  const individualElements = db.collection<IndividualElementDoc>('room_elements');
+      // Create required indexes
+      const users = connectedDb.collection<StoredUserDoc>('users');
+      const tokens = connectedDb.collection<SessionTokenDoc>('tokens');
+      const rooms = connectedDb.collection<SessionRoomDoc>('rooms');
+      const elements = connectedDb.collection<RoomElementsDoc>('elements');
+      const individualElements = connectedDb.collection<IndividualElementDoc>('room_elements');
 
-  await Promise.allSettled([
-    users.createIndex({ id: 1 }, { unique: true }),
-    users.createIndex({ username: 1 }),
-    users.createIndex({ email: 1 }),
-    users.createIndex({ createdAt: 1 }, { expireAfterSeconds: 7 * 24 * 60 * 60, partialFilterExpression: { isGuest: true } }),
-    tokens.createIndex({ token: 1 }, { unique: true }),
-    tokens.createIndex({ userId: 1 }),
-    tokens.createIndex({ createdAt: 1 }, { expireAfterSeconds: 30 * 24 * 60 * 60 }),
-    rooms.createIndex({ id: 1 }, { unique: true }),
-    rooms.createIndex({ creatorId: 1 }),
-    elements.createIndex({ roomId: 1 }, { unique: true }),
-    individualElements.createIndex({ roomId: 1, elementId: 1 }, { unique: true }),
-    individualElements.createIndex({ roomId: 1 }),
-  ]);
+      const indexSpecs: Array<[string, Promise<string>]> = [
+        ['users.id', users.createIndex({ id: 1 }, { unique: true })],
+        ['users.username', users.createIndex({ username: 1 }, { unique: true })],
+        ['users.email', users.createIndex({ email: 1 }, { unique: true })],
+        [
+          'users.expiresAt',
+          users.createIndex(
+            { expiresAt: 1 },
+            { expireAfterSeconds: 0, partialFilterExpression: { isGuest: true } }
+          ),
+        ],
+        ['tokens.token', tokens.createIndex({ token: 1 }, { unique: true })],
+        ['tokens.userId', tokens.createIndex({ userId: 1 })],
+        ['tokens.expiresAt', tokens.createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 })],
+        ['rooms.id', rooms.createIndex({ id: 1 }, { unique: true })],
+        ['rooms.creatorId', rooms.createIndex({ creatorId: 1 })],
+        ['elements.roomId', elements.createIndex({ roomId: 1 }, { unique: true })],
+        [
+          'room_elements.roomId_elementId',
+          individualElements.createIndex({ roomId: 1, elementId: 1 }, { unique: true }),
+        ],
+        ['room_elements.roomId', individualElements.createIndex({ roomId: 1 })],
+      ];
 
-  return db;
+      const results = await Promise.allSettled(indexSpecs.map(([, promise]) => promise));
+      results.forEach((result, i) => {
+        if (result.status === 'rejected') {
+          console.warn(`[MongoDB] Failed to create index ${indexSpecs[i][0]}:`, result.reason?.message || result.reason);
+        }
+      });
+
+      return connectedDb;
+    } catch (err) {
+      try {
+        await newClient.close();
+      } catch {}
+      client = null;
+      db = null;
+      throw err;
+    } finally {
+      connectPromise = null;
+    }
+  })();
+
+  return connectPromise;
 }
 
 export function getDb(): Db {
