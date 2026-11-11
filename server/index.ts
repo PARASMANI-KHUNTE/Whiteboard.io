@@ -22,6 +22,7 @@ import {
 } from "./auth";
 import { connectDb, checkDbHealth } from "./db";
 import { generateDiagram, reviseDiagram } from "./ai/generate";
+import { defaultDiagramAuthor, getProviderSummary, resolveAiProvider } from "./ai/providers";
 import {
   coerceDiagramType,
   coerceDetailLevel,
@@ -342,7 +343,18 @@ async function startServer() {
     }
   });
 
-  // Gemini AI Diagram Generation Route (Rate limited to 10 requests / min per IP)
+  // Which AI engine is active (Gemini, local Ollama, or the fallback generator).
+  app.get("/api/ai/config", (_req, res) => {
+    const summary = getProviderSummary();
+    res.json({
+      success: true,
+      provider: summary.provider,
+      model: summary.model,
+      label: summary.label,
+    });
+  });
+
+  // AI Diagram Generation Route (Rate limited to 10 requests / min per IP)
   app.post("/api/ai/generate-diagram", authRateLimiter(10, 60000, "ai-generate"), async (req, res) => {
     try {
       const body = req.body ?? {};
@@ -355,7 +367,9 @@ async function startServer() {
       const authHeader = req.headers.authorization;
       const token = authHeader?.replace("Bearer ", "")?.trim();
       const user = token ? await getUserByToken(token) : null;
-      const author = user ? { id: user.id, name: user.name } : { id: "ai_gemini", name: "Gemini AI" };
+      const author = user
+        ? { id: user.id, name: user.name }
+        : defaultDiagramAuthor(resolveAiProvider());
 
       const canvasCenter =
         body.canvasCenter &&
@@ -376,7 +390,7 @@ async function startServer() {
 
       res.json({ success: true, ...result });
     } catch (err: any) {
-      console.error("[Gemini AI Error]:", err.message);
+      console.error("[AI Generate Error]:", err.message);
       res.status(500).json({ success: false, error: err.message || "Failed to generate diagram" });
     }
   });
@@ -400,7 +414,9 @@ async function startServer() {
       const authHeader = req.headers.authorization;
       const token = authHeader?.replace("Bearer ", "")?.trim();
       const user = token ? await getUserByToken(token) : null;
-      const author = user ? { id: user.id, name: user.name } : { id: "ai_gemini", name: "Gemini AI" };
+      const author = user
+        ? { id: user.id, name: user.name }
+        : defaultDiagramAuthor(resolveAiProvider());
 
       const history: ChatTurn[] = Array.isArray(body.history)
         ? body.history
