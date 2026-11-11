@@ -298,10 +298,10 @@ export const Header: React.FC<HeaderProps> = ({
             className="w-5 h-5 rounded-full text-white flex items-center justify-center text-[10px] font-bold shadow-xs shrink-0"
             style={{ backgroundColor: currentUser.color || '#3b82f6' }}
           >
-            {(authUser?.name || currentUser.name || 'U').charAt(0).toUpperCase()}
+            {(currentUser.name || authUser?.name || 'U').charAt(0).toUpperCase()}
           </div>
           <span className="hidden md:inline truncate max-w-[85px]">
-            {authUser?.name || currentUser.name}
+            {currentUser.name || authUser?.name}
           </span>
         </button>
 

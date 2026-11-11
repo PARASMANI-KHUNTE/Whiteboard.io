@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { X, Copy, Check, Share2, Users, Shield, Globe } from 'lucide-react';
 
@@ -23,17 +23,36 @@ export const ShareRoomModal: React.FC<ShareRoomModalProps> = ({
 }) => {
   const [copiedCode, setCopiedCode] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
+  const codeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const linkTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (codeTimerRef.current) clearTimeout(codeTimerRef.current);
+      if (linkTimerRef.current) clearTimeout(linkTimerRef.current);
+    };
+  }, []);
 
   if (!isOpen) return null;
 
   const activeRoomId = roomCode || 'offline';
   const roomUrl = `${window.location.origin}?room=${encodeURIComponent(activeRoomId)}`;
 
+  const resetCopiedCodeLater = () => {
+    if (codeTimerRef.current) clearTimeout(codeTimerRef.current);
+    codeTimerRef.current = setTimeout(() => setCopiedCode(false), 2500);
+  };
+
+  const resetCopiedLinkLater = () => {
+    if (linkTimerRef.current) clearTimeout(linkTimerRef.current);
+    linkTimerRef.current = setTimeout(() => setCopiedLink(false), 2500);
+  };
+
   const handleCopyCode = async () => {
     try {
       await navigator.clipboard.writeText(activeRoomId);
       setCopiedCode(true);
-      setTimeout(() => setCopiedCode(false), 2500);
+      resetCopiedCodeLater();
     } catch {
       // Fallback without browser prompt
       const el = document.createElement('textarea');
@@ -43,7 +62,7 @@ export const ShareRoomModal: React.FC<ShareRoomModalProps> = ({
       document.execCommand('copy');
       document.body.removeChild(el);
       setCopiedCode(true);
-      setTimeout(() => setCopiedCode(false), 2500);
+      resetCopiedCodeLater();
     }
   };
 
@@ -51,7 +70,7 @@ export const ShareRoomModal: React.FC<ShareRoomModalProps> = ({
     try {
       await navigator.clipboard.writeText(roomUrl);
       setCopiedLink(true);
-      setTimeout(() => setCopiedLink(false), 2500);
+      resetCopiedLinkLater();
     } catch {
       // Fallback without browser prompt
       const el = document.createElement('textarea');
@@ -61,7 +80,7 @@ export const ShareRoomModal: React.FC<ShareRoomModalProps> = ({
       document.execCommand('copy');
       document.body.removeChild(el);
       setCopiedLink(true);
-      setTimeout(() => setCopiedLink(false), 2500);
+      resetCopiedLinkLater();
     }
   };
 

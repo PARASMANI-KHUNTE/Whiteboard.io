@@ -174,8 +174,8 @@ export const ShapeItem: React.FC<ShapeItemProps> = ({
     const handleMouseMove = (moveEvent: MouseEvent) => {
       const deltaX = (moveEvent.clientX - startX) / (zoom || 1);
       const deltaY = (moveEvent.clientY - startY) / (zoom || 1);
-      const newX = Math.max(0, initialPos.x + deltaX);
-      const newY = Math.max(0, initialPos.y + deltaY);
+      const newX = initialPos.x + deltaX;
+      const newY = initialPos.y + deltaY;
 
       currentPosRef.current = { x: newX, y: newY };
       setLocalPos({ x: newX, y: newY });

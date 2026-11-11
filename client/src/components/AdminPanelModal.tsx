@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   X,
   Shield,
@@ -48,6 +48,14 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
 }) => {
   const [confirmKickId, setConfirmKickId] = useState<string | null>(null);
   const [confirmDeleteRoom, setConfirmDeleteRoom] = useState(false);
+
+  // Reset destructive-confirmation state whenever the panel is (re)opened.
+  useEffect(() => {
+    if (isOpen) {
+      setConfirmKickId(null);
+      setConfirmDeleteRoom(false);
+    }
+  }, [isOpen]);
 
   if (!isOpen) return null;
 

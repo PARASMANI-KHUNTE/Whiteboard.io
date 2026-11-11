@@ -68,6 +68,8 @@ export function useVoiceChat({
   // Synchronized ref for callback access without stale closures
   const isVoiceConnectedRef = useRef<boolean>(false);
   isVoiceConnectedRef.current = isVoiceConnected;
+  const isMutedRef = useRef<boolean>(false);
+  isMutedRef.current = isMuted;
 
   // Web Audio refs
   const audioCtxRef = useRef<AudioContext | null>(null);
@@ -171,6 +173,12 @@ export function useVoiceChat({
       } catch (_) {}
       audioCtxRef.current = null;
     }
+
+    analyserRef.current = null;
+    masterGainRef.current = null;
+    simGainRef.current = null;
+    freqDataBufferRef.current = new Uint8Array(32);
+    setFrequencyData(new Uint8Array(32));
 
     setIsVoiceConnected(false);
     isVoiceConnectedRef.current = false;
@@ -400,7 +408,7 @@ export function useVoiceChat({
         const avg = sum / (len * 255);
         const normalized = Math.min(1, avg * 2.8);
 
-        const speakingNow = normalized > 0.08 && !isMuted;
+        const speakingNow = normalized > 0.08 && !isMutedRef.current;
         setAudioLevel(normalized);
         setIsSpeaking(speakingNow);
 
@@ -452,7 +460,6 @@ export function useVoiceChat({
     socket,
     isDeafened,
     initiatePeerConnections,
-    isMuted,
     onNotification,
     roomId,
   ]);
@@ -537,6 +544,7 @@ export function useVoiceChat({
       cleanupAll();
       setError(null);
       setIsSimulated(true);
+      setIsMuted(false);
       setIsVoiceConnected(true);
       isVoiceConnectedRef.current = true;
 
@@ -622,7 +630,7 @@ export function useVoiceChat({
     // Incoming WebRTC Offer
     const handleVoiceOffer = async (payload: { fromUserId: string; offer: any }) => {
       try {
-        let pc = peerConnectionsRef.current[payload.fromUserId];
+        let pc: RTCPeerConnection | undefined = peerConnectionsRef.current[payload.fromUserId];
         // If connection exists in a non-stable state or has a collision, recreate cleanly
         if (pc && pc.signalingState !== 'stable') {
           try {

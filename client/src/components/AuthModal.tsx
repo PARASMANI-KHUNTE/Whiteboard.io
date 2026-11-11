@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { X, Lock, Mail, User as UserIcon, Check, Eye, EyeOff, Sparkles, LogIn, UserPlus, Chrome, LogOut } from 'lucide-react';
 import { AuthUser } from '../types';
@@ -48,6 +48,22 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
+
+  // Clear credentials whenever the dialog closes so they are not left in memory
+  // or shown again when the user reopens it.
+  useEffect(() => {
+    if (!isOpen) {
+      setIdentifier('');
+      setPassword('');
+      setUsername('');
+      setEmail('');
+      setName('');
+      setShowPassword(false);
+      setError(null);
+      setIsSubmitting(false);
+      setIsGoogleLoading(false);
+    }
+  }, [isOpen]);
 
   if (!isOpen) return null;
 

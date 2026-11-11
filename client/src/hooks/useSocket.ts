@@ -58,9 +58,19 @@ export function getRoomIdFromUrl(): string | null {
   if (roomParam && roomParam.trim()) {
     return roomParam.trim().toUpperCase();
   }
-  // Check hash
-  if (window.location.hash && window.location.hash.length > 1) {
-    return window.location.hash.replace('#', '').toUpperCase();
+  // Check hash, ignoring OAuth callback hashes such as #auth_token=...
+  const rawHash = window.location.hash.replace(/^#/, '');
+  if (rawHash) {
+    const hashParams = new URLSearchParams(rawHash);
+    if (hashParams.has('auth_token')) return null;
+    const hashRoom = hashParams.get('room');
+    if (hashRoom && hashRoom.trim()) {
+      return hashRoom.trim().toUpperCase();
+    }
+    // Only treat the hash as a room code when it is not another key=value pair
+    if (!rawHash.includes('=')) {
+      return rawHash.toUpperCase();
+    }
   }
   return null;
 }
@@ -129,19 +139,42 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
   currentUserRef.current = currentUser;
   const authTokenRef = useRef<string | null | undefined>(authToken);
   authTokenRef.current = authToken;
+  const isHostRef = useRef<boolean>(isHost);
+  isHostRef.current = isHost;
 
-  // Sync currentUser with authUser if provided
+  // Sync currentUser with the authenticated account (or fall back to the tab
+  // guest identity on logout) and re-announce the new identity to the server.
   useEffect(() => {
-    if (authUser) {
-      setCurrentUser((prev) => ({
-        ...prev,
-        name: authUser.name,
-        color: authUser.color,
-        username: authUser.username,
-        isGuest: authUser.isGuest,
-      }));
+    const guest = !authUser ? getInitialUser() : null;
+    const nextUser: RemoteUser = authUser
+      ? {
+          ...currentUserRef.current,
+          id: authUser.id,
+          name: authUser.name,
+          color: authUser.color,
+          username: authUser.username,
+          isGuest: authUser.isGuest,
+        }
+      : {
+          ...currentUserRef.current,
+          id: guest!.id,
+          name: guest!.name,
+          color: guest!.color,
+          username: undefined,
+          isGuest: true,
+        };
+
+    currentUserRef.current = nextUser;
+    setCurrentUser(nextUser);
+
+    if (socketRef.current?.connected && roomId) {
+      socketRef.current.emit('join-room', {
+        roomId,
+        user: nextUser,
+        token: authToken || undefined,
+      });
     }
-  }, [authUser]);
+  }, [authUser, authToken, roomId]);
 
   const addNotification = useCallback((text: string, type: 'info' | 'success' | 'warning' = 'info') => {
     const id = Math.random().toString(36).substring(2, 9);
@@ -153,6 +186,8 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
 
   const elementsRef = useRef<Record<string, CanvasElement>>(elements);
   elementsRef.current = elements;
+  const usersRef = useRef<Record<string, RemoteUser>>(users);
+  usersRef.current = users;
 
   // Connect socket
   useEffect(() => {
@@ -260,15 +295,26 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
     });
 
     socket.on('user-left', (data: { userId: string }) => {
+      const leftUser = usersRef.current[data.userId];
       setUsers((prev) => {
+        if (!prev[data.userId]) return prev;
         const next = { ...prev };
-        const leftUser = next[data.userId];
-        if (leftUser) {
-          addNotification(`${leftUser.name} left`, 'info');
-          delete next[data.userId];
-        }
+        delete next[data.userId];
         return next;
       });
+      // Drop any partially streamed stroke from a disconnected collaborator.
+      setLiveStrokes((prev) => {
+        const next: typeof prev = {};
+        let changed = false;
+        Object.entries(prev).forEach(([id, stroke]) => {
+          if (stroke.userId === data.userId) changed = true;
+          else next[id] = stroke;
+        });
+        return changed ? next : prev;
+      });
+      if (leftUser) {
+        addNotification(`${leftUser.name} left`, 'info');
+      }
     });
 
     // Admin & Permissions Events
@@ -314,7 +360,7 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
         Object.keys(next).forEach((id) => {
           if (id === data.newHostId) {
             next[id] = { ...next[id], isHost: true, role: 'admin', canWrite: true };
-          } else if (next[id].isHost) {
+          } else if (next[id]?.isHost) {
             next[id] = { ...next[id], isHost: false };
           }
         });
@@ -340,7 +386,7 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
       if (data.users) {
         setUsers(data.users);
       }
-      if (!isHost) {
+      if (!isHostRef.current) {
         setCanWrite(!data.isLocked);
         addNotification(
           data.isLocked ? 'Board was locked by host (View-Only).' : 'Board was unlocked by host.',
@@ -351,6 +397,10 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
 
     socket.on('permission-denied', (data: { message: string }) => {
       addNotification(data.message || 'Permission Denied: Writing is restricted.', 'warning');
+    });
+
+    socket.on('room-error', (data: { message?: string }) => {
+      addNotification(data?.message || 'Could not join the requested room.', 'warning');
     });
 
     // Real-time live stroke events from other users
@@ -621,40 +671,49 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
     const trimmed = name.trim();
     if (!trimmed) return;
     sessionStorage.setItem('collab_user_name', trimmed);
-    setCurrentUser((prev) => ({ ...prev, name: trimmed }));
+    const updatedUser = { ...currentUserRef.current, name: trimmed };
+    setCurrentUser(updatedUser);
     // Re-join with updated identity
     if (socketRef.current?.connected && roomId) {
       socketRef.current.emit('join-room', {
         roomId,
-        user: { ...currentUser, name: trimmed },
+        user: updatedUser,
+        token: authTokenRef.current || undefined,
       });
     }
-  }, [currentUser, roomId]);
+  }, [roomId]);
 
   const updateUserColor = useCallback((color: string) => {
     sessionStorage.setItem('collab_user_color', color);
-    setCurrentUser((prev) => ({ ...prev, color }));
+    const updatedUser = { ...currentUserRef.current, color };
+    setCurrentUser(updatedUser);
     if (socketRef.current?.connected && roomId) {
       socketRef.current.emit('join-room', {
         roomId,
-        user: { ...currentUser, color },
+        user: updatedUser,
+        token: authTokenRef.current || undefined,
       });
     }
-  }, [currentUser, roomId]);
+  }, [roomId]);
 
   const switchRoom = useCallback((newRoomId: string | null) => {
     isSoloMigrationRef.current = false;
-    setElements({});
-    elementsRef.current = {};
-    setLiveStrokes({});
-    setUsers({});
     if (!newRoomId) {
+      setElements({});
+      elementsRef.current = {};
+      setLiveStrokes({});
+      setUsers({});
       setRoomId(null);
       setRoomIdInUrl(null);
       return;
     }
     const cleaned = newRoomId.trim().toUpperCase().replace(/[^A-Z0-9_-]/g, '-');
     if (!cleaned || cleaned === roomId) return;
+    // Only clear the current board once we know we are actually switching rooms.
+    setElements({});
+    elementsRef.current = {};
+    setLiveStrokes({});
+    setUsers({});
     setRoomId(cleaned);
     setRoomIdInUrl(cleaned);
   }, [roomId]);

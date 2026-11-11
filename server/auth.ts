@@ -45,23 +45,54 @@ export interface SessionRoomMeta {
   isLocked: boolean;
 }
 
-export function hashPassword(password: string): { salt: string; hash: string } {
+function pbkdf2Async(password: string, salt: string, iterations: number, keylen: number): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    crypto.pbkdf2(password, salt, iterations, keylen, 'sha512', (err, derivedKey) => {
+      if (err) reject(err);
+      else resolve(derivedKey);
+    });
+  });
+}
+
+/** Constant-time comparison of two hex digests. */
+function safeCompareHex(a: string, b: string): boolean {
+  const bufA = Buffer.from(a, 'hex');
+  const bufB = Buffer.from(b, 'hex');
+  if (bufA.length !== bufB.length || bufA.length === 0) return false;
+  return crypto.timingSafeEqual(bufA, bufB);
+}
+
+export async function hashPassword(password: string): Promise<{ salt: string; hash: string }> {
   const salt = crypto.randomBytes(16).toString('hex');
-  const hash = crypto.pbkdf2Sync(password, salt, 100000, 64, 'sha512').toString('hex');
+  const hash = (await pbkdf2Async(password, salt, 100000, 64)).toString('hex');
   return { salt, hash };
 }
 
-export function verifyPassword(password: string, salt: string, hash: string): boolean {
+export async function verifyPassword(password: string, salt: string, hash: string): Promise<boolean> {
+  if (!hash) return false;
   // Check modern 100k iterations first
-  const modernHash = crypto.pbkdf2Sync(password, salt, 100000, 64, 'sha512').toString('hex');
-  if (modernHash === hash) return true;
+  const modernHash = (await pbkdf2Async(password, salt, 100000, 64)).toString('hex');
+  if (safeCompareHex(modernHash, hash)) return true;
   // Fallback to legacy 1,000 iterations
-  const legacyHash = crypto.pbkdf2Sync(password, salt, 1000, 64, 'sha512').toString('hex');
-  return legacyHash === hash;
+  const legacyHash = (await pbkdf2Async(password, salt, 1000, 64)).toString('hex');
+  return safeCompareHex(legacyHash, hash);
 }
 
 export function generateToken(): string {
   return crypto.randomBytes(32).toString('hex');
+}
+
+const TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+
+function buildTokenDoc(token: string, userId: string) {
+  const now = Date.now();
+  return {
+    token,
+    userId,
+    createdAt: now,
+    updatedAt: now,
+    expiresAt: new Date(now + TOKEN_TTL_MS),
+  };
 }
 
 export function sanitizeUser(u: StoredUserDoc | StoredUser): SanitizedUser {
@@ -118,7 +149,7 @@ export async function registerUser(params: {
     throw new Error('An account with this email already exists.');
   }
 
-  const { salt, hash } = hashPassword(password);
+  const { salt, hash } = await hashPassword(password);
   const id = 'user_' + crypto.randomBytes(6).toString('hex');
   const name = sanitizeString(params.name) || username;
   const color = sanitizeString(params.color) || '#3b82f6';
@@ -136,15 +167,17 @@ export async function registerUser(params: {
     isGuest: false,
   };
 
-  await users.insertOne(newUser);
+  try {
+    await users.insertOne(newUser);
+  } catch (err: any) {
+    if (err?.code === 11000) {
+      throw new Error('This username or email is already registered.');
+    }
+    throw err;
+  }
 
   const token = generateToken();
-  await tokens.insertOne({
-    token,
-    userId: id,
-    createdAt: Date.now(),
-    updatedAt: Date.now(),
-  });
+  await tokens.insertOne(buildTokenDoc(token, id));
 
   return { token, user: sanitizeUser(newUser) };
 }
@@ -165,21 +198,18 @@ export async function loginUser(identifier: string, password: string): Promise<{
   });
 
   if (!user) {
-    throw new Error('Account not found. Please check your username/email or register.');
+    // Perform a dummy derivation so response timing does not reveal whether the account exists.
+    await pbkdf2Async(pass, 'invalid-account-salt', 100000, 64);
+    throw new Error('Invalid username/email or password.');
   }
 
-  const isValid = verifyPassword(pass, user.salt, user.passwordHash);
+  const isValid = await verifyPassword(pass, user.salt, user.passwordHash);
   if (!isValid) {
-    throw new Error('Incorrect password. Please try again.');
+    throw new Error('Invalid username/email or password.');
   }
 
   const token = generateToken();
-  await tokens.insertOne({
-    token,
-    userId: user.id,
-    createdAt: Date.now(),
-    updatedAt: Date.now(),
-  });
+  await tokens.insertOne(buildTokenDoc(token, user.id));
 
   return { token, user: sanitizeUser(user) };
 }
@@ -188,10 +218,11 @@ export async function createGuestUser(name?: string, color?: string): Promise<{ 
   const id = 'guest_' + crypto.randomBytes(5).toString('hex');
   const displayName = (name && name.trim()) || `Guest_${id.slice(-4)}`;
   const displayColor = color || '#10b981';
+  const username = `guest_${id.slice(-8)}`;
 
   const guestUser: StoredUserDoc = {
     id,
-    username: `guest_${id.slice(-4)}`,
+    username,
     email: `${id}@guest.local`,
     passwordHash: '',
     salt: '',
@@ -200,6 +231,7 @@ export async function createGuestUser(name?: string, color?: string): Promise<{ 
     createdAt: Date.now(),
     createdRooms: [],
     isGuest: true,
+    expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
   };
 
   const users = getUsersCollection();
@@ -208,12 +240,7 @@ export async function createGuestUser(name?: string, color?: string): Promise<{ 
   await users.insertOne(guestUser);
 
   const token = generateToken();
-  await tokens.insertOne({
-    token,
-    userId: id,
-    createdAt: Date.now(),
-    updatedAt: Date.now(),
-  });
+  await tokens.insertOne(buildTokenDoc(token, id));
 
   return { token, user: sanitizeUser(guestUser) };
 }
@@ -255,18 +282,24 @@ export async function findOrCreateGoogleUser(googleProfile: {
     }
 
     const token = generateToken();
-    await tokens.insertOne({
-      token,
-      userId: existingUser.id,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-    });
+    await tokens.insertOne(buildTokenDoc(token, existingUser.id));
 
     return { token, user: sanitizeUser(existingUser) };
   }
 
-  const userId = `google_${googleProfile.id || Math.random().toString(36).substring(2, 10)}`;
-  const username = emailLower.split('@')[0].replace(/[^a-zA-Z0-9_]/g, '') || `user_${userId.slice(-6)}`;
+  const userId = `google_${googleProfile.id || crypto.randomBytes(5).toString('hex')}`;
+  const baseUsername = emailLower.split('@')[0].replace(/[^a-zA-Z0-9_]/g, '') || `user_${userId.slice(-6)}`;
+  let username = baseUsername;
+  let suffix = 0;
+  // Usernames are unique; append a numeric suffix on collision.
+  while (await users.findOne({ username })) {
+    suffix += 1;
+    username = `${baseUsername}${suffix}`;
+    if (suffix > 50) {
+      username = `${baseUsername}_${crypto.randomBytes(3).toString('hex')}`;
+      break;
+    }
+  }
   const displayName = googleProfile.name || emailLower.split('@')[0] || 'Google User';
 
   const newUser: StoredUserDoc = {
@@ -287,12 +320,7 @@ export async function findOrCreateGoogleUser(googleProfile: {
   await users.insertOne(newUser);
 
   const token = generateToken();
-  await tokens.insertOne({
-    token,
-    userId: userId,
-    createdAt: Date.now(),
-    updatedAt: Date.now(),
-  });
+  await tokens.insertOne(buildTokenDoc(token, userId));
 
   return { token, user: sanitizeUser(newUser) };
 }
@@ -303,6 +331,13 @@ export async function getUserByToken(token: string): Promise<SanitizedUser | nul
   const tokens = getTokensCollection();
   const tokenDoc = await tokens.findOne({ token: cleanToken });
   if (!tokenDoc) return null;
+
+  // Enforce session expiry even if the TTL index has not run yet.
+  const issuedAt = Number(tokenDoc.createdAt) || 0;
+  if (!issuedAt || Date.now() - issuedAt > TOKEN_TTL_MS) {
+    await tokens.deleteOne({ token: cleanToken });
+    return null;
+  }
 
   const users = getUsersCollection();
   const user = await users.findOne({ id: tokenDoc.userId });
@@ -326,11 +361,28 @@ export async function saveRoomMeta(room: SessionRoomMeta) {
     creatorName: sanitizeString(room.creatorName),
   };
 
-  await rooms.updateOne(
-    { id: cleanId },
-    { $set: sanitizedRoom },
-    { upsert: true }
-  );
+  const existing = await rooms.findOne({ id: cleanId });
+
+  if (existing) {
+    // A custom room code must not allow taking over an existing room.
+    if (existing.creatorId && existing.creatorId !== sanitizedRoom.creatorId) {
+      throw new Error('That room code is already in use. Please choose another.');
+    }
+    await rooms.updateOne(
+      { id: cleanId },
+      {
+        $set: {
+          name: sanitizedRoom.name,
+          creatorId: existing.creatorId || sanitizedRoom.creatorId,
+          creatorName: existing.creatorName || sanitizedRoom.creatorName,
+          isLocked: sanitizedRoom.isLocked,
+        },
+        $setOnInsert: { createdAt: sanitizedRoom.createdAt },
+      }
+    );
+  } else {
+    await rooms.insertOne(sanitizedRoom as SessionRoomDoc);
+  }
 
   if (sanitizedRoom.creatorId) {
     await users.updateOne(
@@ -377,11 +429,11 @@ export function generateRoomCode(): string {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   let code = '';
   for (let i = 0; i < 3; i++) {
-    code += chars.charAt(Math.floor(Math.random() * chars.length));
+    code += chars.charAt(crypto.randomInt(0, chars.length));
   }
   code += '-';
   for (let i = 0; i < 3; i++) {
-    code += chars.charAt(Math.floor(Math.random() * chars.length));
+    code += chars.charAt(crypto.randomInt(0, chars.length));
   }
   return code;
 }
@@ -414,22 +466,22 @@ export async function loadRoomElements(roomId: string): Promise<Record<string, a
 }
 
 const pendingElementSaves = new Map<string, NodeJS.Timeout>();
+// Serialize writes per room so an older snapshot cannot delete newer elements.
+const roomSaveChains = new Map<string, Promise<void>>();
 
-export async function saveRoomElements(roomId: string, elements: Record<string, any>) {
+async function persistRoomElements(cleanRoomId: string, elements: Record<string, any>) {
   try {
-    const existingTimer = pendingElementSaves.get(roomId);
-    if (existingTimer) {
-      clearTimeout(existingTimer);
-      pendingElementSaves.delete(roomId);
-    }
-    const cleanRoomId = sanitizeString(roomId);
-    if (!cleanRoomId) return;
-
     const individualCol = getIndividualElementsCollection();
+    const elementsCol = getElementsCollection();
     const entries = Object.entries(elements);
 
     if (entries.length === 0) {
-      await individualCol.deleteMany({ roomId: cleanRoomId });
+      await Promise.all([
+        individualCol.deleteMany({ roomId: cleanRoomId }),
+        // Remove the legacy document too, otherwise a cleared board would
+        // resurrect its old elements on the next server restart.
+        elementsCol.deleteOne({ roomId: cleanRoomId }),
+      ]);
       return;
     }
 
@@ -445,9 +497,31 @@ export async function saveRoomElements(roomId: string, elements: Record<string, 
     await Promise.all([
       individualCol.bulkWrite(bulkOps, { ordered: false }),
       individualCol.deleteMany({ roomId: cleanRoomId, elementId: { $nin: activeIds } }),
+      elementsCol.deleteOne({ roomId: cleanRoomId }),
     ]);
   } catch (err) {
-    console.warn(`Could not persist elements to MongoDB for room ${roomId}:`, err);
+    console.warn(`Could not persist elements to MongoDB for room ${cleanRoomId}:`, err);
+  }
+}
+
+export async function saveRoomElements(roomId: string, elements: Record<string, any>): Promise<void> {
+  const existingTimer = pendingElementSaves.get(roomId);
+  if (existingTimer) {
+    clearTimeout(existingTimer);
+    pendingElementSaves.delete(roomId);
+  }
+  const cleanRoomId = sanitizeString(roomId);
+  if (!cleanRoomId) return;
+
+  const previous = roomSaveChains.get(cleanRoomId) || Promise.resolve();
+  const next = previous.catch(() => {}).then(() => persistRoomElements(cleanRoomId, elements));
+  roomSaveChains.set(cleanRoomId, next);
+  try {
+    await next;
+  } finally {
+    if (roomSaveChains.get(cleanRoomId) === next) {
+      roomSaveChains.delete(cleanRoomId);
+    }
   }
 }
 
@@ -470,10 +544,10 @@ export async function deleteRoom(roomId: string, requestingUserId?: string): Pro
   const rooms = getRoomsCollection();
   const meta = await rooms.findOne({ id: cleanRoomId });
 
-  // If requestingUserId is provided and creatorId exists, ensure authorization
-  if (requestingUserId && meta?.creatorId) {
-    const cleanUserId = sanitizeString(requestingUserId);
-    if (meta.creatorId !== cleanUserId) {
+  // Deletion requires ownership when the room has a known creator
+  if (meta?.creatorId) {
+    const cleanUserId = sanitizeString(requestingUserId || "");
+    if (!cleanUserId || meta.creatorId !== cleanUserId) {
       return false;
     }
   }
@@ -483,6 +557,13 @@ export async function deleteRoom(roomId: string, requestingUserId?: string): Pro
   if (existingTimer) {
     clearTimeout(existingTimer);
     pendingElementSaves.delete(cleanRoomId);
+  }
+
+  // Wait for any in-flight write so it cannot re-create rows after deletion
+  const inFlight = roomSaveChains.get(cleanRoomId);
+  if (inFlight) {
+    await inFlight.catch(() => {});
+    roomSaveChains.delete(cleanRoomId);
   }
 
   // Delete from rooms collection
@@ -501,5 +582,15 @@ export async function deleteRoom(roomId: string, requestingUserId?: string): Pro
   await users.updateMany({}, { $pull: { createdRooms: cleanRoomId } });
 
   return true;
+}
+
+/** Flush every pending debounced write. Call during graceful shutdown. */
+export async function flushAllPendingSaves(): Promise<void> {
+  const timers = Array.from(pendingElementSaves.values());
+  pendingElementSaves.clear();
+  timers.forEach((timer) => clearTimeout(timer));
+
+  const chains = Array.from(roomSaveChains.values());
+  await Promise.all(chains.map((chain) => chain.catch(() => {})));
 }
 

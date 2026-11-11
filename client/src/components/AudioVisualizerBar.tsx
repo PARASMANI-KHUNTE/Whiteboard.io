@@ -40,7 +40,6 @@ export const AudioVisualizerBar: React.FC<AudioVisualizerBarProps> = ({
   isDeafened,
   volume,
   onSetVolume,
-  audioLevel,
   isSpeaking,
   frequencyData,
   isSimulated,
@@ -53,18 +52,10 @@ export const AudioVisualizerBar: React.FC<AudioVisualizerBarProps> = ({
   onToggleDeafen,
   onToggleSimulated,
   onOpenInNewTab,
-  onAudioLevelChange,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [showVolumeSlider, setShowVolumeSlider] = useState(false);
   const [showErrorModal, setShowErrorModal] = useState(false);
-
-  // Broadcast audio level to room
-  useEffect(() => {
-    if (onAudioLevelChange) {
-      onAudioLevelChange(audioLevel, isSpeaking);
-    }
-  }, [audioLevel, isSpeaking, onAudioLevelChange]);
 
   // If an error occurs, show error details
   useEffect(() => {

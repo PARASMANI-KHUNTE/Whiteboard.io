@@ -173,6 +173,7 @@ async function callGeminiWithRetry(apiKey: string, prompt: string, diagramType: 
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(requestBody),
+        signal: AbortSignal.timeout(20_000),
       });
 
       // Retry only transient quota and service-availability responses.
@@ -184,6 +185,8 @@ async function callGeminiWithRetry(apiKey: string, prompt: string, diagramType: 
         const delayMs = getRetryDelayMs(response, attempt);
         const reason = response.status === 429 ? "rate limit" : "temporary unavailability";
         console.warn(`[Gemini Retry]: Hit ${response.status} (${reason}). Retrying in ${delayMs}ms (attempt ${attempt + 1}/${maxRetries})...`);
+        // Release the response body so the connection can be reused.
+        await response.body?.cancel().catch(() => {});
         await new Promise((res) => setTimeout(res, delayMs));
         continue;
       }
@@ -191,13 +194,19 @@ async function callGeminiWithRetry(apiKey: string, prompt: string, diagramType: 
       const data = await response.json();
       if (!response.ok || !data.candidates?.[0]?.content?.parts?.[0]?.text) {
         const errorMsg = data.error?.message || response.statusText || "Failed to generate diagram from Gemini";
-        throw new Error(`Gemini API Error: ${errorMsg}`);
+        const error = new Error(`Gemini API Error: ${errorMsg}`) as Error & { fatal?: boolean };
+        // 4xx responses (bad key, unknown model, invalid request) are not
+        // transient, so retrying only wastes the request queue.
+        if (response.status >= 400 && response.status < 500) {
+          error.fatal = true;
+        }
+        throw error;
       }
 
       const rawJson = data.candidates[0].content.parts[0].text;
       return JSON.parse(rawJson);
     } catch (err: any) {
-      if (attempt === maxRetries || err.message?.includes("not configured")) {
+      if (attempt === maxRetries || err.fatal || err.message?.includes("not configured")) {
         throw err;
       }
       const delayMs = Math.min(1500 * attempt, 5000) + Math.floor(Math.random() * 500);

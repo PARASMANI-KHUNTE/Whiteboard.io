@@ -68,6 +68,7 @@ export default function App() {
   const selectAllHandlerRef = useRef<(() => void) | null>(null);
   const navigateToElementsRef = useRef<((elements: CanvasElement[]) => void) | null>(null);
   const getWorldCenterRef = useRef<(() => { x: number; y: number }) | null>(null);
+  const getViewportRef = useRef<(() => { pan: { x: number; y: number }; zoom: number }) | null>(null);
 
   // Authentication hook
   const {
@@ -84,11 +85,6 @@ export default function App() {
     createRoom,
     deleteRoom,
   } = useAuth();
-
-  const handleLogout = useCallback(async () => {
-    await logout();
-    addNotification('Logged out successfully. Switched to guest session.', 'info');
-  }, [logout]);
 
   // Real-time WebSocket connection hook
   const {
@@ -133,6 +129,11 @@ export default function App() {
     addNotification,
     socket,
   } = useSocket(undefined, authUser, token);
+
+  const handleLogout = useCallback(async () => {
+    await logout();
+    addNotification('Logged out successfully. Switched to guest session.', 'info');
+  }, [logout, addNotification]);
 
   const handleDeleteRoom = useCallback(async (targetRoomId: string) => {
     const isCurrent = targetRoomId === roomId;
@@ -374,40 +375,82 @@ export default function App() {
     }
   }, [canWrite, users, elements, emitVoteClearStart, emitClearBoardDirect, addNotification]);
 
-  // Export board as PNG
+  // Export board as PNG (matches the current viewport pan & zoom)
   const handleExport = useCallback(() => {
     const canvas = document.createElement('canvas');
     const width = window.innerWidth;
     const height = window.innerHeight;
-    canvas.width = width * 2;
-    canvas.height = height * 2;
+    const dpr = 2;
+    canvas.width = width * dpr;
+    canvas.height = height * dpr;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    ctx.scale(2, 2);
+    const viewport = getViewportRef.current?.() ?? { pan: { x: 0, y: 0 }, zoom: 1 };
+    const pan = viewport.pan;
+    const zoom = viewport.zoom > 0 ? viewport.zoom : 1;
+
+    ctx.scale(dpr, dpr);
 
     // Background
     ctx.fillStyle = theme === 'dark' ? '#0b0f19' : '#ffffff';
     ctx.fillRect(0, 0, width, height);
 
-    // Grid
-    ctx.strokeStyle = theme === 'dark' ? '#1e293b' : '#f1f5f9';
-    ctx.lineWidth = 1;
-    for (let x = 0; x < width; x += 24) {
-      ctx.beginPath();
-      ctx.moveTo(x, 0);
-      ctx.lineTo(x, height);
-      ctx.stroke();
-    }
-    for (let y = 0; y < height; y += 24) {
-      ctx.beginPath();
-      ctx.moveTo(0, y);
-      ctx.lineTo(width, y);
-      ctx.stroke();
+    // Grid, aligned with the current viewport offset
+    const gridSize = 24 * zoom;
+    if (gridSize >= 4) {
+      ctx.strokeStyle = theme === 'dark' ? '#1e293b' : '#f1f5f9';
+      ctx.lineWidth = 1;
+      const startX = ((pan.x % gridSize) + gridSize) % gridSize;
+      const startY = ((pan.y % gridSize) + gridSize) % gridSize;
+      for (let x = startX; x < width; x += gridSize) {
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, height);
+        ctx.stroke();
+      }
+      for (let y = startY; y < height; y += gridSize) {
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(width, y);
+        ctx.stroke();
+      }
     }
 
+    // Enter world space so element coordinates line up with the on-screen canvas
+    ctx.save();
+    ctx.translate(pan.x, pan.y);
+    ctx.scale(zoom, zoom);
+
+    const allElements = Object.values(elements) as CanvasElement[];
+
+    // Word-wrap helper used for sticky notes / shapes / text elements
+    const wrapLines = (text: string, maxWidth: number): string[] => {
+      const result: string[] = [];
+      if (!text) return result;
+      for (const paragraph of text.split('\n')) {
+        if (paragraph === '') {
+          result.push('');
+          continue;
+        }
+        const words = paragraph.split(/\s+/);
+        let current = '';
+        for (const word of words) {
+          const candidate = current ? `${current} ${word}` : word;
+          if (ctx.measureText(candidate).width > maxWidth && current) {
+            result.push(current);
+            current = word;
+          } else {
+            current = candidate;
+          }
+        }
+        if (current) result.push(current);
+      }
+      return result;
+    };
+
     // Draw strokes
-    (Object.values(elements) as CanvasElement[]).forEach((el) => {
+    allElements.forEach((el) => {
       if (el.type === 'stroke') {
         const stroke = el as DrawingStroke;
         const points = stroke.points;
@@ -446,7 +489,7 @@ export default function App() {
     });
 
     // Draw wires (Line & Curve connectors between objects)
-    (Object.values(elements) as CanvasElement[]).forEach((el) => {
+    allElements.forEach((el) => {
       if (el.type === 'wire') {
         const w = el as WireElement;
         const sourceEl = elements[w.fromId];
@@ -478,7 +521,17 @@ export default function App() {
         const path2d = new Path2D(route.svgPath);
         ctx.stroke(path2d);
 
-        // Draw arrow if arrowEnd !== false
+        const drawArrowHead = (pt: { x: number; y: number }, angle: number) => {
+          const headLen = Math.max(8, (w.strokeWidth || 3) * 2.5);
+          ctx.beginPath();
+          ctx.moveTo(pt.x, pt.y);
+          ctx.lineTo(pt.x - headLen * Math.cos(angle - Math.PI / 6), pt.y - headLen * Math.sin(angle - Math.PI / 6));
+          ctx.lineTo(pt.x - headLen * Math.cos(angle + Math.PI / 6), pt.y - headLen * Math.sin(angle + Math.PI / 6));
+          ctx.closePath();
+          ctx.fill();
+        };
+
+        // End arrow
         if (w.arrowEnd !== false) {
           const endPt = route.toPoint;
           let angle = 0;
@@ -488,13 +541,20 @@ export default function App() {
           } else {
             angle = Math.atan2(endPt.y - route.fromPoint.y, endPt.x - route.fromPoint.x);
           }
-          const headLen = Math.max(8, (w.strokeWidth || 3) * 2.5);
-          ctx.beginPath();
-          ctx.moveTo(endPt.x, endPt.y);
-          ctx.lineTo(endPt.x - headLen * Math.cos(angle - Math.PI / 6), endPt.y - headLen * Math.sin(angle - Math.PI / 6));
-          ctx.lineTo(endPt.x - headLen * Math.cos(angle + Math.PI / 6), endPt.y - headLen * Math.sin(angle + Math.PI / 6));
-          ctx.closePath();
-          ctx.fill();
+          drawArrowHead(endPt, angle);
+        }
+
+        // Start arrow
+        if (w.arrowStart) {
+          const startPt = route.fromPoint;
+          let angle = 0;
+          if (route.controlPoints) {
+            const cp1 = route.controlPoints[0];
+            angle = Math.atan2(startPt.y - cp1.y, startPt.x - cp1.x);
+          } else {
+            angle = Math.atan2(startPt.y - route.toPoint.y, startPt.x - route.toPoint.x);
+          }
+          drawArrowHead(startPt, angle);
         }
 
         // Draw midpoint label if present
@@ -523,32 +583,39 @@ export default function App() {
     });
 
     // Draw sticky notes
-    (Object.values(elements) as CanvasElement[]).forEach((el) => {
+    allElements.forEach((el) => {
       if (el.type === 'sticky') {
         const note = el as StickyNote;
+        const noteWidth = note.width || 224;
+        const noteHeight = note.height || 150;
         ctx.save();
         ctx.fillStyle = note.color || '#fef08a';
         ctx.strokeStyle = '#e2e8f0';
         ctx.shadowColor = 'rgba(0,0,0,0.1)';
         ctx.shadowBlur = 8;
         ctx.beginPath();
-        ctx.roundRect(note.x, note.y, note.width || 200, note.height || 140, 8);
+        ctx.roundRect(note.x, note.y, noteWidth, noteHeight, 8);
         ctx.fill();
         ctx.stroke();
 
         ctx.shadowColor = 'transparent';
-        ctx.fillStyle = '#1e293b';
+        ctx.fillStyle = theme === 'dark' ? '#0f172a' : '#1e293b';
         ctx.font = '14px sans-serif';
-        const lines = (note.text || '').split('\n');
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'top';
+        ctx.beginPath();
+        ctx.rect(note.x + 8, note.y + 8, noteWidth - 16, noteHeight - 16);
+        ctx.clip();
+        const lines = wrapLines(note.text || '', noteWidth - 24);
         lines.forEach((line, idx) => {
-          ctx.fillText(line, note.x + 12, note.y + 28 + idx * 18, (note.width || 200) - 24);
+          ctx.fillText(line, note.x + 12, note.y + 18 + idx * 18);
         });
         ctx.restore();
       }
     });
 
     // Draw text elements
-    (Object.values(elements) as CanvasElement[]).forEach((el) => {
+    allElements.forEach((el) => {
       if (el.type === 'text') {
         const t = el as TextElement;
         ctx.save();
@@ -558,22 +625,66 @@ export default function App() {
             : theme === 'light' && isColorWhite(t.color)
             ? '#0f172a'
             : t.color || '#0f172a';
+        const fontSize = t.fontSize || 18;
+        const fontStyle = t.fontStyle || 'normal';
+        const fontWeight = t.fontWeight || 'normal';
         ctx.fillStyle = textColor;
-        ctx.font = `${t.fontSize || 18}px sans-serif`;
-        ctx.fillText(t.text || '', t.x, t.y + (t.fontSize || 18));
+        ctx.font = `${fontStyle} ${fontWeight} ${fontSize}px ${t.fontFamily || 'sans-serif'}`;
+        ctx.textBaseline = 'top';
+        ctx.textAlign = t.textAlign || 'left';
+
+        const lines = (t.text || '').split('\n');
+        const maxWidth = Math.max(
+          0,
+          ...lines.map((line) => ctx.measureText(line || ' ').width)
+        );
+        let anchorX = t.x;
+        if (t.textAlign === 'center') anchorX = t.x + maxWidth / 2;
+        else if (t.textAlign === 'right') anchorX = t.x + maxWidth;
+
+        const lineHeight = fontSize * 1.25;
+        lines.forEach((line, idx) => {
+          const lineY = t.y + idx * lineHeight;
+          ctx.fillText(line, anchorX, lineY);
+          if (t.textDecoration === 'underline' && line) {
+            const lineWidth = ctx.measureText(line).width;
+            let startX = anchorX;
+            if (t.textAlign === 'center') startX = anchorX - lineWidth / 2;
+            else if (t.textAlign === 'right') startX = anchorX - lineWidth;
+            ctx.beginPath();
+            ctx.strokeStyle = textColor;
+            ctx.lineWidth = Math.max(1, fontSize / 14);
+            ctx.moveTo(startX, lineY + fontSize + 1);
+            ctx.lineTo(startX + lineWidth, lineY + fontSize + 1);
+            ctx.stroke();
+          }
+        });
         ctx.restore();
       }
     });
 
     // Draw shapes
-    (Object.values(elements) as CanvasElement[]).forEach((el) => {
+    allElements.forEach((el) => {
       if (el.type === 'shape') {
         const s = el as ShapeElement;
         ctx.save();
+        ctx.globalAlpha = typeof s.opacity === 'number' ? s.opacity : 1;
+        if (s.rotation) {
+          const cx = s.x + s.width / 2;
+          const cy = s.y + s.height / 2;
+          ctx.translate(cx, cy);
+          ctx.rotate((s.rotation * Math.PI) / 180);
+          ctx.translate(-cx, -cy);
+        }
         ctx.strokeStyle = s.color || '#0f172a';
         ctx.fillStyle = s.fillColor && s.fillColor !== 'transparent' ? s.fillColor : 'transparent';
         ctx.lineWidth = s.strokeWidth || 3;
         ctx.lineJoin = 'round';
+        if (s.strokeStyle === 'dashed') {
+          ctx.setLineDash([9, 6]);
+        } else if (s.strokeStyle === 'dotted') {
+          ctx.setLineDash([3, 4]);
+        }
         ctx.beginPath();
 
         if (s.shapeType === 'rectangle') {
@@ -590,6 +701,21 @@ export default function App() {
           ctx.moveTo(s.x + s.width / 2, s.y);
           ctx.lineTo(s.x + s.width, s.y + s.height);
           ctx.lineTo(s.x, s.y + s.height);
+          ctx.closePath();
+        } else if (s.shapeType === 'star') {
+          const spikes = 5;
+          const outerR = Math.min(s.width, s.height) / 2;
+          const innerR = outerR * 0.45;
+          const cx = s.x + s.width / 2;
+          const cy = s.y + s.height / 2;
+          for (let i = 0; i < spikes * 2; i++) {
+            const r = i % 2 === 0 ? outerR : innerR;
+            const a = (Math.PI / spikes) * i - Math.PI / 2;
+            const px = cx + Math.cos(a) * r;
+            const py = cy + Math.sin(a) * r;
+            if (i === 0) ctx.moveTo(px, py);
+            else ctx.lineTo(px, py);
+          }
           ctx.closePath();
         } else if (s.shapeType === 'arrow') {
           const arrowH = s.height * 0.4;
@@ -609,15 +735,56 @@ export default function App() {
 
         if (s.fillColor && s.fillColor !== 'transparent') ctx.fill();
         ctx.stroke();
+
+        if (s.text) {
+          const fontSize = s.fontSize || 16;
+          ctx.setLineDash([]);
+          ctx.fillStyle = s.textColor || (theme === 'dark' ? '#f8fafc' : '#0f172a');
+          ctx.font = `normal ${fontSize}px sans-serif`;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.beginPath();
+          ctx.rect(s.x + 6, s.y + 6, Math.max(0, s.width - 12), Math.max(0, s.height - 12));
+          ctx.clip();
+          const lines = wrapLines(s.text, Math.max(10, s.width - 16));
+          const lineHeight = fontSize * 1.25;
+          const startY = s.y + s.height / 2 - ((lines.length - 1) * lineHeight) / 2;
+          lines.forEach((line, idx) => {
+            ctx.fillText(line, s.x + s.width / 2, startY + idx * lineHeight);
+          });
+        }
+
         ctx.restore();
       }
     });
 
     // Draw icons
-    (Object.values(elements) as CanvasElement[]).forEach((el) => {
+    allElements.forEach((el) => {
       if (el.type === 'icon') {
         const ic = el as IconElement;
+        const boxSize = ic.size + 16;
+        const cx = ic.x + boxSize / 2;
+        const cy = ic.y + boxSize / 2;
         ctx.save();
+        ctx.globalAlpha = typeof ic.opacity === 'number' ? ic.opacity : 1;
+        ctx.translate(cx, cy);
+        if (ic.rotation) ctx.rotate((ic.rotation * Math.PI) / 180);
+        if (ic.flipH || ic.flipV) ctx.scale(ic.flipH ? -1 : 1, ic.flipV ? -1 : 1);
+
+        // Background shape
+        if (ic.bgShape && ic.bgShape !== 'none') {
+          ctx.fillStyle = ic.bgColor || 'rgba(148, 163, 184, 0.2)';
+          ctx.beginPath();
+          if (ic.bgShape === 'circle') {
+            ctx.arc(0, 0, boxSize / 2, 0, Math.PI * 2);
+          } else if (ic.bgShape === 'square') {
+            ctx.rect(-boxSize / 2, -boxSize / 2, boxSize, boxSize);
+          } else {
+            ctx.roundRect(-boxSize / 2, -boxSize / 2, boxSize, boxSize, 8);
+          }
+          ctx.fill();
+        }
+
         ctx.fillStyle = ic.color || '#3b82f6';
         ctx.font = `bold ${Math.max(16, ic.size * 0.65)}px sans-serif`;
         ctx.textAlign = 'center';
@@ -642,17 +809,19 @@ export default function App() {
           check: '✅',
         };
         const symbol = emojiMap[ic.iconName] || '★';
-        ctx.fillText(symbol, ic.x + (ic.size + 16) / 2, ic.y + (ic.size + 16) / 2);
+        ctx.fillText(symbol, 0, 0);
         ctx.restore();
       }
     });
+
+    ctx.restore();
 
     const link = document.createElement('a');
     link.download = `whiteboard-${roomId}.png`;
     link.href = canvas.toDataURL('image/png');
     link.click();
     addNotification('Whiteboard exported as PNG', 'success');
-  }, [elements, roomId, addNotification]);
+  }, [elements, roomId, addNotification, theme]);
 
   const isMultiplayer = Object.keys(users).length > 1;
 
@@ -758,6 +927,9 @@ export default function App() {
         onRegisterGetWorldCenter={(fn) => {
           getWorldCenterRef.current = fn;
         }}
+        onRegisterGetViewport={(fn) => {
+          getViewportRef.current = fn;
+        }}
       />
 
       {/* Bottom Floating Toolbar */}
@@ -833,7 +1005,9 @@ export default function App() {
         onClose={() => setShowShareModal(false)}
         roomCode={roomId || ''}
         roomName={roomName}
+        creatorName={creatorName}
         isHost={isHost}
+        userCount={Object.keys(users).length || 1}
       />
 
       {/* Session Launcher Modal: Choose Solo vs Multiplayer room */}

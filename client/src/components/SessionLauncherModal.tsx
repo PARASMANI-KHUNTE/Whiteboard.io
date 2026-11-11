@@ -70,8 +70,17 @@ export const SessionLauncherModal: React.FC<SessionLauncherModalProps> = ({
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {/* Solo Mode Card */}
             <div
+              role="button"
+              tabIndex={0}
+              aria-label="Start drawing solo on a private canvas"
               onClick={onStartSolo}
-              className="group p-5 rounded-2xl border-2 border-slate-200/90 dark:border-slate-800 hover:border-blue-500 dark:hover:border-blue-500 hover:shadow-lg hover:shadow-blue-500/5 bg-white dark:bg-slate-800/60 transition-all cursor-pointer flex flex-col justify-between"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  onStartSolo();
+                }
+              }}
+              className="group p-5 rounded-2xl border-2 border-slate-200/90 dark:border-slate-800 hover:border-blue-500 dark:hover:border-blue-500 hover:shadow-lg hover:shadow-blue-500/5 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 bg-white dark:bg-slate-800/60 transition-all cursor-pointer flex flex-col justify-between"
             >
               <div>
                 <div className="w-10 h-10 rounded-xl bg-blue-50 dark:bg-blue-950 text-blue-600 dark:text-blue-400 flex items-center justify-center mb-3 group-hover:scale-105 transition-transform">
@@ -93,8 +102,17 @@ export const SessionLauncherModal: React.FC<SessionLauncherModalProps> = ({
 
             {/* Collaborative Room Card */}
             <div
+              role="button"
+              tabIndex={0}
+              aria-label="Create a collaborative multiplayer room"
               onClick={onOpenCreateRoom}
-              className="group p-5 rounded-2xl border-2 border-slate-200/90 dark:border-slate-800 hover:border-indigo-500 dark:hover:border-indigo-500 hover:shadow-lg hover:shadow-indigo-500/5 bg-white dark:bg-slate-800/60 transition-all cursor-pointer flex flex-col justify-between"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  onOpenCreateRoom();
+                }
+              }}
+              className="group p-5 rounded-2xl border-2 border-slate-200/90 dark:border-slate-800 hover:border-indigo-500 dark:hover:border-indigo-500 hover:shadow-lg hover:shadow-indigo-500/5 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 bg-white dark:bg-slate-800/60 transition-all cursor-pointer flex flex-col justify-between"
             >
               <div>
                 <div className="w-10 h-10 rounded-xl bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 flex items-center justify-center mb-3 group-hover:scale-105 transition-transform">

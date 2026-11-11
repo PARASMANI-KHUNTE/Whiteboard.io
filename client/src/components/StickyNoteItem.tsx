@@ -93,8 +93,8 @@ export const StickyNoteItem: React.FC<StickyNoteItemProps> = ({
     const handleMouseMove = (moveEvent: MouseEvent) => {
       const deltaX = (moveEvent.clientX - dragStartRef.current.mouseX) / (zoom || 1);
       const deltaY = (moveEvent.clientY - dragStartRef.current.mouseY) / (zoom || 1);
-      const newX = Math.max(0, dragStartRef.current.startX + deltaX);
-      const newY = Math.max(0, dragStartRef.current.startY + deltaY);
+      const newX = dragStartRef.current.startX + deltaX;
+      const newY = dragStartRef.current.startY + deltaY;
 
       currentPosRef.current = { x: newX, y: newY };
       setLocalPos({ x: newX, y: newY });

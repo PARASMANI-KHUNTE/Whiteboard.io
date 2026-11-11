@@ -1,4 +1,5 @@
 import React from 'react';
+import { createPortal } from 'react-dom';
 import {
   X,
   Sparkles,
@@ -7,8 +8,6 @@ import {
   Shield,
   CheckCircle2,
   XCircle,
-  ExternalLink,
-  Layers,
   Heart,
 } from 'lucide-react';
 
@@ -25,7 +24,7 @@ export const AboutModal: React.FC<AboutModalProps> = ({
 }) => {
   if (!isOpen) return null;
 
-  return (
+  return createPortal(
     <div
       className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/60 dark:bg-black/80 backdrop-blur-md animate-in fade-in duration-200"
       onClick={(e) => {
@@ -223,6 +222,7 @@ export const AboutModal: React.FC<AboutModalProps> = ({
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };
