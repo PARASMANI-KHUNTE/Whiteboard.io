@@ -28,3 +28,114 @@
 .dark ::-webkit-scrollbar-thumb:hover {
   background: #475569;
 }
+
+/* ---------------------------------------------------------------------------
+   Shortcut / context-menu polish
+   --------------------------------------------------------------------------- */
+
+@keyframes wb-pop-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+@keyframes wb-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes wb-slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-pop-in {
+  animation: wb-pop-in 0.14s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.animate-fade-in {
+  animation: wb-fade-in 0.16s ease-out;
+}
+
+.animate-slide-up {
+  animation: wb-slide-up 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.kbd-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.45rem;
+  height: 1.4rem;
+  padding: 0 0.35rem;
+  border-radius: 0.4rem;
+  border: 1px solid #e2e8f0;
+  border-bottom-width: 2px;
+  background: #f8fafc;
+  color: #475569;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.66rem;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.dark .kbd-chip {
+  border-color: #334155;
+  background: #1e293b;
+  color: #cbd5e1;
+}
+
+.kbd-inline {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.05rem 0.3rem;
+  border-radius: 0.3rem;
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+  color: #475569;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.68rem;
+  font-weight: 600;
+  line-height: 1.1;
+}
+
+.dark .kbd-inline {
+  border-color: #334155;
+  background: #1e293b;
+  color: #cbd5e1;
+}
+
+/* Keep floating chrome clear of iOS home-indicator / Android gesture bars. */
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* Long-press on canvas shouldn't pop the native callout on touch devices. */
+#whiteboard-canvas-container {
+  -webkit-touch-callout: none;
+}
+
+@media (hover: none) {
+  /* Slightly larger hit targets for touch-only devices. */
+  .touch-target {
+    min-width: 40px;
+    min-height: 40px;
+  }
+}
+

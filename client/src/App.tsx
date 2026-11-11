@@ -31,6 +31,14 @@ import { Info, Sparkles, AlertCircle, CheckCircle2, UserX } from 'lucide-react';
 import { isColorBlack, isColorWhite } from './utils/themeColors';
 import { routeWire } from './utils/wireGeometry';
 
+/** A reversible local edit recorded for Ctrl+Z / Ctrl+Shift+Z. */
+type HistoryOperation =
+  | { kind: 'create'; elements: CanvasElement[]; at: number }
+  | { kind: 'delete'; elements: CanvasElement[]; at: number }
+  | { kind: 'update'; before: CanvasElement[]; after: CanvasElement[]; at: number };
+
+const HISTORY_LIMIT = 100;
+
 export default function App() {
   // Theme hook
   const { theme, toggleTheme } = useTheme();
@@ -41,7 +49,6 @@ export default function App() {
   const [selectedShapeType, setSelectedShapeType] = useState<ShapeType>('rectangle');
   const [selectedIconName, setSelectedIconName] = useState<string>('star');
   const [selectedWireStyle, setSelectedWireStyle] = useState<WireStyle>('curve');
-  const [myCreatedElementIds, setMyCreatedElementIds] = useState<string[]>([]);
   const [showWelcomeHint, setShowWelcomeHint] = useState<boolean>(true);
   const [hasChosenSessionMode, setHasChosenSessionMode] = useState<boolean>(false);
 
@@ -129,6 +136,76 @@ export default function App() {
     addNotification,
     socket,
   } = useSocket(undefined, authUser, token);
+
+  // Keep the latest element map available to undo/redo without re-creating
+  // callbacks on every room update.
+  const elementsRef = useRef<Record<string, CanvasElement>>(elements);
+  elementsRef.current = elements;
+
+  // Local undo / redo stacks (only edits initiated by this user are recorded)
+  const historyPastRef = useRef<HistoryOperation[]>([]);
+  const historyFutureRef = useRef<HistoryOperation[]>([]);
+  const [, setHistoryVersion] = useState(0);
+
+  const bumpHistory = useCallback(() => {
+    setHistoryVersion((version) => version + 1);
+  }, []);
+
+  const resetHistory = useCallback(() => {
+    historyPastRef.current = [];
+    historyFutureRef.current = [];
+    bumpHistory();
+  }, [bumpHistory]);
+
+  const pushHistory = useCallback(
+    (operation: HistoryOperation) => {
+      const past = historyPastRef.current;
+      const last = past[past.length - 1];
+
+      // An element created and then immediately moved/edited (alt-drag, typing
+      // into a fresh note) should undo as a single "create" step.
+      if (
+        operation.kind === 'update' &&
+        last &&
+        last.kind === 'create' &&
+        operation.at - last.at < 600 &&
+        operation.after.every((element) => last.elements.some((created) => created.id === element.id))
+      ) {
+        const afterMap = new Map(operation.after.map((element) => [element.id, element]));
+        last.elements = last.elements.map((element) => afterMap.get(element.id) ?? element);
+        last.at = operation.at;
+        historyFutureRef.current = [];
+        bumpHistory();
+        return;
+      }
+
+      // Dragging fires many small updates; merge them into a single undo step.
+      if (
+        operation.kind === 'update' &&
+        last &&
+        last.kind === 'update' &&
+        operation.at - last.at < 600
+      ) {
+        const afterMap = new Map(last.after.map((element) => [element.id, element]));
+        operation.after.forEach((element) => afterMap.set(element.id, element));
+        const beforeMap = new Map(last.before.map((element) => [element.id, element]));
+        operation.before.forEach((element) => {
+          if (!beforeMap.has(element.id)) beforeMap.set(element.id, element);
+        });
+        last.after = Array.from(afterMap.values());
+        last.before = Array.from(beforeMap.values());
+        last.at = operation.at;
+      } else {
+        past.push(operation);
+        if (past.length > HISTORY_LIMIT) past.shift();
+      }
+
+      // Any new edit invalidates the redo branch.
+      historyFutureRef.current = [];
+      bumpHistory();
+    },
+    [bumpHistory]
+  );
 
   const handleLogout = useCallback(async () => {
     await logout();
@@ -313,7 +390,7 @@ export default function App() {
 
   const [cursorCoords, setCursorCoords] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
 
-  // Handle local element creation & track for undo
+  // Handle local element creation & record it for undo
   const handleElementCreate = useCallback(
     (element: CanvasElement) => {
       if (!canWrite) {
@@ -321,26 +398,110 @@ export default function App() {
         return;
       }
       emitElementCreate(element);
-      setMyCreatedElementIds((prev) => [...prev, element.id]);
+      pushHistory({ kind: 'create', elements: [element], at: Date.now() });
     },
-    [canWrite, emitElementCreate, addNotification]
+    [canWrite, emitElementCreate, addNotification, pushHistory]
+  );
+
+  // Element updates (drag, nudge, style changes) are recorded with the pre-edit
+  // snapshot so they can be reversed. Rapid updates are coalesced by pushHistory.
+  const handleElementUpdate = useCallback(
+    (element: CanvasElement) => {
+      const before = elementsRef.current[element.id];
+      if (before) {
+        pushHistory({ kind: 'update', before: [before], after: [element], at: Date.now() });
+      }
+      emitElementUpdate(element);
+    },
+    [emitElementUpdate, pushHistory]
+  );
+
+  const handleElementDelete = useCallback(
+    (elementId: string) => {
+      const target = elementsRef.current[elementId];
+      if (target) {
+        pushHistory({ kind: 'delete', elements: [target], at: Date.now() });
+      }
+      emitElementDelete(elementId);
+    },
+    [emitElementDelete, pushHistory]
+  );
+
+  const handleElementsBatchCreate = useCallback(
+    (newElements: CanvasElement[]) => {
+      if (newElements.length === 0) return;
+      if (!canWrite) {
+        addNotification('Drawing is restricted by the room host', 'warning');
+        return;
+      }
+      emitElementsBatchCreate(newElements);
+      pushHistory({ kind: 'create', elements: newElements, at: Date.now() });
+    },
+    [canWrite, emitElementsBatchCreate, addNotification, pushHistory]
+  );
+
+  const handleElementsBatchDelete = useCallback(
+    (elementIds: string[]) => {
+      const removed = elementIds
+        .map((id) => elementsRef.current[id])
+        .filter((element): element is CanvasElement => Boolean(element));
+      if (removed.length > 0) {
+        pushHistory({ kind: 'delete', elements: removed, at: Date.now() });
+      }
+      emitElementsBatchDelete(elementIds);
+    },
+    [emitElementsBatchDelete, pushHistory]
   );
 
   // Reset undo history on room change
   useEffect(() => {
-    setMyCreatedElementIds([]);
-  }, [roomId]);
+    resetHistory();
+  }, [roomId, resetHistory]);
 
-  // Undo last locally created element
+  // Undo / redo the last locally initiated edit
   const handleUndo = useCallback(() => {
     if (!canWrite) return;
-    if (myCreatedElementIds.length === 0) return;
-    const lastId = myCreatedElementIds[myCreatedElementIds.length - 1];
-    setMyCreatedElementIds((prev) => prev.slice(0, -1));
-    if (elements[lastId]) {
-      emitElementDelete(lastId);
+    const operation = historyPastRef.current.pop();
+    if (!operation) return;
+
+    if (operation.kind === 'create') {
+      // Cascade to connectors attached to created objects.
+      const ids = new Set(operation.elements.map((element) => element.id));
+      (Object.values(elementsRef.current) as CanvasElement[]).forEach((element) => {
+        if (element.type === 'wire' && (ids.has(element.fromId) || ids.has(element.toId))) {
+          ids.add(element.id);
+        }
+      });
+      emitElementsBatchDelete(Array.from(ids));
+    } else if (operation.kind === 'delete') {
+      emitElementsBatchCreate(operation.elements);
+    } else {
+      operation.before.forEach((element) => emitElementUpdate(element));
     }
-  }, [canWrite, myCreatedElementIds, elements, emitElementDelete]);
+
+    historyFutureRef.current.push(operation);
+    bumpHistory();
+  }, [canWrite, emitElementsBatchDelete, emitElementsBatchCreate, emitElementUpdate, bumpHistory]);
+
+  const handleRedo = useCallback(() => {
+    if (!canWrite) return;
+    const operation = historyFutureRef.current.pop();
+    if (!operation) return;
+
+    if (operation.kind === 'create') {
+      emitElementsBatchCreate(operation.elements);
+    } else if (operation.kind === 'delete') {
+      emitElementsBatchDelete(operation.elements.map((element) => element.id));
+    } else {
+      operation.after.forEach((element) => emitElementUpdate(element));
+    }
+
+    historyPastRef.current.push(operation);
+    bumpHistory();
+  }, [canWrite, emitElementsBatchCreate, emitElementsBatchDelete, emitElementUpdate, bumpHistory]);
+
+  const canUndo = historyPastRef.current.length > 0;
+  const canRedo = historyFutureRef.current.length > 0;
 
   // Request clear board
   const handleRequestClear = useCallback(() => {
@@ -367,13 +528,13 @@ export default function App() {
         variant: 'danger',
         onConfirm: () => {
           emitClearBoardDirect();
-          setMyCreatedElementIds([]);
+          resetHistory();
           addNotification('Whiteboard cleared', 'info');
           setConfirmModalState((prev) => ({ ...prev, isOpen: false }));
         },
       });
     }
-  }, [canWrite, users, elements, emitVoteClearStart, emitClearBoardDirect, addNotification]);
+  }, [canWrite, users, elements, emitVoteClearStart, emitClearBoardDirect, addNotification, resetHistory]);
 
   // Export board as PNG (matches the current viewport pan & zoom)
   const handleExport = useCallback(() => {
@@ -905,9 +1066,13 @@ export default function App() {
         liveStrokes={liveStrokes}
         remoteUsers={users}
         onElementCreate={handleElementCreate}
-        onElementUpdate={emitElementUpdate}
-        onElementDelete={emitElementDelete}
-        onElementsBatchDelete={emitElementsBatchDelete}
+        onElementUpdate={handleElementUpdate}
+        onElementDelete={handleElementDelete}
+        onElementsBatchDelete={handleElementsBatchDelete}
+        onElementsBatchCreate={handleElementsBatchCreate}
+        onUndo={handleUndo}
+        onRedo={handleRedo}
+        onNotify={addNotification}
         onCursorMove={(pos) => {
           setCursorCoords(pos);
           emitCursorMove(pos);
@@ -937,7 +1102,8 @@ export default function App() {
         currentTool={currentTool}
         currentColor={currentColor}
         currentSize={currentSize}
-        canUndo={myCreatedElementIds.length > 0}
+        canUndo={canUndo}
+        canRedo={canRedo}
         canWrite={canWrite}
         selectedShapeType={selectedShapeType}
         selectedIconName={selectedIconName}
@@ -949,6 +1115,7 @@ export default function App() {
         onSelectIcon={setSelectedIconName}
         onSelectWireStyle={setSelectedWireStyle}
         onUndo={handleUndo}
+        onRedo={handleRedo}
         onRequestClear={handleRequestClear}
         onExport={handleExport}
         onSelectAll={() => selectAllHandlerRef.current?.()}

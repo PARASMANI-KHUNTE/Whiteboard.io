@@ -12,6 +12,7 @@ interface StickyNoteItemProps {
   onSelect?: (isMulti?: boolean) => void;
   onUpdate: (updated: StickyNote) => void;
   onDelete: (id: string) => void;
+  onDuplicate?: (element: StickyNote, offset?: { dx: number; dy: number }) => StickyNote | void;
 }
 
 const STICKY_COLORS = [
@@ -31,6 +32,7 @@ export const StickyNoteItem: React.FC<StickyNoteItemProps> = ({
   onSelect,
   onUpdate,
   onDelete,
+  onDuplicate,
 }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [localText, setLocalText] = useState(note.text);
@@ -82,6 +84,15 @@ export const StickyNoteItem: React.FC<StickyNoteItemProps> = ({
   const handleMouseDownHeader = (e: React.MouseEvent) => {
     if (!canWrite) return;
     e.stopPropagation();
+    onSelect?.();
+
+    // Alt-drag duplicates in place and moves the copy.
+    let dragElement = note;
+    if (e.altKey && onDuplicate) {
+      const duplicated = onDuplicate(note, { dx: 0, dy: 0 });
+      if (duplicated) dragElement = duplicated;
+    }
+
     setIsDragging(true);
     dragStartRef.current = {
       mouseX: e.clientX,
@@ -103,7 +114,7 @@ export const StickyNoteItem: React.FC<StickyNoteItemProps> = ({
       if (now - lastEmitRef.current > 40) {
         lastEmitRef.current = now;
         onUpdate({
-          ...note,
+          ...dragElement,
           x: newX,
           y: newY,
           updatedAt: now,
@@ -117,7 +128,7 @@ export const StickyNoteItem: React.FC<StickyNoteItemProps> = ({
       window.removeEventListener('mouseup', handleMouseUp);
       // Emit final destination
       onUpdate({
-        ...note,
+        ...dragElement,
         x: currentPosRef.current.x,
         y: currentPosRef.current.y,
         updatedAt: Date.now(),

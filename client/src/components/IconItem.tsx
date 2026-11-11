@@ -28,7 +28,7 @@ interface IconItemProps {
   onSelect?: (isMulti?: boolean) => void;
   onUpdate: (updated: IconElement) => void;
   onDelete: (id: string) => void;
-  onDuplicate?: (element: IconElement) => void;
+  onDuplicate?: (element: IconElement, offset?: { dx: number; dy: number }) => IconElement | void;
 }
 
 const PALETTE_COLORS = [
@@ -148,6 +148,14 @@ export const IconItem: React.FC<IconItemProps> = ({
     if (!canWrite || isLocked) return;
     e.stopPropagation();
     onSelect?.();
+
+    // Alt-drag duplicates in place and moves the copy.
+    let dragElement = element;
+    if (e.altKey && onDuplicate) {
+      const duplicated = onDuplicate(element, { dx: 0, dy: 0 });
+      if (duplicated) dragElement = duplicated;
+    }
+
     setIsDragging(true);
 
     const startX = e.clientX;
@@ -167,7 +175,7 @@ export const IconItem: React.FC<IconItemProps> = ({
       if (now - lastEmitRef.current > 40) {
         lastEmitRef.current = now;
         onUpdate({
-          ...element,
+          ...dragElement,
           x: newX,
           y: newY,
           updatedAt: now,
@@ -180,7 +188,7 @@ export const IconItem: React.FC<IconItemProps> = ({
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
       onUpdate({
-        ...element,
+        ...dragElement,
         x: currentPosRef.current.x,
         y: currentPosRef.current.y,
         updatedAt: Date.now(),
