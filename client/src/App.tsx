@@ -31,6 +31,8 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import { Info, Sparkles, AlertCircle, CheckCircle2, UserX } from 'lucide-react';
 import { isColorBlack, isColorWhite } from './utils/themeColors';
 import { routeWire } from './utils/wireGeometry';
+import { loadAiSession, saveAiSession, clearAiSession } from './utils/aiSessionStorage';
+import { forgetRecentRoom, rememberRecentRoom } from './utils/recentRooms';
 import type { AiDiagramPayload, AiSessionState } from './ai/types';
 
 /** A reversible local edit recorded for Ctrl+Z / Ctrl+Shift+Z. */
@@ -139,6 +141,7 @@ export default function App() {
     liveStrokes,
     voteToClear,
     notifications,
+    boardClearCount,
     emitStrokeLiveStart,
     emitStrokeLivePoint,
     emitElementCreate,
@@ -168,6 +171,27 @@ export default function App() {
   // callbacks on every room update.
   const elementsRef = useRef<Record<string, CanvasElement>>(elements);
   elementsRef.current = elements;
+
+  // AI chat is persisted per board (room code, or "solo") so a reload brings
+  // back the same conversation and diagram context.
+  const aiBoardKey = roomId || 'solo';
+  const aiBoardKeyRef = useRef(aiBoardKey);
+  aiBoardKeyRef.current = aiBoardKey;
+
+  const applyAiSession = useCallback((next: AiSessionState | null) => {
+    setAiSession(next);
+    const key = aiBoardKeyRef.current;
+    if (next) {
+      saveAiSession(key, next);
+    } else {
+      clearAiSession(key);
+    }
+  }, []);
+
+  // An AI "replace board" clears the canvas on purpose and then re-adds the new
+  // diagram. The server echoes that clear back to the sender, so guard the
+  // "board cleared -> end the AI conversation" logic for a moment afterwards.
+  const aiClearGuardUntilRef = useRef(0);
 
   // Local undo / redo stacks (only edits initiated by this user are recorded)
   const historyPastRef = useRef<HistoryOperation[]>([]);
@@ -246,6 +270,7 @@ export default function App() {
     }
     const res = await deleteRoom(targetRoomId);
     if (res.success) {
+      forgetRecentRoom(targetRoomId);
       addNotification(`Room ${targetRoomId} deleted successfully.`, 'success');
       if (isCurrent) {
         switchRoom(null);
@@ -255,6 +280,19 @@ export default function App() {
     }
     return res;
   }, [roomId, deleteCurrentRoom, deleteRoom, addNotification, switchRoom]);
+
+  // Attach the caller's stable identity when creating a room. Authenticated
+  // users are resolved from their token server-side; guests need this so they
+  // become (and stay) the host of the room they just created.
+  const handleCreateRoom = useCallback(
+    (data: { name: string; customCode?: string; isLocked?: boolean }) =>
+      createRoom({
+        ...data,
+        creatorId: currentUser.id,
+        creatorName: currentUser.name,
+      }),
+    [createRoom, currentUser.id, currentUser.name]
+  );
 
   // Convert current solo canvas to a collaborative multiplayer room
   const handleShareAndGoLive = useCallback(() => {
@@ -526,6 +564,7 @@ export default function App() {
       }
 
       if (options.replaceBoard) {
+        aiClearGuardUntilRef.current = Date.now() + 2500;
         emitClearBoardDirect();
         // The clear is intentional and not undoable; the AI turn itself is.
         resetHistory();
@@ -534,7 +573,7 @@ export default function App() {
       applyAiElements(payload.sessionId, payload.elements);
 
       const now = Date.now();
-      setAiSession({
+      applyAiSession({
         sessionId: payload.sessionId,
         type: payload.type,
         detail: payload.detail,
@@ -574,6 +613,7 @@ export default function App() {
       canWrite,
       addNotification,
       applyAiElements,
+      applyAiSession,
       emitClearBoardDirect,
       resetHistory,
     ]
@@ -609,7 +649,7 @@ export default function App() {
         at: now + 1,
       };
 
-      setAiSession({
+      applyAiSession({
         ...aiSession,
         type: payload.type,
         detail: payload.detail,
@@ -626,15 +666,31 @@ export default function App() {
         'success'
       );
     },
-    [aiSession, canWrite, addNotification, applyAiElements]
+    [aiSession, canWrite, addNotification, applyAiElements, applyAiSession]
   );
 
-  // Reset undo history and detach the AI chat on room change
+  // Reset undo history and restore the AI chat that belongs to this board.
   useEffect(() => {
     resetHistory();
-    setAiSession(null);
-    setIsAiChatOpen(false);
+    const stored = loadAiSession(roomId || 'solo');
+    setAiSession(stored);
+    setIsAiChatOpen(Boolean(stored));
   }, [roomId, resetHistory]);
+
+  // An explicit board clear ends the diagram conversation it was based on.
+  useEffect(() => {
+    if (boardClearCount === 0) return;
+    if (Date.now() < aiClearGuardUntilRef.current) return;
+    if (Object.keys(elementsRef.current).length > 0) return;
+    applyAiSession(null);
+    setIsAiChatOpen(false);
+  }, [boardClearCount, applyAiSession]);
+
+  // Remember joined rooms so guests can rediscover them later.
+  useEffect(() => {
+    if (!roomId) return;
+    rememberRecentRoom(roomId, roomName || `Room ${roomId}`);
+  }, [roomId, roomName]);
 
   // Undo / redo the last locally initiated edit
   const handleUndo = useCallback(() => {
@@ -1363,7 +1419,7 @@ export default function App() {
             setShowCreateRoomModal(false);
           }}
           onDeleteRoom={handleDeleteRoom}
-          onCreateRoom={createRoom}
+          onCreateRoom={handleCreateRoom}
           onFetchRooms={fetchRooms}
         />
       </ErrorBoundary>
