@@ -42,6 +42,7 @@ In this mode, the Node.js Express server automatically builds and serves the Rea
    - `PORT`: `3000` *(Render provides this automatically, but setting 3000 ensures consistency)*
    - `APP_URL`: `https://whiteboard-app.onrender.com`
    - `MONGODB_URI`: `mongodb+srv://<user>:<password>@cluster0.mongodb.net/whiteboard?retryWrites=true&w=majority`
+   - `AI_PROVIDER`: `gemini` *(or `ollama` for a self-hosted local model)*
    - `GEMINI_API_KEY`: `your-google-gemini-api-key` *(From [Google AI Studio](https://aistudio.google.com/app/apikey))*
    - `GOOGLE_CLIENT_ID`: `your-google-client-id.apps.googleusercontent.com`
    - `GOOGLE_CLIENT_SECRET`: `your-google-client-secret`
@@ -59,6 +60,7 @@ In this mode, the Node.js Express server automatically builds and serves the Rea
    PORT=3000
    APP_URL=https://whiteboard-frontend.onrender.com (or your Vercel URL)
    MONGODB_URI=your_mongodb_connection_string
+   AI_PROVIDER=gemini
    GEMINI_API_KEY=your-google-gemini-api-key
    GOOGLE_CLIENT_ID=your-google-client-id
    GOOGLE_CLIENT_SECRET=your-google-client-secret
@@ -153,7 +155,17 @@ VITE_TURN_PASSWORD=your_turn_password
 | `PORT` | HTTP server listening port | No | `3000` |
 | `APP_URL` | Frontend URL allowed for CORS and OAuth return | Yes | `http://localhost:5173` |
 | `MONGODB_URI` | MongoDB connection URI | Yes | `mongodb://127.0.0.1:27017/whiteboard` |
-| `GEMINI_API_KEY` | Google Gemini API key for AI diagram generation | No (optional; uses procedural fallback if unset) | `""` |
+| `AI_PROVIDER` | Which AI engine to use: `gemini`, `ollama`, or `fallback`. Unset auto-picks Gemini when `GEMINI_API_KEY` exists, otherwise Ollama when configured | No | auto |
+| `GEMINI_API_KEY` | Google Gemini API key for AI diagram generation | No (optional; uses Ollama or procedural fallback if unset) | `""` |
+| `GEMINI_MODEL` | Gemini model id | No | `gemini-3.8-flash` |
+| `OLLAMA_MODEL` | Local Ollama model used for generation | No | `llama3.2` |
+| `OLLAMA_BASE_URL` | Ollama server base URL | No | `http://127.0.0.1:11434` |
+| `OLLAMA_TIMEOUT_MS` | Per-request timeout for local generation | No | `180000` |
+| `OLLAMA_NUM_CTX` | Ollama context window | No | `12288` |
+| `OLLAMA_NUM_PREDICT` | Max tokens generated per request | No | `6144` |
+| `OLLAMA_KEEP_ALIVE` | How long Ollama keeps the model loaded | No | `10m` |
+| `OLLAMA_MIN_INTERVAL_MS` | Minimum gap between local model calls | No | `250` |
+| `OLLAMA_API_KEY` | Bearer token for a remote/protected Ollama server | No | `""` |
 | `GOOGLE_CLIENT_ID` | Google OAuth 2.0 Web Client ID | Yes (for OAuth) | None |
 | `GOOGLE_CLIENT_SECRET`| Google OAuth 2.0 Client Secret | Yes (for OAuth) | None |
 | `GOOGLE_CALLBACK_URL` | Explicit redirect URI override sent to Google | No | `${SERVER_URL}/auth/google/callback` |

@@ -172,11 +172,11 @@ interface RoomElementsDoc {
 
 ---
 
-## 6. Google Gemini AI Engine & 5-Layer Rate-Limit Shield
+## 6. AI Diagram Engine (Gemini or Local Ollama) & 5-Layer Rate-Limit Shield
 
-Whiteboard.io includes an integrated AI diagram generation pipeline powered by **Google Gemini 3.8 Flash** (`server/ai/`). Users can describe ideas in plain English and automatically receive fully styled, interactive canvas elements (mind maps, flowcharts, Kanban/SWOT boards, and architecture diagrams) with real connectors and labelled branches.
+Whiteboard.io includes an integrated AI diagram generation pipeline (`server/ai/`). The default cloud engine is **Google Gemini 3.8 Flash**, and the same pipeline can run fully offline against a local **Ollama** model. `server/ai/providers.ts` resolves the active engine from the environment (`AI_PROVIDER`, `GEMINI_API_KEY`, `OLLAMA_MODEL`, `OLLAMA_BASE_URL`), exposes it at `GET /api/ai/config`, and dispatches structured-output calls to either backend. Users can describe ideas in plain English and automatically receive fully styled, interactive canvas elements (mind maps, flowcharts, Kanban/SWOT boards, and architecture diagrams) with real connectors and labelled branches.
 
-The model returns a semantic **graph** (nodes + edges), not coordinates. The server normalizes it, runs a quality gate (with one retry when output is too sparse or disconnected), then computes layout (layered DAG, architecture lanes, radial mind map, or brainstorm columns) and emits real `ShapeElement`/`StickyNote`/`WireElement` objects. A stateless `POST /api/ai/revise-diagram` endpoint accepts the current graph plus an instruction and returns the complete revised graph, which the client diffs against the session's `ai_<sessionId>_` elements and applies as a single undo step.
+The model returns a semantic **graph** (nodes + edges), not coordinates. The server normalizes it, runs a quality gate (with one retry when output is too sparse or disconnected), then computes layout (layered DAG, architecture lanes, radial mind map, or brainstorm columns) and emits real `ShapeElement`/`StickyNote`/`WireElement` objects. A stateless `POST /api/ai/revise-diagram` endpoint accepts the current graph plus an instruction and returns the complete revised graph, which the client diffs against the session's `ai_<sessionId>_` elements and applies as a single undo step. Both backends return JSON constrained by the shared `GRAPH_RESPONSE_SCHEMA` (Gemini `responseSchema`, Ollama `format`).
 
 ### AI Generation Flow
 
@@ -200,7 +200,8 @@ The model returns a semantic **graph** (nodes + edges), not coordinates. The ser
 │ Room Viewport   │                                                       │
 └─────────────────┘                                                       ▼
                                                               ┌────────────────────────┐
-                                                              │ Google Gemini API Call │
+                                                              │ Engine Dispatch        │
+                                                              │ Gemini / Ollama        │
                                                               │ (Exponential Backoff)  │
                                                               └───────────┬────────────┘
                                                                           │ (If offline / 429)
@@ -218,10 +219,10 @@ Google Gemini's free tier has strict concurrency and Requests-Per-Minute (RPM) l
 | Layer | Mechanism | Implementation Detail |
 | :--- | :--- | :--- |
 | **Layer 1: IP Rate Limiting** | Express In-Memory Token Limiter | Restricts clients to a maximum of **10 AI diagram requests per minute per IP address** (`server/index.ts`). |
-| **Layer 2: Response Caching** | Normalizing In-Memory Cache (2hr TTL) | Caches generated diagrams using a normalized hash key `[style]:[lowercase_prompt]`. Repeated prompts (e.g. popular templates) return immediately in **<1ms** with zero Gemini API quota consumed. |
-| **Layer 3: Request Pacing Queue** | Serial FIFO Promise Queue | Queues all outbound calls to Google Gemini and enforces a strict **3000ms inter-call spacing window**. This prevents simultaneous users from triggering burst spikes that exceed Gemini's RPM. |
-| **Layer 4: Exponential Backoff & Retry** | Jittered Retry Loop | If Google returns `429 Too Many Requests` or `503 Service Unavailable`, the queue automatically pauses and retries up to 3 times with exponential backoff (`1500ms`, `3000ms`, `6000ms`). |
-| **Layer 5: Procedural Fallback Engine** | Offline Algorithmic Diagram Synthesis | If no API key is provided, if retries are exhausted, or if Gemini services are experiencing downtime, the system transparently falls back to a deterministic procedural generator. The user always receives a clean, connected diagram without any application error. |
+| **Layer 2: Response Caching** | Normalizing In-Memory Cache (2hr TTL) | Caches generated graphs using a normalized key `schema|provider|model|type|detail|direction|lowercase_prompt`. Repeated prompts (e.g. popular templates) return immediately in **<1ms** with zero model calls. |
+| **Layer 3: Request Pacing Queue** | Serial FIFO Promise Queue | Queues all outbound calls to the active engine and enforces an inter-call spacing window — **3000ms** for Gemini, `OLLAMA_MIN_INTERVAL_MS` (default 250ms) for local Ollama. This prevents simultaneous users from triggering burst spikes. |
+| **Layer 4: Exponential Backoff & Retry** | Jittered Retry Loop | If Gemini returns `429 Too Many Requests` or `503 Service Unavailable`, the queue automatically pauses and retries up to 3 times with exponential backoff (`1500ms`, `3000ms`, `6000ms`). Local Ollama calls use a single attempt with a long `OLLAMA_TIMEOUT_MS` (default 180s) to absorb model loading. |
+| **Layer 5: Procedural Fallback Engine** | Offline Algorithmic Diagram Synthesis | If no engine is configured, if retries are exhausted, or if the model backend is down, the system transparently falls back to a deterministic procedural generator. The user always receives a clean, connected diagram without any application error. |
 
 ### Diagram Synthesis Styles & Structured Output
 The generator maps natural language into specific graph topologies:

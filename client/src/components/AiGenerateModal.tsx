@@ -1,6 +1,12 @@
 import React, { useState, useRef, useEffect } from 'react';
-import type { AiDiagramPayload, DetailLevel, DiagramDirection, DiagramType } from '../ai/types';
-import { requestDiagram } from '../ai/api';
+import type {
+  AiDiagramPayload,
+  AiEngineConfig,
+  DetailLevel,
+  DiagramDirection,
+  DiagramType,
+} from '../ai/types';
+import { fetchAiEngine, requestDiagram } from '../ai/api';
 import {
   Sparkles,
   Brain,
@@ -108,6 +114,8 @@ export const AiGenerateModal: React.FC<AiGenerateModalProps> = ({
   const [isReady, setIsReady] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [replaceBoard, setReplaceBoard] = useState<boolean>(false);
+  const [engineLabel, setEngineLabel] = useState<string>('Gemini 3.8 Flash');
+  const [engineProvider, setEngineProvider] = useState<AiEngineConfig['provider'] | null>(null);
 
   const abortControllerRef = useRef<AbortController | null>(null);
 
@@ -134,6 +142,20 @@ export const AiGenerateModal: React.FC<AiGenerateModalProps> = ({
       window.addEventListener('keydown', handleKeyDown);
       return () => window.removeEventListener('keydown', handleKeyDown);
     }
+  }, [isOpen]);
+
+  // Show the real engine: Gemini in the cloud, or whichever local Ollama model.
+  useEffect(() => {
+    if (!isOpen) return;
+    const controller = new AbortController();
+    fetchAiEngine(controller.signal)
+      .then((config) => {
+        if (!config) return;
+        setEngineProvider(config.provider);
+        setEngineLabel(config.label);
+      })
+      .catch(() => {});
+    return () => controller.abort();
   }, [isOpen]);
 
   useEffect(() => {
@@ -228,10 +250,15 @@ export const AiGenerateModal: React.FC<AiGenerateModalProps> = ({
             </div>
             <div>
               <h3 className="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                Generate with Gemini AI
+                Generate with AI
                 <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700 dark:bg-indigo-900/60 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800">
-                  Gemini 3.8 Flash
+                  {engineLabel}
                 </span>
+                {engineProvider === 'ollama' && (
+                  <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
+                    Local
+                  </span>
+                )}
               </h3>
               <p className="text-xs text-slate-500 dark:text-slate-400">
                 {isGenerating

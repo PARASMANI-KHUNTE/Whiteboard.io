@@ -56,9 +56,20 @@ export interface AiDiagramPayload {
   summary: string;
   suggestions: string[];
   changes: string[];
+  /** Which engine produced this payload (gemini, ollama, fallback). */
+  provider?: string;
+  /** Concrete model identifier used, for display/diagnostics. */
+  model?: string;
   notice?: string;
   fromCache?: boolean;
   isFallback?: boolean;
+}
+
+/** Engine description returned by GET /api/ai/config. */
+export interface AiEngineConfig {
+  provider: "gemini" | "ollama" | "fallback";
+  model: string;
+  label: string;
 }
 
 export interface AiChatTurn {
