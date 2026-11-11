@@ -18,6 +18,7 @@ import {
   Moon,
   Sparkles,
   Info,
+  MessageSquare,
 } from 'lucide-react';
 
 interface HeaderProps {
@@ -44,6 +45,9 @@ interface HeaderProps {
   theme: 'light' | 'dark';
   onToggleTheme: () => void;
   onOpenAiModal?: () => void;
+  /** Toggle the docked AI chat for the current session. */
+  onToggleAiChat?: () => void;
+  isAiChatOpen?: boolean;
   // Voice Chat
   isVoiceConnected: boolean;
   isMuted: boolean;
@@ -92,6 +96,8 @@ export const Header: React.FC<HeaderProps> = ({
   theme,
   onToggleTheme,
   onOpenAiModal,
+  onToggleAiChat,
+  isAiChatOpen = false,
   isVoiceConnected,
   isMuted,
   isDeafened,
@@ -315,6 +321,31 @@ export const Header: React.FC<HeaderProps> = ({
           >
             <LogIn className="w-3.5 h-3.5 text-slate-500 dark:text-slate-400" />
             <span className="hidden sm:inline">Sign In</span>
+          </button>
+        )}
+
+        {/* AI Chat Sidepanel Toggle (current session) */}
+        {onToggleAiChat && (
+          <button
+            id="ai-chat-header-btn"
+            onClick={onToggleAiChat}
+            aria-pressed={isAiChatOpen}
+            title={
+              isAiChatOpen
+                ? 'Minimize the AI chat for this session'
+                : 'Open the AI chat for this session'
+            }
+            className={`relative inline-flex items-center gap-1.5 p-2 sm:px-2.5 sm:py-2 rounded-xl border text-xs font-semibold transition-colors cursor-pointer ${
+              isAiChatOpen
+                ? 'bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800'
+                : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800'
+            }`}
+          >
+            <MessageSquare className="w-4 h-4 shrink-0" />
+            <span className="hidden lg:inline">AI Chat</span>
+            {isAiChatOpen && (
+              <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-emerald-500 ring-2 ring-white dark:ring-slate-900" />
+            )}
           </button>
         )}
 
