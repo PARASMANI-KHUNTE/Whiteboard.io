@@ -87,6 +87,10 @@ export interface DiagramPayload {
   summary: string;
   suggestions: string[];
   changes: string[];
+  /** Which engine produced this payload (gemini, ollama, fallback). */
+  provider?: string;
+  /** Concrete model identifier used, for display/diagnostics. */
+  model?: string;
   notice?: string;
   fromCache?: boolean;
   isFallback?: boolean;

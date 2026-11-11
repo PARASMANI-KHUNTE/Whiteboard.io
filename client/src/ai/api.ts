@@ -2,6 +2,7 @@ import { BACKEND_URL } from "../config";
 import type {
   AiChatTurn,
   AiDiagramPayload,
+  AiEngineConfig,
   DetailLevel,
   DiagramDirection,
   DiagramGraph,
@@ -26,6 +27,33 @@ async function readPayload(res: Response): Promise<AiDiagramPayload> {
   }
 
   return data as AiDiagramPayload;
+}
+
+/**
+ * Ask the server which engine would handle requests right now, so the UI can
+ * label the badge accurately (Gemini in the cloud, or a local Ollama model).
+ * Returns null when the server is unreachable; callers fall back to a generic
+ * label rather than blocking diagram generation.
+ */
+export async function fetchAiEngine(signal?: AbortSignal): Promise<AiEngineConfig | null> {
+  try {
+    const res = await fetch(`${BACKEND_URL}/api/ai/config`, { signal });
+    if (!res.ok) return null;
+    const data = (await res.json()) as {
+      success?: boolean;
+      provider?: AiEngineConfig["provider"];
+      model?: string;
+      label?: string;
+    };
+    if (!data?.success || !data.provider || !data.label) return null;
+    return {
+      provider: data.provider,
+      model: data.model || "",
+      label: data.label,
+    };
+  } catch {
+    return null;
+  }
 }
 
 export interface GenerateDiagramRequest extends BaseRequest {

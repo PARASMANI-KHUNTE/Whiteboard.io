@@ -129,13 +129,66 @@ PORT=3000
 APP_URL=http://localhost:5173
 MONGODB_URI=mongodb://127.0.0.1:27017/whiteboard
 
+# AI engine: "gemini" (cloud), "ollama" (local), "fallback" (offline generator),
+# or leave unset to auto-pick Gemini when a key exists, otherwise Ollama.
+AI_PROVIDER=
+
 # Google Gemini API Key for AI Diagram & Mind Map Generation
 GEMINI_API_KEY=your_gemini_api_key_here
+GEMINI_MODEL=gemini-3.8-flash
+
+# Local Ollama engine (no API key needed). See "Local AI with Ollama" below.
+OLLAMA_BASE_URL=http://127.0.0.1:11434
+OLLAMA_MODEL=llama3.2
 
 # Optional Google OAuth Credentials
 GOOGLE_CLIENT_ID=
 GOOGLE_CLIENT_SECRET=
 ```
+
+#### Local AI with Ollama (optional)
+
+You can run diagram generation entirely on your own machine with
+[Ollama](https://ollama.com). Install Ollama, pull a model, and set
+`AI_PROVIDER=ollama`:
+
+```bash
+ollama pull llama3.2
+ollama serve   # usually already running as a background service
+```
+
+```env
+AI_PROVIDER=ollama
+OLLAMA_MODEL=llama3.2
+OLLAMA_BASE_URL=http://127.0.0.1:11434
+```
+
+Good model choices for structured diagram output:
+
+| Model | Size | Notes |
+| :--- | :---: | :--- |
+| `llama3.2` | ~2 GB | Default. Fast and reliably emits valid schema-constrained JSON. |
+| `qwen2.5-coder:14b` | ~9 GB | Stronger structure/labels if you have the VRAM. |
+| `qwen2.5:7b-instruct` | ~4.7 GB | Good reasoning, but some quantized builds loop under JSON constraints — test before relying on it. |
+
+Any Ollama model with structured-output/JSON support can be used; set
+`OLLAMA_MODEL` to its exact `ollama list` name.
+
+Tuning variables (all optional):
+
+| Variable | Default | Purpose |
+| :--- | :--- | :--- |
+| `OLLAMA_TIMEOUT_MS` | `180000` | Per-request timeout. Raise it for first-run model loading. |
+| `OLLAMA_NUM_CTX` | `12288` | Context window. |
+| `OLLAMA_NUM_PREDICT` | `6144` | Max tokens generated (raise for very detailed boards). |
+| `OLLAMA_KEEP_ALIVE` | `10m` | How long the model stays loaded between requests. |
+| `OLLAMA_MIN_INTERVAL_MS` | `250` | Minimum gap between two local model calls. |
+| `OLLAMA_API_KEY` | *(empty)* | Only for a remote/protected Ollama server; sent as a bearer token. |
+
+If Ollama is down or returns an unusable graph, the server automatically falls
+back to the built-in offline generator, so the board still gets a diagram.
+The active engine is shown in the generation dialog badge and exposed at
+`GET /api/ai/config`.
 
 **Client Environment** (`client/.env`):
 ```env

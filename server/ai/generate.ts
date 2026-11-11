@@ -11,8 +11,6 @@ import type {
 import { sanitizeSessionId } from "./types";
 import {
   AI_SCHEMA_VERSION,
-  GRAPH_RESPONSE_SCHEMA,
-  SYSTEM_INSTRUCTION,
   buildInitialUserMessage,
   buildRetryUserMessage,
   buildRevisionUserMessage,
@@ -22,6 +20,14 @@ import type { NormalizedGraph } from "./types";
 import { layoutGraph } from "./layout";
 import { buildElements } from "./elements";
 import { buildFallbackGraph } from "./fallback";
+import {
+  callAiModel,
+  defaultDiagramAuthor,
+  getProviderSummary,
+  resolveAiProvider,
+  type AiProviderInfo,
+  type AiProviderSummary,
+} from "./providers";
 
 // ---------------------------------------------------------------------------
 // Response cache — stores the semantic graph, never geometry or element ids.
@@ -45,26 +51,43 @@ const cleanupTimer = setInterval(() => {
 cleanupTimer.unref?.();
 
 function cacheKey(
+  provider: AiProviderInfo,
   prompt: string,
   type: DiagramType,
   detail: DetailLevel,
   direction: DiagramDirection
 ): string {
-  return [AI_SCHEMA_VERSION, type, detail, direction, prompt.trim().toLowerCase()].join("|");
+  return [
+    AI_SCHEMA_VERSION,
+    provider.name,
+    provider.model,
+    type,
+    detail,
+    direction,
+    prompt.trim().toLowerCase(),
+  ].join("|");
 }
 
 // ---------------------------------------------------------------------------
-// Throttled outbound queue — Gemini free tier allows ~15 requests/minute.
+// Throttled outbound queue — Gemini's free tier allows ~15 requests/minute,
+// while a local Ollama server only needs a small breather between calls.
 // ---------------------------------------------------------------------------
 
-const MIN_REQUEST_INTERVAL_MS = 3000;
 let lastOutboundTime = 0;
 let queuePromise: Promise<void> = Promise.resolve();
 
-function scheduleThrottledTask<T>(task: () => Promise<T>): Promise<T> {
+function outboundIntervalMs(provider: AiProviderInfo): number {
+  if (provider.name === "ollama") {
+    const configured = Number(process.env.OLLAMA_MIN_INTERVAL_MS);
+    return Number.isFinite(configured) && configured >= 0 ? configured : 250;
+  }
+  return 3000;
+}
+
+function scheduleThrottledTask<T>(intervalMs: number, task: () => Promise<T>): Promise<T> {
   const run = async (): Promise<T> => {
     const elapsed = Date.now() - lastOutboundTime;
-    const waitTime = Math.max(0, MIN_REQUEST_INTERVAL_MS - elapsed);
+    const waitTime = Math.max(0, intervalMs - elapsed);
     if (waitTime > 0) {
       await new Promise((resolve) => setTimeout(resolve, waitTime));
     }
@@ -78,121 +101,6 @@ function scheduleThrottledTask<T>(task: () => Promise<T>): Promise<T> {
     () => {}
   );
   return nextPromise;
-}
-
-// ---------------------------------------------------------------------------
-// Gemini caller
-// ---------------------------------------------------------------------------
-
-function getRetryDelayMs(response: Response, attempt: number): number {
-  const retryAfter = response.headers.get("retry-after");
-  if (retryAfter) {
-    const seconds = Number(retryAfter);
-    if (Number.isFinite(seconds)) {
-      return Math.min(Math.max(seconds * 1000, 1000), 30_000);
-    }
-  }
-  const exponentialDelay = Math.min(2 ** attempt * 1000, 15_000);
-  return exponentialDelay + Math.floor(Math.random() * 500);
-}
-
-function extractJson(text: string): unknown {
-  const trimmed = text.trim();
-  const unfenced = trimmed
-    .replace(/^```(?:json)?\s*/i, "")
-    .replace(/\s*```$/i, "")
-    .trim();
-  try {
-    return JSON.parse(unfenced);
-  } catch {
-    const start = unfenced.indexOf("{");
-    const end = unfenced.lastIndexOf("}");
-    if (start >= 0 && end > start) {
-      return JSON.parse(unfenced.slice(start, end + 1));
-    }
-    throw new Error("Gemini returned a response that was not valid JSON.");
-  }
-}
-
-async function callGemini(
-  apiKey: string,
-  userMessage: string,
-  temperature: number,
-  maxRetries = 3
-): Promise<unknown> {
-  const model = process.env.GEMINI_MODEL?.trim() || "gemini-3.8-flash";
-  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
-
-  const requestBody = {
-    system_instruction: {
-      parts: [{ text: SYSTEM_INSTRUCTION }],
-    },
-    contents: [
-      {
-        role: "user",
-        parts: [{ text: userMessage }],
-      },
-    ],
-    generationConfig: {
-      responseMimeType: "application/json",
-      responseSchema: GRAPH_RESPONSE_SCHEMA,
-      temperature,
-      maxOutputTokens: 8192,
-    },
-  };
-
-  for (let attempt = 1; attempt <= maxRetries; attempt++) {
-    try {
-      const response = await fetch(endpoint, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(requestBody),
-        signal: AbortSignal.timeout(45_000),
-      });
-
-      if (response.status === 429 || response.status === 503) {
-        if (attempt === maxRetries) {
-          const reason = response.status === 429 ? "rate limit" : "service unavailable";
-          throw new Error(
-            `Gemini ${reason} after ${maxRetries} attempts (HTTP ${response.status}).`
-          );
-        }
-        const delayMs = getRetryDelayMs(response, attempt);
-        console.warn(
-          `[AI Retry]: HTTP ${response.status}. Retrying in ${delayMs}ms (attempt ${attempt + 1}/${maxRetries})...`
-        );
-        await response.body?.cancel().catch(() => {});
-        await new Promise((resolve) => setTimeout(resolve, delayMs));
-        continue;
-      }
-
-      const data = (await response.json()) as {
-        candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
-        error?: { message?: string };
-      };
-
-      const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-      if (!response.ok || !text) {
-        const message =
-          data.error?.message || response.statusText || "Failed to generate a diagram from Gemini";
-        const error = new Error(`Gemini API Error: ${message}`) as Error & { fatal?: boolean };
-        if (response.status >= 400 && response.status < 500) error.fatal = true;
-        throw error;
-      }
-
-      return extractJson(text);
-    } catch (err: unknown) {
-      const error = err as Error & { fatal?: boolean };
-      if (attempt === maxRetries || error.fatal) throw error;
-      const delayMs = Math.min(1500 * attempt, 5000) + Math.floor(Math.random() * 500);
-      console.warn(
-        `[AI Retry]: ${error.message}. Retrying in ${delayMs}ms (attempt ${attempt + 1}/${maxRetries})...`
-      );
-      await new Promise((resolve) => setTimeout(resolve, delayMs));
-    }
-  }
-
-  throw new Error("Gemini API call failed after multiple retry attempts");
 }
 
 // ---------------------------------------------------------------------------
@@ -258,6 +166,7 @@ interface AssembleParams {
   author: DiagramAuthor;
   canvasCenter: CanvasCenter;
   changes?: string[];
+  engine?: AiProviderSummary;
   fromCache?: boolean;
   isFallback?: boolean;
   notice?: string;
@@ -273,6 +182,7 @@ function assemblePayload(params: AssembleParams): DiagramPayload {
     author,
     canvasCenter,
     changes = [],
+    engine,
     fromCache,
     isFallback,
     notice,
@@ -299,6 +209,7 @@ function assemblePayload(params: AssembleParams): DiagramPayload {
     summary: graph.summary,
     suggestions: graph.suggestions.length > 0 ? graph.suggestions : defaultSuggestions(type),
     changes,
+    ...(engine ? { provider: engine.provider, model: engine.model } : {}),
     ...(fromCache ? { fromCache } : {}),
     ...(isFallback ? { isFallback } : {}),
     ...(notice ? { notice } : {}),
@@ -320,17 +231,11 @@ export interface GenerateDiagramParams {
 }
 
 export async function generateDiagram(params: GenerateDiagramParams): Promise<DiagramPayload> {
-  const {
-    prompt,
-    type,
-    detail,
-    direction,
-    canvasCenter = { x: 0, y: 0 },
-    author = { id: "ai_gemini", name: "Gemini AI" },
-  } = params;
+  const { prompt, type, detail, direction, canvasCenter = { x: 0, y: 0 } } = params;
 
+  const provider = resolveAiProvider();
+  const author = params.author ?? defaultDiagramAuthor(provider);
   const sessionId = sanitizeSessionId(params.sessionId);
-  const key = cacheKey(prompt, type, detail, direction);
   const options: NormalizeOptions = {
     type,
     detail,
@@ -338,23 +243,8 @@ export async function generateDiagram(params: GenerateDiagramParams): Promise<Di
     fallbackTitle: prompt.length > 70 ? `${prompt.slice(0, 69)}…` : prompt,
   };
 
-  const cached = graphCache.get(key);
-  if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
-    return assemblePayload({
-      sessionId,
-      type,
-      detail,
-      direction,
-      graph: cached.graph,
-      author,
-      canvasCenter,
-      fromCache: true,
-    });
-  }
-
-  const apiKey = process.env.GEMINI_API_KEY?.trim();
-
-  if (!apiKey) {
+  // No model backend configured: serve the deterministic local engine.
+  if (!provider) {
     const fallback = normalizeGraph(
       buildFallbackGraph(prompt, type, detail) as unknown,
       options
@@ -367,15 +257,38 @@ export async function generateDiagram(params: GenerateDiagramParams): Promise<Di
       graph: fallback.graph,
       author,
       canvasCenter,
+      engine: { provider: "fallback", model: "procedural", label: "Local fallback engine" },
       isFallback: true,
       notice:
-        "GEMINI_API_KEY is not configured, so this diagram was generated by the local fallback engine.",
+        "No AI model is configured, so this diagram was generated by the local fallback engine.",
+    });
+  }
+
+  const engine: AiProviderSummary = getProviderSummary();
+
+  const key = cacheKey(provider, prompt, type, detail, direction);
+
+  const cached = graphCache.get(key);
+  if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
+    return assemblePayload({
+      sessionId,
+      type,
+      detail,
+      direction,
+      graph: cached.graph,
+      author,
+      canvasCenter,
+      engine,
+      fromCache: true,
     });
   }
 
   try {
+    const interval = outboundIntervalMs(provider);
     const baseMessage = buildInitialUserMessage(prompt, type, detail, direction);
-    const firstRaw = await scheduleThrottledTask(() => callGemini(apiKey, baseMessage, 0.4));
+    const firstRaw = await scheduleThrottledTask(interval, () =>
+      callAiModel(provider, baseMessage, 0.4)
+    );
     const first = normalizeGraph(firstRaw, options);
 
     let best = first;
@@ -383,8 +296,8 @@ export async function generateDiagram(params: GenerateDiagramParams): Promise<Di
       console.warn(`[AI Quality Gate]: ${first.issues.join(" ")} Retrying once with stricter guidance.`);
       const retryMessage = buildRetryUserMessage(baseMessage, first.issues);
       try {
-        const secondRaw = await scheduleThrottledTask(() =>
-          callGemini(apiKey, retryMessage, 0.3)
+        const secondRaw = await scheduleThrottledTask(interval, () =>
+          callAiModel(provider, retryMessage, 0.3)
         );
         best = pickBetter(first, normalizeGraph(secondRaw, options));
       } catch (retryError: unknown) {
@@ -395,7 +308,7 @@ export async function generateDiagram(params: GenerateDiagramParams): Promise<Di
     }
 
     if (best.graph.nodes.length === 0) {
-      throw new Error("Gemini returned an empty diagram.");
+      throw new Error(`The ${provider.label} model returned an empty diagram.`);
     }
 
     if (best.issues.length === 0) {
@@ -410,6 +323,7 @@ export async function generateDiagram(params: GenerateDiagramParams): Promise<Di
       graph: best.graph,
       author,
       canvasCenter,
+      engine,
       ...(best.issues.length > 0
         ? { notice: `Quality checks reported: ${best.issues[0]}` }
         : {}),
@@ -430,8 +344,9 @@ export async function generateDiagram(params: GenerateDiagramParams): Promise<Di
       graph: fallback.graph,
       author,
       canvasCenter,
+      engine: { provider: "fallback", model: "procedural", label: "Local fallback engine" },
       isFallback: true,
-      notice: "Gemini was unavailable, so this diagram was generated by the local fallback engine.",
+      notice: `${provider.label} was unavailable, so this diagram was generated by the local fallback engine.`,
     });
   }
 }
@@ -457,13 +372,17 @@ export async function reviseDiagram(params: ReviseDiagramParams): Promise<Diagra
     detail,
     direction,
     canvasCenter = { x: 0, y: 0 },
-    author = { id: "ai_gemini", name: "Gemini AI" },
   } = params;
 
-  const apiKey = process.env.GEMINI_API_KEY?.trim();
-  if (!apiKey) {
+  const provider = resolveAiProvider();
+  const author = params.author ?? defaultDiagramAuthor(provider);
+  const engine: AiProviderSummary = provider
+    ? getProviderSummary()
+    : { provider: "fallback", model: "procedural", label: "Local fallback engine" };
+
+  if (!provider) {
     throw new Error(
-      "GEMINI_API_KEY is not configured on the server, so follow-up edits are unavailable."
+      "No AI model is configured on the server, so follow-up edits are unavailable."
     );
   }
 
@@ -493,7 +412,10 @@ export async function reviseDiagram(params: ReviseDiagramParams): Promise<Diagra
     fallbackSummary: current.graph.summary,
   };
 
-  const firstRaw = await scheduleThrottledTask(() => callGemini(apiKey, baseMessage, 0.3));
+  const interval = outboundIntervalMs(provider);
+  const firstRaw = await scheduleThrottledTask(interval, () =>
+    callAiModel(provider, baseMessage, 0.3)
+  );
   const first = normalizeGraph(firstRaw, options);
 
   let best = first;
@@ -501,8 +423,8 @@ export async function reviseDiagram(params: ReviseDiagramParams): Promise<Diagra
   if (first.issues.length > 0) {
     const retryMessage = buildRetryUserMessage(baseMessage, first.issues);
     try {
-      const secondRaw = await scheduleThrottledTask(() =>
-        callGemini(apiKey, retryMessage, 0.25)
+      const secondRaw = await scheduleThrottledTask(interval, () =>
+        callAiModel(provider, retryMessage, 0.25)
       );
       const second = normalizeGraph(secondRaw, options);
       if (pickBetter(first, second) === second) bestRaw = secondRaw;
@@ -524,6 +446,7 @@ export async function reviseDiagram(params: ReviseDiagramParams): Promise<Diagra
       graph: current.graph,
       author,
       canvasCenter,
+      engine,
       changes: ["The AI returned no usable nodes, so the diagram was left unchanged."],
       notice: "The AI response was empty. Your diagram was left as it was — try rephrasing the instruction.",
     });
@@ -546,5 +469,6 @@ export async function reviseDiagram(params: ReviseDiagramParams): Promise<Diagra
     author,
     canvasCenter,
     changes,
+    engine,
   });
 }
