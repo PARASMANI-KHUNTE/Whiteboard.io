@@ -1223,6 +1223,8 @@ export default function App() {
         onShareAndGoLive={handleShareAndGoLive}
         onOpenAdminModal={() => setShowAdminModal(true)}
         onOpenAiModal={() => setShowAiModal(true)}
+        onToggleAiChat={() => setIsAiChatOpen((open) => !open)}
+        isAiChatOpen={isAiChatOpen}
         onUpdateUserName={updateUserName}
         onUpdateUserColor={updateUserColor}
         onSwitchRoom={switchRoom}
@@ -1441,17 +1443,15 @@ export default function App() {
         authToken={token}
       />
 
-      {/* Docked follow-up chat for the active AI diagram */}
-      {aiSession && (
-        <AiChatPanel
-          isOpen={isAiChatOpen}
-          session={aiSession}
-          onClose={() => setIsAiChatOpen(false)}
-          onNewDiagram={() => setShowAiModal(true)}
-          onApplyTurn={handleAiApplyTurn}
-          authToken={token}
-        />
-      )}
+      {/* Docked follow-up chat for the current session (null session shows an empty state) */}
+      <AiChatPanel
+        isOpen={isAiChatOpen}
+        session={aiSession}
+        onClose={() => setIsAiChatOpen(false)}
+        onNewDiagram={() => setShowAiModal(true)}
+        onApplyTurn={handleAiApplyTurn}
+        authToken={token}
+      />
 
       {/* Reopen the AI chat after it has been minimized */}
       {aiSession && !isAiChatOpen && (
