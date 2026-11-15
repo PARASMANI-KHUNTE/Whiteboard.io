@@ -1,8 +1,27 @@
 # 🎨 Whiteboard.io — Real-Time Collaborative Whiteboard
 
-An enterprise-grade, real-time collaborative digital whiteboard built with **React**, **TypeScript**, **Node.js**, **Socket.io**, **WebRTC**, and **MongoDB**.
+<div align="center">
 
-Designed for distributed teams, design sprint brainstorming, remote tutoring, and interactive sketching with zero latency, live cursors, voice chat, and granular permission controls.
+[![Live Demo](https://img.shields.io/badge/🚀_Live_Demo-whiteboard--io--1.onrender.com-brightgreen?style=for-the-badge&logo=render&logoColor=white)](https://whiteboard-io-1.onrender.com/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=for-the-badge)](LICENSE)
+[![TypeScript](https://img.shields.io/badge/TypeScript-007ACC?style=for-the-badge&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![React 19](https://img.shields.io/badge/React_19-20232A?style=for-the-badge&logo=react&logoColor=61DAFB)](https://react.dev/)
+[![Node.js](https://img.shields.io/badge/Node.js-43853D?style=for-the-badge&logo=node.js&logoColor=white)](https://nodejs.org/)
+[![Socket.io](https://img.shields.io/badge/Socket.io-010101?style=for-the-badge&logo=socket.io&logoColor=white)](https://socket.io/)
+[![Google Gemini](https://img.shields.io/badge/Google_Gemini_3.8_Flash-4285F4?style=for-the-badge&logo=google&logoColor=white)](https://ai.google.dev/)
+
+<br />
+
+**An enterprise-grade, real-time collaborative digital whiteboard with infinite canvas, WebRTC spatial voice chat, and Gemini & Ollama AI diagram synthesis.**
+
+[🌐 Explore the Live Application](https://whiteboard-io-1.onrender.com/) · [📖 Documentation](docs/ARCHITECTURE.md) · [🐛 Report Issue](https://github.com/PARASMANI-KHUNTE/Whiteboard.io/issues)
+
+</div>
+
+---
+
+> [!TIP]
+> **Live Production Deployment**: Experience Whiteboard.io in real time at **[https://whiteboard-io-1.onrender.com/](https://whiteboard-io-1.onrender.com/)**. Open the link across multiple devices or browser windows to test real-time multiplayer drawing, WebRTC mesh voice chat, and AI diagram synthesis.
 
 ---
 
@@ -97,7 +116,7 @@ Most existing whiteboards force compromises: either you pay heavy per-seat month
 | **Backend** | Node.js (ESM), Express 4, Socket.io Server |
 | **Database** | MongoDB 7 / MongoDB Atlas Native Node Driver (with in-memory fallback) |
 | **Security** | PBKDF2 Cryptographic Hashing, Rate Limiting, CORS Allowlist |
-| **Deployment** | Render, Railway, Vercel, Docker, Fly.io |
+| **Hosting & CI/CD** | Render, Railway, Docker, Vercel |
 
 ---
 
@@ -258,19 +277,19 @@ Deploying on **Render**, **Railway**, or a single VPS:
 2. **Build Command**: `npm run build`
 3. **Start Command**: `npm start`
 4. Set environment variables:
-   * `APP_URL`: `https://<your-service>.onrender.com`
+   * `APP_URL`: `https://whiteboard-io-1.onrender.com`
    * `MONGODB_URI`: `<your_atlas_connection_string>`
    * `GEMINI_API_KEY`: `your_gemini_api_key_here`
    * `GOOGLE_CLIENT_ID` & `GOOGLE_CLIENT_SECRET`: *(From Google Cloud Console)*
 
 ### Option B: Split Frontend (Static) & Backend (Web Service)
 * **Backend (Render Web Service)**:
-  * Runs Node server on `https://<your-backend>.onrender.com`.
+  * Runs Node server on `https://whiteboard-io-1.onrender.com`.
   * Set `APP_URL=https://<your-frontend>.onrender.com` to allow CORS and OAuth redirects.
   * Set `GEMINI_API_KEY=your_gemini_api_key_here`.
 * **Frontend (Render Static Site or Vercel)**:
   * Publishes `client/dist`.
-  * Set `VITE_BACKEND_URL=https://<your-backend>.onrender.com`.
+  * Set `VITE_BACKEND_URL=https://whiteboard-io-1.onrender.com`.
 
 ---
 

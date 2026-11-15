@@ -11,3 +11,13 @@ server/.env*
 !server/.env.example
 !client/.env.example
 !.env.example
+
+# Local server database / runtime cache
+server/data/
+**/server/data/
+
+# Office documents and report artifacts
+*.docx
+*.doc
+*.pptx
+*.xlsx
