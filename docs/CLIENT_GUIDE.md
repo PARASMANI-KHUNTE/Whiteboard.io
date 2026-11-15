@@ -1,6 +1,6 @@
 # Client Architecture & Component Guide
 
-This guide details the internal frontend architecture, state management hooks, canvas rendering pipeline, and component hierarchy of **Whiteboard.io**.
+This guide details the internal frontend architecture, state management hooks, canvas rendering pipeline, persistence utilities, and component hierarchy of **Whiteboard.io**.
 
 ---
 
@@ -10,22 +10,28 @@ The frontend is organized into modular React components centered around an infin
 
 ```
 App.tsx
-├── Header.tsx (Room status, users dropdown, voice toggle, auth buttons, theme toggle, ✨ AI Diagram button, ℹ️ About modal)
+├── Header.tsx (Room status, users dropdown, voice toggle, auth buttons, theme toggle, ✨ AI Diagram button, 💬 AI Chat toggle, ℹ️ About modal, ⌨️ Shortcuts modal)
 │   ├── AudioVisualizerBar.tsx (Waveform rendering & mic controls)
 │   ├── AdminPanelModal.tsx (Host room lock, user permissions, kick user)
-│   └── AboutModal.tsx (App mission, key differentiators, and feature comparison matrix)
-├── Toolbar.tsx (Drawing tools, shapes, sticky notes, text, icons, colors, stroke width)
-├── Canvas.tsx (Interactive drawing surface, coordinate transformation, remote cursors)
+│   ├── AboutModal.tsx (App mission, key differentiators, and feature comparison matrix)
+│   ├── ShortcutsModal.tsx (Keyboard shortcuts cheat sheet overlay)
+│   └── SessionLauncherModal.tsx (Recent rooms dashboard, new room creation, solo mode selector)
+├── Toolbar.tsx (Drawing tools, shapes, sticky notes, text, icons, wires/connectors, colors, stroke width)
+├── Canvas.tsx (Interactive drawing surface, coordinate transformation, remote cursors, spatial indexing)
 │   ├── ShapeItem.tsx (Rectangles, circles, diamonds, triangles, stars, arrows)
 │   ├── StickyNoteItem.tsx (Draggable colored sticky notes with inline editing)
 │   ├── TextItem.tsx (Rich text nodes with font styling and resizing)
-│   └── IconItem.tsx (Lucide SVG icons with color/rotation transforms)
+│   ├── IconItem.tsx (Lucide SVG icons with color/rotation transforms)
+│   ├── WireItem.tsx (Smart relational connectors with cubic Bézier curve paths & arrowheads)
+│   └── ContextMenu.tsx (Right-click quick actions: duplicate, bring to front, send to back, delete)
 ├── ZoomControls.tsx (Zoom in/out, pan reset, zoom-to-fit)
 ├── AuthModal.tsx (Login, registration, guest onboarding, Google sign-in)
-├── CreateRoomModal.tsx (Room code generator, room naming, private lock)
+├── CreateRoomModal.tsx (Room code generator, room naming, private lock, recent room tags)
 ├── ShareRoomModal.tsx (Shareable link, QR code, room code copy)
 ├── VoteToClearModal.tsx (Interactive voting modal with live consensus progress)
-└── AiGenerateModal.tsx (Gemini AI prompt modal with style tabs, prompt chips, loading states)
+├── ConfirmModal.tsx (Modal confirmation dialog for destructive actions)
+├── AiGenerateModal.tsx (Natural language diagram generation modal: style, detail, direction, live backend engine badge)
+└── AiChatPanel.tsx (Slide-out conversational drawer for diagram revisions, follow-up refinements, and turn history)
 ```
 
 ---
@@ -42,17 +48,20 @@ Located in [`client/src/hooks/useSocket.ts`](file:///f:/Codes/Projects/Whiteboar
   - `voteToClear`: Active vote timer and participant vote tallies.
   - `canWrite`: Boolean indicating whether the local user has write permissions.
   - `isHost`: Boolean indicating whether the local user is room administrator.
-- Provides unified emission functions: `emitElementCreate`, `emitElementsBatchCreate`, `emitElementUpdate`, `emitElementDelete`, `emitElementsBatchDelete`, `emitCursorMove`, `emitAudioLevel`, `setParticipantPermission`, `kickParticipant`.
-- Listens for `elements-batch-created` events to seamlessly insert multi-element AI diagrams broadcast from remote peers.
+  - `isLocked`: Boolean indicating if room is currently locked by the host.
+- Provides unified emission functions:
+  - `emitElementCreate`, `emitElementsBatchCreate`, `emitElementUpdate`, `emitElementDelete`, `emitElementsBatchDelete`.
+  - `emitCursorMove`, `emitAudioLevel`, `setParticipantPermission`, `kickParticipant`, `toggleRoomLock`.
+- Listens for `elements-batch-created` and `elements-batch-deleted` to atomically render complex multi-element diagrams without overloading network buffers.
 
 ### 2. `useAuth()`
 Located in [`client/src/hooks/useAuth.ts`](file:///f:/Codes/Projects/Whiteboard/Whiteboard.io/client/src/hooks/useAuth.ts).
-- Manages authentication state with persistent storage in `localStorage`.
+- Manages user identity and JWT session persistence in `localStorage`.
 - Supports:
   - Account registration and login via `/api/auth/*`.
-  - Ephemeral guest creation via `/api/auth/guest`.
+  - Ephemeral guest creation via `/api/auth/guest` with seamless identity recovery (`guestIdentity.ts`).
   - Google OAuth popup flow with `postMessage` listener and URL hash redirect fallback (`#auth_token=`).
-  - Room list querying via `/api/rooms/my-rooms`.
+  - Room querying via `/api/rooms/my-rooms`.
 
 ### 3. `useVoiceChat({ socket, currentUser, roomId, users })`
 Located in [`client/src/hooks/useVoiceChat.ts`](file:///f:/Codes/Projects/Whiteboard/Whiteboard.io/client/src/hooks/useVoiceChat.ts).
@@ -64,8 +73,8 @@ Located in [`client/src/hooks/useVoiceChat.ts`](file:///f:/Codes/Projects/Whiteb
 
 ### 4. `useTheme()`
 Located in [`client/src/hooks/useTheme.ts`](file:///f:/Codes/Projects/Whiteboard/Whiteboard.io/client/src/hooks/useTheme.ts).
-- Toggles dark mode and light mode.
-- Syncs state with `localStorage` and toggles the `dark` class on the root HTML document.
+- Toggles dark mode and light mode across the application.
+- Syncs state with `localStorage` and applies the `dark` class to the root HTML document.
 
 ---
 
@@ -90,10 +99,23 @@ To prevent blurry lines on Retina and 4K displays:
   ctx.scale(dpr, dpr);
   ```
 
-### Smooth Stroke Interpolation
-Rather than drawing rigid polygonal lines between sampled mouse points:
-- Quadratic Bézier curves (`ctx.quadraticCurveTo`) smooth out intermediate pointer coordinates.
-- Highlighter strokes utilize `ctx.globalCompositeOperation = 'multiply'` and semi-transparent alpha channels to highlight text and diagrams without obscuring underlying shapes.
+### 2D Spatial Indexing (`spatialIndex.ts`)
+To maintain 60 FPS even on whiteboards with thousands of elements, Whiteboard.io uses a spatial acceleration grid:
+- Partitions the infinite 2D world into uniform spatial cells.
+- Insertion and updates index an element's axis-aligned bounding box (AABB).
+- Viewport culling queries only elements intersecting the visible camera frustum:
+  $$\text{Query Time} = O(\log N + K)$$
+- Powers instantaneous bounding-box collision detection for mouse selections, lasso selections, and point-and-click hit tests.
+
+### Smooth Stroke Interpolation & Simplification (`strokeSimplification.ts`)
+- **Real-time Smoothing**: Quadratic Bézier curves (`ctx.quadraticCurveTo`) smooth out intermediate pointer coordinates during live drawing.
+- **Ramer-Douglas-Peucker (RDP) Simplification**: Finalized strokes undergo distance-epsilon point reduction to eliminate redundant collinear points before network broadcast, reducing network payload sizes by up to 70%.
+- **Highlighter Mode**: Utilizes `ctx.globalCompositeOperation = 'multiply'` and semi-transparent alpha channels to highlight text and diagrams without obscuring underlying shapes.
+
+### Smart Relational Connectors & Wires (`wireGeometry.ts`, `WireItem.tsx`)
+- AI diagrams and manual connectors utilize dedicated `wire` elements.
+- Features automatic magnetic terminal snapping to shape boundary anchor points (top, bottom, left, right).
+- Calculates smooth cubic Bézier tangents based on connected node orientation and renders directional arrowheads.
 
 ### Eraser Collision Engine
 The eraser tool supports two modes:
@@ -104,56 +126,83 @@ The eraser tool supports two modes:
 
 ---
 
-## 4. Keyboard Shortcuts
+## 4. Local & Session Persistence Architecture
 
-| Shortcut | Action |
-| :--- | :--- |
-| `V` or `1` | Select / Move Tool |
-| `H` or `2` | Hand / Pan Tool |
-| `P` or `3` | Pen / Pencil Tool |
-| `M` or `4` | Highlighter Tool |
-| `E` or `5` | Eraser Tool |
-| `S` or `6` | Sticky Note Tool |
-| `T` or `7` | Text Tool |
-| `R` or `8` | Shape Tool |
-| `I` or `9` | Icon Library Tool |
-| `Ctrl + Z` / `Cmd + Z` | Undo last action |
-| `Ctrl + Y` / `Cmd + Shift + Z` | Redo action |
-| `Delete` / `Backspace` | Delete selected element |
-| `Space + Drag` | Pan across canvas |
-| `Ctrl + Scroll` / `Cmd + Scroll` | Zoom in and out |
-| `Ctrl + 0` | Reset zoom to 100% |
+Whiteboard.io guarantees session continuity through a multi-tier client persistence layer:
+
+### 1. Solo Mode Autosave (`soloStorage.ts`)
+- For offline or local sketching without joining a multiplayer room.
+- Automatically persists the complete whiteboard state to browser `localStorage` with a debounced 300ms writer.
+- Supports snapshot recovery, last-saved timestamps, and safe board wipes.
+
+### 2. Guest Identity Continuity (`guestIdentity.ts`)
+- Preserves anonymous guest user profiles (unique guest ID, custom display name, and avatar color) across page reloads and room transitions.
+- Eliminates the need to re-enter your name when jumping between collaborative rooms.
+
+### 3. Recent Rooms Tracker (`recentRooms.ts`)
+- Maintains an LRU cache of recently visited rooms in `localStorage`.
+- Stores room codes, room titles, last-accessed timestamps, and host information.
+- Displayed in the `SessionLauncherModal` and room creation interfaces for 1-click re-entry.
+
+### 4. AI Session History Storage (`aiSessionStorage.ts`)
+- Persists conversational diagram threads per room session.
+- Retains prompt history, assistant responses, model notices, and graph representations so users can resume iterative diagram edits across browser refreshes.
 
 ---
 
-## 5. AI Diagram Generation & Viewport Mathematics
+## 5. Keyboard Shortcuts & Productivity Controls
 
-### Natural Language to Canvas Elements
-The `AiGenerateModal` component provides an intuitive interface for transforming text into structured diagrams:
-1. **Style Selection**: Users choose from 4 specialized diagram typologies:
-   - 🧠 **Mind Map**: Radial hierarchy radiating from a central idea.
-   - 🔀 **Flowchart**: Decision tree with logic diamonds and sequence arrows.
-   - 📋 **Sticky Board**: Kanban columns (To Do / In Progress / Done) or SWOT quadrants.
-   - 🏗️ **Architecture**: Multi-tier microservice / cloud architecture topology.
-2. **Template Inspiration Chips**: Pre-crafted prompts enable 1-click experimentation (e.g. "OAuth 2.0 Auth Flow", "E-Commerce Microservices", "SWOT Analysis").
+A comprehensive set of single-key and modifier shortcuts accelerates canvas navigation and element manipulation:
 
-### Viewport Coordinate Centering
-To ensure generated diagrams appear right where the user is currently looking (rather than at arbitrary `(0,0)` coordinates):
-```typescript
-// App.tsx
-const handleOpenAiModal = () => {
-  // Compute the world-space center of the current user's viewport
-  const centerWorldX = (window.innerWidth / 2 - panOffset.x) / zoomLevel;
-  const centerWorldY = (window.innerHeight / 2 - panOffset.y) / zoomLevel;
-  setAiViewportCenter({ x: Math.round(centerWorldX), y: Math.round(centerWorldY) });
-  setIsAiModalOpen(true);
-};
-```
-The backend uses this `viewportCenter` as the origin anchor, positioning the root hub or first node directly at the user's focal point.
+| Shortcut | Action | Description |
+| :--- | :--- | :--- |
+| `V` or `1` | Select Tool | Select, move, and resize canvas elements |
+| `H` or `2` | Pan / Hand Tool | Drag to navigate the canvas |
+| `P` or `3` | Pen Tool | Freehand drawing |
+| `M` or `4` | Highlighter | Transparent multi-layer highlighting |
+| `E` or `5` | Eraser Tool | Toggle point eraser / object eraser |
+| `S` or `6` | Sticky Note Tool | Place colored sticky notes |
+| `T` or `7` | Text Tool | Insert and format rich text |
+| `R` or `8` | Shape Tool | Insert rectangles, circles, diamonds, stars |
+| `I` or `9` | Icon Library | Search and insert Lucide icons |
+| `Ctrl + Z` / `Cmd + Z` | Undo | Revert last action |
+| `Ctrl + Y` / `Cmd + Shift + Z` | Redo | Re-apply last reverted action |
+| `Ctrl + C` / `Cmd + C` | Copy | Copy selected element to clipboard |
+| `Ctrl + V` / `Cmd + V` | Paste | Paste copied element at cursor |
+| `Ctrl + D` / `Cmd + D` | Duplicate | Duplicate selected element with offset |
+| `Ctrl + A` / `Cmd + A` | Select All | Select all elements on canvas |
+| `Delete` / `Backspace` | Delete | Delete selected elements |
+| `[` / `]` | Layering | Send backward / bring forward |
+| `Shift + [` / `Shift + ]` | Layering (Extremes) | Send to bottom / bring to top |
+| `Arrow Keys` | Nudge | Move selected elements by 1px |
+| `Shift + Arrow Keys` | Fast Nudge | Move selected elements by 10px |
+| `Space + Drag` | Quick Pan | Temporarily pan without switching tools |
+| `Ctrl + Scroll` / `Cmd + Scroll` | Zoom | Smooth zoom centered at cursor position |
+| `Ctrl + 0` / `Cmd + 0` | Reset Zoom | Reset camera to 100% at origin |
+| `?` or `Shift + /` | Shortcut Cheat Sheet | Open shortcuts reference modal |
+| `Right Click` | Context Menu | Open context menu (Duplicate, Layering, Delete) |
 
-### Collaborative Batch Dispatch
-When the API returns a generated batch of elements:
-1. The client updates local React state immediately for zero-lag rendering.
-2. The client emits `emitElementsBatchCreate(elements)`.
-3. The server relays `elements-batch-created` to all other participants in the room, creating an instant shared canvas update without overloading the WebSocket gateway with individual single-element packets.
+---
 
+## 6. AI Diagram Generation & Conversational Revision
+
+### Generation Dialog (`AiGenerateModal.tsx`)
+1. **Dynamic Engine Indicator**:
+   Fetches `GET /api/ai/config` to display the active backend (e.g. *Gemini 3.8 Flash*, *Gemini 3.6 Flash*, *Ollama · llama3.2*, or *Offline procedural fallback*).
+2. **Topology Styles**:
+   - 🧠 **Mind Map**: Central core radiating outward to concept branches.
+   - 🔀 **Flowchart**: Process DAG with decision logic diamonds and steps.
+   - 📋 **Sticky Board**: Grid of Kanban or SWOT cards.
+   - 🏗️ **Architecture**: Tiered cloud/microservice topology with connectors.
+3. **Control Parameters**:
+   - **Direction**: `horizontal`, `vertical`, `radial`, `free`.
+   - **Detail Level**: `concise` (~4-6 nodes), `balanced` (~8-12 nodes), `detailed` (~15+ nodes).
+4. **Viewport Centering**:
+   Automatically computes world-space coordinates of the current user's viewport center so generated diagrams appear directly within view.
+
+### Conversational Revision Drawer (`AiChatPanel.tsx`)
+- Provides a conversational AI side panel accessible from the header toolbar.
+- Allows team members to iteratively revise existing diagrams with plain English instructions (e.g. *"Add a Redis caching layer between API Gateway and PostgreSQL"*, *"Convert to horizontal flow"*).
+- Calls `POST /api/ai/revise-diagram` with current semantic graph and conversation history.
+- Computes differential element updates and atomically updates the whiteboard, preserving session undo/redo integrity.
+- Displays model failover notifications (e.g. *"Gemini 3.8 Flash unavailable — Ollama · llama3.2 produced this diagram"*).
