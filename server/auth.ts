@@ -36,6 +36,13 @@ export interface SanitizedUser {
   picture?: string;
 }
 
+export type RoomRole = 'admin' | 'editor' | 'viewer';
+
+export interface RoomPermission {
+  canWrite: boolean;
+  role: RoomRole;
+}
+
 export interface SessionRoomMeta {
   id: string;
   name: string;
@@ -43,6 +50,10 @@ export interface SessionRoomMeta {
   creatorName: string;
   createdAt: number;
   isLocked: boolean;
+  /** Identities banned from the room; survives server restarts. */
+  kickedUserIds?: string[];
+  /** Explicit host-granted/revoked permissions keyed by user id. */
+  userPermissions?: Record<string, RoomPermission>;
 }
 
 function pbkdf2Async(password: string, salt: string, iterations: number, keylen: number): Promise<Buffer> {
@@ -343,6 +354,25 @@ export async function getUserByToken(token: string): Promise<SanitizedUser | nul
   const user = await users.findOne({ id: tokenDoc.userId });
   if (!user) return null;
 
+  // Sliding session: an actively used token should not expire mid-session.
+  const now = Date.now();
+  void tokens
+    .updateOne(
+      { token: cleanToken },
+      { $set: { updatedAt: now, expiresAt: new Date(now + TOKEN_TTL_MS) } }
+    )
+    .catch(() => {});
+  // Guest accounts are TTL-collected after 7 days of inactivity; keep an active
+  // guest alive for another week so a long-running session is not wiped.
+  if (user.isGuest) {
+    void users
+      .updateOne(
+        { id: user.id },
+        { $set: { expiresAt: new Date(now + 7 * 24 * 60 * 60 * 1000) } }
+      )
+      .catch(() => {});
+  }
+
   return sanitizeUser(user);
 }
 
@@ -406,7 +436,125 @@ export async function getRoomMeta(roomId: string): Promise<SessionRoomMeta | nul
     creatorName: doc.creatorName,
     createdAt: doc.createdAt,
     isLocked: !!doc.isLocked,
+    kickedUserIds: Array.isArray(doc.kickedUserIds) ? doc.kickedUserIds : [],
+    userPermissions: doc.userPermissions || {},
   };
+}
+
+/**
+ * Persist the moderation state (lock, kicks, per-user permissions) of a room.
+ * Upserts so rooms created implicitly by an invite-code join are still stored.
+ */
+export async function saveRoomAccessState(
+  room: SessionRoomMeta,
+  access: {
+    isLocked: boolean;
+    kickedUserIds: string[];
+    userPermissions: Record<string, RoomPermission>;
+  }
+): Promise<void> {
+  const cleanId = sanitizeString(room.id);
+  if (!cleanId) return;
+
+  try {
+    const rooms = getRoomsCollection();
+    await rooms.updateOne(
+      { id: cleanId },
+      {
+        $set: {
+          isLocked: !!access.isLocked,
+          kickedUserIds: Array.from(new Set(access.kickedUserIds.map(sanitizeString).filter(Boolean))),
+          userPermissions: access.userPermissions || {},
+        },
+        $setOnInsert: {
+          id: cleanId,
+          name: sanitizeString(room.name) || `Room ${cleanId}`,
+          creatorId: sanitizeString(room.creatorId),
+          creatorName: sanitizeString(room.creatorName),
+          createdAt: Number(room.createdAt) || Date.now(),
+        },
+      },
+      { upsert: true }
+    );
+
+    if (room.creatorId) {
+      await getUsersCollection().updateOne(
+        { id: sanitizeString(room.creatorId) },
+        { $addToSet: { createdRooms: cleanId } }
+      );
+    }
+  } catch (err) {
+    console.warn(`Could not persist access state for room ${cleanId}:`, err);
+  }
+}
+
+/**
+ * Record the first participant of a room as its creator. Only fills an empty
+ * creator so an existing owner can never be overwritten by a later joiner.
+ */
+export async function claimRoomCreator(room: SessionRoomMeta): Promise<void> {
+  const cleanId = sanitizeString(room.id);
+  const creatorId = sanitizeString(room.creatorId);
+  if (!cleanId || !creatorId) return;
+
+  try {
+    const rooms = getRoomsCollection();
+    const existing = await rooms.findOne({ id: cleanId });
+
+    if (!existing) {
+      await rooms.insertOne({
+        id: cleanId,
+        name: sanitizeString(room.name) || `Room ${cleanId}`,
+        creatorId,
+        creatorName: sanitizeString(room.creatorName),
+        createdAt: Number(room.createdAt) || Date.now(),
+        isLocked: !!room.isLocked,
+        kickedUserIds: room.kickedUserIds || [],
+        userPermissions: room.userPermissions || {},
+      } as SessionRoomDoc);
+    } else if (!existing.creatorId) {
+      await rooms.updateOne(
+        { id: cleanId, creatorId: existing.creatorId },
+        { $set: { creatorId, creatorName: sanitizeString(room.creatorName) } }
+      );
+    }
+
+    await getUsersCollection().updateOne(
+      { id: creatorId },
+      { $addToSet: { createdRooms: cleanId } }
+    );
+  } catch (err: any) {
+    // Two participants can race to claim an unowned room; the loser can ignore
+    // the duplicate-key error because the room now has an owner either way.
+    if (err?.code !== 11000) {
+      console.warn(`Could not claim room ${cleanId}:`, err);
+    }
+  }
+}
+
+/** Hand room ownership to another participant (host migration). */
+export async function transferRoomOwnership(
+  roomId: string,
+  creatorId: string,
+  creatorName: string
+): Promise<void> {
+  const cleanId = sanitizeString(roomId);
+  const cleanCreatorId = sanitizeString(creatorId);
+  if (!cleanId || !cleanCreatorId) return;
+
+  try {
+    const rooms = getRoomsCollection();
+    await rooms.updateOne(
+      { id: cleanId },
+      { $set: { creatorId: cleanCreatorId, creatorName: sanitizeString(creatorName) } }
+    );
+    await getUsersCollection().updateOne(
+      { id: cleanCreatorId },
+      { $addToSet: { createdRooms: cleanId } }
+    );
+  } catch (err) {
+    console.warn(`Could not transfer ownership of room ${cleanId}:`, err);
+  }
 }
 
 export async function getRoomsForUser(userId: string): Promise<SessionRoomMeta[]> {

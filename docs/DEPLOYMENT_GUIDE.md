@@ -157,7 +157,10 @@ VITE_TURN_PASSWORD=your_turn_password
 | `MONGODB_URI` | MongoDB connection URI | Yes | `mongodb://127.0.0.1:27017/whiteboard` |
 | `AI_PROVIDER` | Which AI engine to use: `gemini`, `ollama`, or `fallback`. Unset auto-picks Gemini when `GEMINI_API_KEY` exists, otherwise Ollama when configured | No | auto |
 | `GEMINI_API_KEY` | Google Gemini API key for AI diagram generation | No (optional; uses Ollama or procedural fallback if unset) | `""` |
-| `GEMINI_MODEL` | Gemini model id | No | `gemini-3.8-flash` |
+| `GEMINI_MODEL` | Gemini model id (first link in the failover chain) | No | `gemini-3.8-flash` |
+| `GEMINI_FALLBACK_MODELS` | Comma-separated Gemini models tried when the primary is unavailable; `none` disables Gemini failover | No | `gemini-3.6-flash` |
+| `GEMINI_TIMEOUT_MS` | Per-attempt Gemini request timeout | No | `45000` |
+| `AI_ALLOW_OLLAMA_FALLBACK` | In `auto` mode, fall back to Ollama after all Gemini models fail; set `false` to disable | No | `true` |
 | `OLLAMA_MODEL` | Local Ollama model used for generation | No | `llama3.2` |
 | `OLLAMA_BASE_URL` | Ollama server base URL | No | `http://127.0.0.1:11434` |
 | `OLLAMA_TIMEOUT_MS` | Per-request timeout for local generation | No | `180000` |

@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { AuthUser, SessionRoom } from '../types';
 import { BACKEND_URL } from '../config';
+import { getGuestIdentityId } from '../utils/guestIdentity';
 
 export type { AuthUser, SessionRoom };
 
@@ -333,6 +334,8 @@ export function useAuth() {
     name: string;
     customCode?: string;
     isLocked?: boolean;
+    creatorId?: string;
+    creatorName?: string;
   }): Promise<{ success: boolean; room?: SessionRoom; error?: string }> => {
     try {
       const currentToken = token || localStorage.getItem(TOKEN_KEY);
@@ -364,6 +367,8 @@ export function useAuth() {
           'Content-Type': 'application/json',
           ...(currentToken ? { Authorization: `Bearer ${currentToken}` } : {}),
         },
+        // Anonymous hosts prove ownership with their stable guest identity.
+        body: JSON.stringify({ creatorId: getGuestIdentityId() }),
       });
       const data = await res.json();
       if (!res.ok || !data.success) {

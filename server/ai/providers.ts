@@ -10,8 +10,29 @@ export interface AiProviderInfo {
 }
 
 const DEFAULT_GEMINI_MODEL = "gemini-3.8-flash";
+// Newest Gemini flash tiers can 503 during demand spikes. When that happens the
+// next model in the chain is tried instead of dropping straight to the local
+// procedural engine. Override with GEMINI_FALLBACK_MODELS (comma separated).
+const DEFAULT_GEMINI_FALLBACK_MODELS = ["gemini-3.6-flash"];
 const DEFAULT_OLLAMA_MODEL = "llama3.2";
 const DEFAULT_OLLAMA_BASE_URL = "http://127.0.0.1:11434";
+
+function splitList(value: string | undefined): string[] {
+  if (!value) return [];
+  return value
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+}
+
+function ollamaInfo(): AiProviderInfo {
+  const model = process.env.OLLAMA_MODEL?.trim() || DEFAULT_OLLAMA_MODEL;
+  return { name: "ollama", model, label: "Ollama" };
+}
+
+function geminiInfo(model: string): AiProviderInfo {
+  return { name: "gemini", model, label: prettyGeminiModel(model) };
+}
 
 function prettyGeminiModel(model: string): string {
   const cleaned = model.replace(/^gemini[-_]?/i, "");
@@ -43,33 +64,92 @@ export function resolveAiProvider(): AiProviderInfo | null {
   }
 
   if (requested === "ollama") {
-    return {
-      name: "ollama",
-      model: ollamaModel || DEFAULT_OLLAMA_MODEL,
-      label: "Ollama",
-    };
+    return ollamaInfo();
   }
 
   if (requested === "gemini") {
     if (!geminiKey) return null;
     const model = process.env.GEMINI_MODEL?.trim() || DEFAULT_GEMINI_MODEL;
-    return { name: "gemini", model, label: prettyGeminiModel(model) };
+    return geminiInfo(model);
   }
 
   if (geminiKey) {
     const model = process.env.GEMINI_MODEL?.trim() || DEFAULT_GEMINI_MODEL;
-    return { name: "gemini", model, label: prettyGeminiModel(model) };
+    return geminiInfo(model);
   }
 
   if (ollamaModel || ollamaBaseUrl) {
-    return {
-      name: "ollama",
-      model: ollamaModel || DEFAULT_OLLAMA_MODEL,
-      label: "Ollama",
-    };
+    return ollamaInfo();
   }
 
   return null;
+}
+
+/** Gemini model chain: the configured primary, then GEMINI_FALLBACK_MODELS. */
+function geminiProviderChain(): AiProviderInfo[] {
+  const primary = process.env.GEMINI_MODEL?.trim() || DEFAULT_GEMINI_MODEL;
+  const configured = process.env.GEMINI_FALLBACK_MODELS?.trim();
+  const disabled = /^(none|off|-)$/i.test(configured || "");
+  const fallbacks = disabled
+    ? []
+    : configured
+      ? splitList(configured)
+      : DEFAULT_GEMINI_FALLBACK_MODELS;
+
+  const models: string[] = [];
+  for (const model of [primary, ...fallbacks]) {
+    if (model && !models.includes(model)) models.push(model);
+  }
+  return models.map(geminiInfo);
+}
+
+/**
+ * Ollama as a last resort in `auto` mode. Enabled by default so a Gemini outage
+ * still produces a real diagram instead of the procedural approximation. Set
+ * AI_ALLOW_OLLAMA_FALLBACK=false to keep Gemini-only behaviour.
+ */
+export function ollamaFallbackEnabled(): boolean {
+  return !/^(false|0|off|no)$/i.test((process.env.AI_ALLOW_OLLAMA_FALLBACK || "").trim());
+}
+
+/**
+ * Ordered list of model backends to try for a single AI turn. The first entry is
+ * the preferred engine; the rest are failover candidates. Empty when no model
+ * backend is configured.
+ *
+ * - `AI_PROVIDER=gemini`   -> the Gemini chain only (operator asked for Gemini).
+ * - `AI_PROVIDER=ollama`   -> Ollama only.
+ * - `AI_PROVIDER=fallback` -> empty (procedural engine).
+ * - unset / `auto`         -> Gemini chain, then Ollama (unless disabled).
+ * - no Gemini key          -> Ollama when configured.
+ */
+export function resolveProviderChain(): AiProviderInfo[] {
+  const requested = (process.env.AI_PROVIDER || "").trim().toLowerCase();
+  const geminiKey = process.env.GEMINI_API_KEY?.trim();
+  const ollamaModel = process.env.OLLAMA_MODEL?.trim();
+  const ollamaBaseUrl = process.env.OLLAMA_BASE_URL?.trim();
+
+  if (requested === "none" || requested === "fallback" || requested === "off") {
+    return [];
+  }
+  if (requested === "ollama") {
+    return [ollamaInfo()];
+  }
+  if (requested === "gemini") {
+    return geminiKey ? geminiProviderChain() : [];
+  }
+
+  if (geminiKey) {
+    const chain = geminiProviderChain();
+    if (ollamaFallbackEnabled()) chain.push(ollamaInfo());
+    return chain;
+  }
+
+  if (ollamaModel || ollamaBaseUrl) {
+    return [ollamaInfo()];
+  }
+
+  return [];
 }
 
 export interface AiProviderSummary {
@@ -79,8 +159,13 @@ export interface AiProviderSummary {
 }
 
 /** Human-readable engine description for the client badge / config route. */
-export function getProviderSummary(): AiProviderSummary {
-  const provider = resolveAiProvider();
+export function providerDisplayName(provider: AiProviderInfo): string {
+  return provider.name === "ollama"
+    ? `Ollama · ${provider.model}`
+    : prettyGeminiModel(provider.model);
+}
+
+export function summarizeProvider(provider: AiProviderInfo | null): AiProviderSummary {
   if (!provider) {
     return {
       provider: "fallback",
@@ -91,11 +176,12 @@ export function getProviderSummary(): AiProviderSummary {
   return {
     provider: provider.name,
     model: provider.model,
-    label:
-      provider.name === "ollama"
-        ? `Ollama · ${provider.model}`
-        : prettyGeminiModel(provider.model),
+    label: providerDisplayName(provider),
   };
+}
+
+export function getProviderSummary(): AiProviderSummary {
+  return summarizeProvider(resolveAiProvider());
 }
 
 // ---------------------------------------------------------------------------
@@ -161,7 +247,8 @@ async function callGemini(
   model: string,
   userMessage: string,
   temperature: number,
-  maxRetries = 3
+  maxRetries = 3,
+  timeoutMs = 45_000
 ): Promise<unknown> {
   const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 
@@ -189,7 +276,7 @@ async function callGemini(
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(requestBody),
-        signal: AbortSignal.timeout(45_000),
+        signal: AbortSignal.timeout(timeoutMs),
       });
 
       if (response.status === 429 || response.status === 503) {
@@ -225,6 +312,16 @@ async function callGemini(
       return extractJson(text);
     } catch (err: unknown) {
       const error = err as Error & { fatal?: boolean };
+      if (error.name === "TimeoutError" || error.name === "AbortError") {
+        const timeoutError = new Error(
+          `Gemini ${model} did not respond within ${Math.round(timeoutMs / 1000)}s.`
+        ) as Error & { fatal?: boolean };
+        if (attempt === maxRetries) throw timeoutError;
+        console.warn(
+          `[AI Retry]: ${timeoutError.message} Retrying (attempt ${attempt + 1}/${maxRetries})...`
+        );
+        continue;
+      }
       if (attempt === maxRetries || error.fatal) throw error;
       const delayMs = Math.min(1500 * attempt, 5000) + Math.floor(Math.random() * 500);
       console.warn(
@@ -379,10 +476,18 @@ async function callOllama(
 // Public dispatch
 // ---------------------------------------------------------------------------
 
+export interface AiCallOptions {
+  /** How many times to retry transient failures against this model. */
+  maxRetries?: number;
+  /** Per-attempt timeout for Gemini requests. */
+  timeoutMs?: number;
+}
+
 export async function callAiModel(
   provider: AiProviderInfo,
   userMessage: string,
-  temperature: number
+  temperature: number,
+  options: AiCallOptions = {}
 ): Promise<unknown> {
   if (provider.name === "ollama") {
     return callOllama(provider.model, userMessage, temperature);
@@ -392,5 +497,12 @@ export async function callAiModel(
   if (!apiKey) {
     throw new Error("GEMINI_API_KEY is not configured.");
   }
-  return callGemini(apiKey, provider.model, userMessage, temperature);
+  return callGemini(
+    apiKey,
+    provider.model,
+    userMessage,
+    temperature,
+    Math.max(1, options.maxRetries ?? 3),
+    options.timeoutMs ?? numberFromEnv("GEMINI_TIMEOUT_MS", 45_000, 10_000, 180_000)
+  );
 }

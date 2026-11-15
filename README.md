@@ -136,6 +136,10 @@ AI_PROVIDER=
 # Google Gemini API Key for AI Diagram & Mind Map Generation
 GEMINI_API_KEY=your_gemini_api_key_here
 GEMINI_MODEL=gemini-3.8-flash
+# Models tried in order if the primary is rate-limited or unavailable.
+GEMINI_FALLBACK_MODELS=gemini-3.6-flash
+# Set to false to stop auto mode from falling back to a local Ollama model.
+AI_ALLOW_OLLAMA_FALLBACK=true
 
 # Local Ollama engine (no API key needed). See "Local AI with Ollama" below.
 OLLAMA_BASE_URL=http://127.0.0.1:11434
@@ -187,6 +191,35 @@ Tuning variables (all optional):
 
 If Ollama is down or returns an unusable graph, the server automatically falls
 back to the built-in offline generator, so the board still gets a diagram.
+
+#### Model failover (optional)
+
+An AI turn walks an ordered chain of backends, so a single unavailable model
+never drops the board straight to the offline generator:
+
+| Mode | Chain |
+| :--- | :--- |
+| unset / `auto` with a Gemini key | `GEMINI_MODEL` → `GEMINI_FALLBACK_MODELS` → Ollama |
+| `AI_PROVIDER=gemini` | `GEMINI_MODEL` → `GEMINI_FALLBACK_MODELS` |
+| `AI_PROVIDER=ollama` | Ollama only |
+| `AI_PROVIDER=fallback` | Offline generator only |
+
+`GEMINI_FALLBACK_MODELS` is a comma-separated list (default
+`gemini-3.6-flash`); set it to `none` to keep a single Gemini model. Ollama is
+the last resort in `auto` mode even when `OLLAMA_MODEL` is not set — it uses
+`llama3.2` at `http://127.0.0.1:11434` by default. If Ollama is not running the
+attempt fails in milliseconds, so it costs nothing. Disable it with
+`AI_ALLOW_OLLAMA_FALLBACK=false`.
+
+When a failover happens the generated diagram reports the engine that actually
+answered, and the chat shows a notice such as:
+
+> Gemini 3.8 Flash unavailable — Ollama · llama3.2 produced this diagram.
+
+Failover candidates are tried once each (`GEMINI_TIMEOUT_MS`, default `45000`,
+bounds a single attempt) so a 503 spike resolves quickly instead of retrying a
+dead model for minutes. A single-backend chain keeps the normal 3 retries.
+
 The active engine is shown in the generation dialog badge and exposed at
 `GET /api/ai/config`.
 

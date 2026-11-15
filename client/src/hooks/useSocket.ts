@@ -2,42 +2,21 @@ import { useEffect, useState, useRef, useCallback } from 'react';
 import { io, Socket } from 'socket.io-client';
 import { CanvasElement, RemoteUser, VoteToClearState, ToolType, Point, AuthUser } from '../types';
 import { BACKEND_URL } from '../config';
-
-const USER_COLORS = [
-  '#ef4444', // Red
-  '#3b82f6', // Blue
-  '#10b981', // Emerald
-  '#f59e0b', // Amber
-  '#8b5cf6', // Violet
-  '#ec4899', // Pink
-  '#06b6d4', // Cyan
-];
-
-const ANIMAL_NAMES = ['Fox', 'Panda', 'Otter', 'Falcon', 'Lynx', 'Koala', 'Owl', 'Badger', 'Dolphin'];
+import {
+  getGuestIdentity,
+  saveGuestIdentityColor,
+  saveGuestIdentityName,
+} from '../utils/guestIdentity';
+import { loadSoloBoard, saveSoloBoard } from '../utils/soloStorage';
 
 function getInitialUser() {
   if (typeof window === 'undefined') {
     return { id: 'user_ssr', name: 'Artist Guest', color: '#3b82f6' };
   }
 
-  // Generate a distinct tab session ID to ensure seamless collaboration across multiple tabs/windows
-  let tabId = (window as any).__collab_tab_session_id;
-  if (!tabId) {
-    tabId = 'u_' + Math.random().toString(36).substring(2, 9);
-    (window as any).__collab_tab_session_id = tabId;
-  }
-
-  const storedName = sessionStorage.getItem('collab_user_name');
-  const storedColor = sessionStorage.getItem('collab_user_color');
-
-  const animal = ANIMAL_NAMES[Math.floor(Math.random() * ANIMAL_NAMES.length)];
-  const name = storedName || `Artist ${animal}`;
-  const color = storedColor || USER_COLORS[Math.floor(Math.random() * USER_COLORS.length)];
-
-  sessionStorage.setItem('collab_user_name', name);
-  sessionStorage.setItem('collab_user_color', color);
-
-  return { id: tabId, name, color };
+  // Stable per-browser identity: host rights, kicks and view-only permissions
+  // are persisted against this id, so it must survive reloads and new tabs.
+  return getGuestIdentity();
 }
 
 export function generateRandomRoomCode(): string {
@@ -78,11 +57,24 @@ export function getRoomIdFromUrl(): string | null {
 export function setRoomIdInUrl(roomId: string | null) {
   if (typeof window === 'undefined') return;
   const url = new URL(window.location.href);
+  const rawHash = url.hash.replace(/^#/, '');
+
   if (roomId) {
     url.searchParams.set('room', roomId);
   } else {
     url.searchParams.delete('room');
+    // Also clear legacy hash room links (e.g. #ABCD-EFG) so a reload does not
+    // silently rejoin the room the user just left.
+    if (rawHash && !rawHash.includes('=')) {
+      url.hash = '';
+    } else if (rawHash.includes('room=')) {
+      const hashParams = new URLSearchParams(rawHash);
+      hashParams.delete('room');
+      const remaining = hashParams.toString();
+      url.hash = remaining ? `#${remaining}` : '';
+    }
   }
+
   window.history.replaceState({}, '', url.toString());
 }
 
@@ -131,6 +123,9 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
     Record<string, { strokeId: string; userId: string; points: Point[]; color: string; size: number; isHighlighter?: boolean }>
   >({});
   const [notifications, setNotifications] = useState<{ id: string; text: string; type: 'info' | 'success' | 'warning' }[]>([]);
+  // Monotonic counter so consumers can react to an explicit board clear
+  // (including remote/voted clears) without watching the element map.
+  const [boardClearCount, setBoardClearCount] = useState(0);
 
   const socketRef = useRef<Socket | null>(null);
   const isSoloMigrationRef = useRef<boolean>(false);
@@ -141,6 +136,9 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
   authTokenRef.current = authToken;
   const isHostRef = useRef<boolean>(isHost);
   isHostRef.current = isHost;
+  const soloHydratedRef = useRef<boolean>(false);
+  const soloIdentityRef = useRef<string | null>(null);
+  const soloNoticeShownRef = useRef<boolean>(false);
 
   // Sync currentUser with the authenticated account (or fall back to the tab
   // guest identity on logout) and re-announce the new identity to the server.
@@ -189,6 +187,87 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
   const usersRef = useRef<Record<string, RemoteUser>>(users);
   usersRef.current = users;
 
+  const currentUserId = currentUser.id;
+
+  // Solo canvas restore: runs when entering solo mode and when the identity
+  // changes (guest -> account). StrictMode-safe because the load is idempotent
+  // and stale async results are discarded.
+  useEffect(() => {
+    if (roomId) return;
+    let cancelled = false;
+    soloHydratedRef.current = false;
+    const identityId = currentUserId;
+    const previousIdentity = soloIdentityRef.current;
+
+    (async () => {
+      let board = await loadSoloBoard(identityId);
+
+      // Carry a guest's personal board over to the account they just signed
+      // into (without deleting the original snapshot).
+      if (
+        (!board || Object.keys(board).length === 0) &&
+        previousIdentity &&
+        previousIdentity !== identityId
+      ) {
+        const previousBoard = await loadSoloBoard(previousIdentity);
+        if (previousBoard && Object.keys(previousBoard).length > 0) {
+          board = previousBoard;
+          await saveSoloBoard(identityId, previousBoard);
+        }
+      }
+
+      if (cancelled) return;
+      soloIdentityRef.current = identityId;
+      if (board && Object.keys(board).length > 0) {
+        setElements(board);
+        elementsRef.current = board;
+        if (!soloNoticeShownRef.current) {
+          soloNoticeShownRef.current = true;
+          addNotification('Restored your saved solo board.', 'info');
+        }
+      }
+      soloHydratedRef.current = true;
+    })().catch(() => {
+      if (cancelled) return;
+      soloIdentityRef.current = identityId;
+      soloHydratedRef.current = true;
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [roomId, currentUserId, addNotification]);
+
+  // Debounced solo autosave. Skips the initial snapshot until restore finished
+  // so an empty first render cannot erase the stored board.
+  useEffect(() => {
+    if (roomId || !soloHydratedRef.current) return;
+    const identityId = currentUserId;
+    const timer = setTimeout(() => {
+      void saveSoloBoard(identityId, elements);
+    }, 450);
+    return () => clearTimeout(timer);
+  }, [elements, roomId, currentUserId]);
+
+  // Flush a final snapshot when the tab is hidden or closed.
+  useEffect(() => {
+    if (roomId) return;
+    const flush = () => {
+      if (soloHydratedRef.current) {
+        void saveSoloBoard(currentUserId, elementsRef.current);
+      }
+    };
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') flush();
+    };
+    window.addEventListener('beforeunload', flush);
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => {
+      window.removeEventListener('beforeunload', flush);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    };
+  }, [roomId, currentUserId]);
+
   // Coalesce high-frequency element updates (drag / resize / rotate) into at
   // most one socket message per element per ~50ms window.
   const pendingElementUpdatesRef = useRef<Map<string, CanvasElement>>(new Map());
@@ -221,12 +300,24 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
       setUsers({});
       setLiveStrokes({});
       setVoteToClear(null);
+      setRoomName('');
+      setCreatorId('');
+      setCreatorName('');
       return;
     }
 
     setRoomIdInUrl(roomId);
     setIsKicked(false);
     setKickedReason(null);
+    // Do not inherit the previous room's role while the handshake is in flight;
+    // `room-init` grants write access once the server has authorised us.
+    setIsHost(false);
+    setCanWrite(false);
+    setIsLocked(false);
+    setRoomName('');
+    setCreatorId('');
+    setCreatorName('');
+    setVoteToClear(null);
 
     const socket = io(BACKEND_URL || undefined, {
       transports: ['polling', 'websocket'],
@@ -242,6 +333,7 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
     socket.on('connect', () => {
       connectErrorNotifiedRef.current = false;
       setIsConnected(true);
+      // Also runs after a reconnect, so the room membership is restored.
       socket.emit('join-room', {
         roomId,
         user: currentUserRef.current,
@@ -255,15 +347,6 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
         connectErrorNotifiedRef.current = true;
         addNotification('Realtime connection lost — reconnecting...', 'warning');
       }
-    });
-
-    socket.on('reconnect', () => {
-      setIsConnected(true);
-      socket.emit('join-room', {
-        roomId,
-        user: currentUserRef.current,
-        token: authTokenRef.current || undefined,
-      });
     });
 
     socket.on('disconnect', () => {
@@ -591,6 +674,7 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
       pendingElementUpdatesRef.current.clear();
       setElements({});
       setLiveStrokes({});
+      setBoardClearCount((count) => count + 1);
       if (!info.wasVoted) {
         addNotification(`${info.initiatorName} cleared the whiteboard`, 'info');
       }
@@ -721,6 +805,7 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
     pendingElementUpdatesRef.current.clear();
     setElements({});
     setLiveStrokes({});
+    setBoardClearCount((count) => count + 1);
     if (socketRef.current?.connected && roomId) {
       socketRef.current.emit('clear-board-direct');
     }
@@ -729,7 +814,7 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
   const updateUserName = useCallback((name: string) => {
     const trimmed = name.trim();
     if (!trimmed) return;
-    sessionStorage.setItem('collab_user_name', trimmed);
+    saveGuestIdentityName(trimmed);
     const updatedUser = { ...currentUserRef.current, name: trimmed };
     setCurrentUser(updatedUser);
     // Re-join with updated identity
@@ -743,7 +828,7 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
   }, [roomId]);
 
   const updateUserColor = useCallback((color: string) => {
-    sessionStorage.setItem('collab_user_color', color);
+    saveGuestIdentityColor(color);
     const updatedUser = { ...currentUserRef.current, color };
     setCurrentUser(updatedUser);
     if (socketRef.current?.connected && roomId) {
@@ -758,27 +843,54 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
   const switchRoom = useCallback((newRoomId: string | null) => {
     isSoloMigrationRef.current = false;
     if (!newRoomId) {
+      if (roomId) {
+        // Leaving a multiplayer room: reset every piece of stale room state so
+        // admin controls from the old room cannot leak into the solo canvas.
+        setRoomName('');
+        setCreatorId('');
+        setCreatorName('');
+        setIsLocked(false);
+        setIsKicked(false);
+        setKickedReason(null);
+        setVoteToClear(null);
+      }
       setElements({});
       elementsRef.current = {};
       setLiveStrokes({});
       setUsers({});
+      setIsHost(true);
+      setCanWrite(true);
       setRoomId(null);
       setRoomIdInUrl(null);
       return;
     }
     const cleaned = newRoomId.trim().toUpperCase().replace(/[^A-Z0-9_-]/g, '-');
     if (!cleaned || cleaned === roomId) return;
+    // Leaving solo: persist the latest canvas before it is replaced by the
+    // (possibly empty) room state.
+    if (!roomId) {
+      void saveSoloBoard(currentUserRef.current.id, elementsRef.current);
+    }
     // Only clear the current board once we know we are actually switching rooms.
     setElements({});
     elementsRef.current = {};
     setLiveStrokes({});
     setUsers({});
+    setRoomName('');
+    setCreatorId('');
+    setCreatorName('');
+    setIsLocked(false);
+    setIsHost(false);
+    setCanWrite(false);
+    setVoteToClear(null);
     setRoomId(cleaned);
     setRoomIdInUrl(cleaned);
   }, [roomId]);
 
   const convertToMultiplayerRoom = useCallback((customCode?: string): string => {
     isSoloMigrationRef.current = true;
+    // Flush the personal board before it becomes a room snapshot.
+    void saveSoloBoard(currentUserRef.current.id, elementsRef.current);
     const code = customCode ? customCode.trim().toUpperCase().replace(/[^A-Z0-9_-]/g, '-') : generateRandomRoomCode();
     setRoomId(code);
     setRoomIdInUrl(code);
@@ -834,6 +946,7 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
     liveStrokes,
     voteToClear,
     notifications,
+    boardClearCount,
     socket: socketRef.current,
     emitStrokeLiveStart,
     emitStrokeLivePoint,
