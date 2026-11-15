@@ -1,6 +1,6 @@
 # System Architecture & Technical Design
 
-This document details the architectural design, communication protocols, data models, and real-time synchronization pipelines of **Whiteboard.io**.
+This document details the architectural design, communication protocols, data models, persistence layers, and real-time synchronization pipelines of **Whiteboard.io**.
 
 ---
 
@@ -15,18 +15,25 @@ Whiteboard.io is built as a real-time, distributed collaborative workspace consi
 │  ┌───────────────────────┐   ┌───────────────────────┐   ┌──────────────┐  │
 │  │   Canvas 2D Engine    │   │  React State / Hooks  │   │ Web Audio    │  │
 │  │  (Strokes, Shapes,    │◄──┤ (useSocket, useAuth,  ├───┤ AnalyserNode │  │
-│  │   Sticky Notes, Text) │   │     useVoiceChat)     │   │ (Microphone) │  │
-│  └───────────────────────┘   └───────────┬───────────┘   └──────────────┘  │
+│  │   Wires, Sticky, Text)│   │  useVoiceChat, Theme) │   │ (Microphone) │  │
+│  └───────────▲───────────┘   └───────────┬───────────┘   └──────────────┘  │
+│              │                           │                                 │
+│  ┌───────────┴───────────┐   ┌───────────┴───────────┐                     │
+│  │  Spatial Index (2D)   │   │  Client Persistence   │                     │
+│  │  (AABB Viewport Cull, │   │ (soloStorage, recents,│                     │
+│  │   Hit/Select Tests)   │   │  guestId, aiSessions) │                     │
+│  └───────────────────────┘   └───────────────────────┘                     │
 └──────────────────────────────────────────┼──────────────────────────────────┘
                                            │
                         ┌──────────────────┴──────────────────┐
                         │                                     │
              HTTP / REST (JSON)                    WebSocket (Socket.io)
-        - Auth (Register/Login/Guest)         - Real-time Drawing Sync
+        - Auth (Register/Login/Guest)         - Real-time Drawing & Wire Sync
         - Google OAuth Popups/Redirect        - Multiplayer Live Cursors
-        - Room Metadata & Management          - WebRTC Mesh Audio Signaling
-        - Health & Database Telemetry         - Admin Permissions & Kick
-                        │                     - Vote-to-Clear Consensus
+        - Room Metadata & Recent Rooms        - WebRTC Mesh Audio Signaling
+        - AI Config, Generate & Revise        - Admin Governance & Lock
+        - Health & Database Telemetry         - Vote-to-Clear Consensus
+                        │                                     │
                         ▼                                     ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                            BACKEND SERVER (Node.js)                         │
@@ -36,18 +43,19 @@ Whiteboard.io is built as a real-time, distributed collaborative workspace consi
 │  │  (CORS, Rate Limiting, Health)  │   │   (Room isolation, Auth guard)  │  │
 │  └────────────────┬────────────────┘   └────────────────┬────────────────┘  │
 │                   │                                     │                   │
-│                   └──────────────────┬──────────────────┘                   │
-│                                      ▼                                      │
-│                        ┌───────────────────────────┐                        │
-│                        │ In-Memory Room State Map  │                        │
-│                        │ (Live users, active vote, │                        │
-│                        │  in-memory elements cache)│                        │
-│                        └─────────────┬─────────────┘                        │
-└──────────────────────────────────────┼──────────────────────────────────────┘
-                                       │
-                      Debounced Persist & Sync Queries
-                                       │
-                                       ▼
+│                   ├─────────────────────────────────────┤                   │
+│                   ▼                                     ▼                   │
+│  ┌─────────────────────────────────┐   ┌─────────────────────────────────┐  │
+│  │      AI Engine Pipeline         │   │    In-Memory Room State Map     │  │
+│  │ (Failover Chain: Gemini 3.8/3.6 │   │ (Live users, active vote,       │  │
+│  │  -> Ollama -> Procedural, Gate, │   │  in-memory elements dictionary) │  │
+│  │  Layout Engines & Revise API)   │   └────────────────┬────────────────┘  │
+│  └─────────────────────────────────┘                    │                   │
+└─────────────────────────────────────────────────────────┼───────────────────┘
+                                                          │
+                                         Debounced Persist & Sync Queries
+                                                          │
+                                                          ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                               MONGODB DATABASE                              │
 │                                                                             │
@@ -61,7 +69,7 @@ Whiteboard.io is built as a real-time, distributed collaborative workspace consi
 
 ---
 
-## 2. Real-Time Synchronization Engine
+## 2. Real-Time Synchronization & Performance Engine
 
 ### In-Memory State & Conflict Resolution
 The server maintains an in-memory `Map<string, RoomData>` storing:
@@ -72,11 +80,18 @@ The server maintains an in-memory `Map<string, RoomData>` storing:
 ### Optimistic UI & Live Stroke Streaming
 Drawing strokes in collaborative apps require zero perceived latency:
 1. **Local Optimistic Draw**: As the user drags the mouse/stylus, points are immediately rendered to the local canvas.
-2. **Live Point Streaming**: At regular intervals during pointer movement, lightweight `stroke-live-point` packets are emitted over WebSockets so remote users see strokes appearing point-by-point in real time.
-3. **Element Finalization**: On pointer release (`pointerup`), the completed `CanvasElement` is finalized and broadcast via `element-create`. The temporary live stroke points are cleaned up and replaced by the authoritative element.
+2. **Live Point Streaming**: Lightweight `stroke-live-point` packets are emitted over WebSockets so remote users see strokes appearing point-by-point in real time.
+3. **Element Finalization & RDP Simplification**: On pointer release (`pointerup`), strokes are simplified using the Ramer-Douglas-Peucker algorithm to remove redundant collinear points, finalized as a `CanvasElement`, and broadcast via `element-create`.
+
+### 2D Spatial Indexing
+To keep rendering and selection fast ($O(\log N + K)$) when a board contains thousands of elements:
+- A 2D spatial grid partitions world space into uniform cells.
+- Elements are indexed by axis-aligned bounding boxes (AABBs).
+- The canvas engine only iterates through and renders elements within the active camera frustum.
+- Hit detection, lasso selection, and eraser collisions query the spatial index directly rather than executing linear full-canvas scans.
 
 ### Debounced Database Persistence
-To prevent MongoDB write bottlenecks during high-frequency drawing:
+To prevent database write bottlenecks during high-frequency drawing:
 - Incoming element modifications are applied immediately to the in-memory room map.
 - A debounce timer (500ms) accumulates changes before writing the aggregated canvas state to MongoDB.
 - Direct board deletions or batch deletes trigger immediate database synchronization.
@@ -97,28 +112,60 @@ Audio communication runs over a decentralized **WebRTC Mesh Network**:
 
 ---
 
-## 4. Security & Authentication Architecture
+## 4. Multi-Tier Persistence & Identity Continuity
+
+Whiteboard.io provides end-to-end data durability across cloud and local storage:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                           PERSISTENCE ARCHITECTURE                          │
+│                                                                             │
+│  Multiplayer Cloud Storage (MongoDB)     Solo & Client Local Storage        │
+│  ┌──────────────────────────────────┐   ┌────────────────────────────────┐  │
+│  │ • users, tokens (TTL 30d)        │   │ • soloStorage.ts (Autosave)    │  │
+│  │ • rooms, elements, room_elements │   │ • guestIdentity.ts (UUID/Name) │  │
+│  │ • Native connection pool & retry │   │ • recentRooms.ts (LRU history) │  │
+│  │ • In-memory fallback if no Mongo │   │ • aiSessionStorage.ts (Chat)   │  │
+│  └──────────────────────────────────┘   └────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+1. **Multiplayer Rooms (MongoDB)**:
+   - Handled via `server/db.ts` with connection pooling and automated index creation.
+   - Degrades gracefully to in-memory store if `MONGODB_URI` is absent (for lightweight testing or offline development).
+2. **Solo Whiteboard Storage (`soloStorage.ts`)**:
+   - Autosaves offline canvas work directly to browser `localStorage` with a 300ms debounce.
+   - Restores user work upon page reload without requiring room creation.
+3. **Guest Identity Persistence (`guestIdentity.ts`)**:
+   - Assigns a stable UUID, animal handle, and color to guest users.
+   - Persists in `localStorage` so users maintain the same identity when switching between rooms.
+4. **Recent Rooms Tracker (`recentRooms.ts`)**:
+   - Tracks visited room IDs, timestamps, and metadata to provide a 1-click room launcher.
+5. **AI Session Memory (`aiSessionStorage.ts`)**:
+   - Stores per-room diagram revision conversations and generated graphs across browser reloads.
+
+---
+
+## 5. Security & Authentication Architecture
 
 ### Identity Models
-The application supports three authentication tiers:
 1. **Registered Account**: Username, email, password hashed with `crypto.pbkdf2Sync` (10,000 iterations, 64-byte salt, sha512).
 2. **Google OAuth 2.0**: Direct federated authentication using Google's OAuth 2.0 UserInfo endpoint. Supports popup messaging and cross-domain redirect fallback via `#auth_token=`.
 3. **Anonymous Guest Session**: Instant ephemeral guest account with animal-themed names and color assignments. Guest sessions expire automatically after 7 days via MongoDB TTL indexes.
 
 ### Security Layers
-- **Rate Limiting**: Custom token-bucket rate limiter for auth endpoints (`/api/auth/register`, `/api/auth/login`, `/api/auth/guest`) protecting against brute-force attacks.
+- **Rate Limiting**: Custom token-bucket rate limiter for auth endpoints (`/api/auth/register`, `/api/auth/login`, `/api/auth/guest`) and AI endpoints (`/api/ai/generate-diagram`, `/api/ai/revise-diagram`).
 - **Security Headers**: Explicit enforcement of `X-Content-Type-Options: nosniff`, `X-Frame-Options: SAMEORIGIN`, `Referrer-Policy: strict-origin-when-cross-origin`, and `X-XSS-Protection`.
 - **CORS Allowlist**: Dynamic origin resolution honoring `APP_URL`, `CLIENT_URL`, and local dev origins.
-- **Input Sanitization**: Malformed JSON guards and HTML escaping on OAuth callback error responses.
+- **Input Sanitization**: Malformed JSON guards, character length truncations (prompt: 1200 chars), and HTML escaping on OAuth callback error responses.
 
 ---
 
-## 5. MongoDB Data Schemas & Indexes
+## 6. MongoDB Data Schemas & Indexes
 
-All MongoDB collections are automatically initialized with optimized compound indexes:
+All MongoDB collections are automatically initialized with compound indexes:
 
 ### `users` Collection
-Stores registered and Google-linked accounts.
 ```typescript
 interface StoredUserDoc {
   id: string;              // Unique UUID (Index: unique)
@@ -137,7 +184,6 @@ interface StoredUserDoc {
 ```
 
 ### `tokens` Collection
-Session authentication tokens.
 ```typescript
 interface SessionTokenDoc {
   token: string;           // SHA-256 token string (Index: unique)
@@ -148,7 +194,6 @@ interface SessionTokenDoc {
 ```
 
 ### `rooms` Collection
-Persisted session room metadata.
 ```typescript
 interface SessionRoomDoc {
   id: string;              // Room code (e.g., 'ABC-XYZ') (Index: unique)
@@ -161,7 +206,6 @@ interface SessionRoomDoc {
 ```
 
 ### `elements` Collection
-Aggregated room canvas elements.
 ```typescript
 interface RoomElementsDoc {
   roomId: string;          // Room ID (Index: unique)
@@ -172,64 +216,70 @@ interface RoomElementsDoc {
 
 ---
 
-## 6. AI Diagram Engine (Gemini or Local Ollama) & 5-Layer Rate-Limit Shield
+## 7. AI Diagram Engine & Model Failover Pipeline
 
-Whiteboard.io includes an integrated AI diagram generation pipeline (`server/ai/`). The default cloud engine is **Google Gemini 3.8 Flash**, and the same pipeline can run fully offline against a local **Ollama** model. `server/ai/providers.ts` resolves the active engine from the environment (`AI_PROVIDER`, `GEMINI_API_KEY`, `OLLAMA_MODEL`, `OLLAMA_BASE_URL`), exposes it at `GET /api/ai/config`, and dispatches structured-output calls to either backend. Users can describe ideas in plain English and automatically receive fully styled, interactive canvas elements (mind maps, flowcharts, Kanban/SWOT boards, and architecture diagrams) with real connectors and labelled branches.
-
-Each AI turn walks a **failover chain** rather than a single model: `GEMINI_MODEL` → `GEMINI_FALLBACK_MODELS` (default `gemini-3.6-flash`) → Ollama in `auto` mode. A `503 UNAVAILABLE` or timeout on the preferred model therefore continues with the next real model instead of degrading to the procedural generator. Chain candidates are attempted once each so an upstream spike resolves in seconds; the payload reports the backend that actually answered and attaches a notice naming the skipped engines. The same chain drives both generation and `POST /api/ai/revise-diagram`.
-
-
-The model returns a semantic **graph** (nodes + edges), not coordinates. The server normalizes it, runs a quality gate (with one retry when output is too sparse or disconnected), then computes layout (layered DAG, architecture lanes, radial mind map, or brainstorm columns) and emits real `ShapeElement`/`StickyNote`/`WireElement` objects. A stateless `POST /api/ai/revise-diagram` endpoint accepts the current graph plus an instruction and returns the complete revised graph, which the client diffs against the session's `ai_<sessionId>_` elements and applies as a single undo step. Both backends return JSON constrained by the shared `GRAPH_RESPONSE_SCHEMA` (Gemini `responseSchema`, Ollama `format`).
-
-### AI Generation Flow
+Whiteboard.io includes an enterprise-grade AI diagram synthesis pipeline (`server/ai/`):
 
 ```
 ┌─────────────────┐       POST /api/ai/generate-diagram       ┌────────────────────────┐
 │  Client Browser │ ─────────────────────────────────────────►│  Express REST Handler  │
 │ (AiGenerateModal│◄───────────────────────────────────────── │  (10 req/min IP limit) │
-└────────┬────────┘      JSON CanvasElement[] Batch           └───────────┬────────────┘
-         │                                                                │
-         │ emitElementsBatchCreate                                        ▼
-         ▼                                                    ┌────────────────────────┐
-┌─────────────────┐                                           │  In-Memory 2hr Cache   │
-│ Socket.io Relay │                                           │ (Matches prompt+style) │
-│ (Room broadcast)│                                           └───────────┬────────────┘
-└────────┬────────┘                                                       │ (Cache miss)
+│  or AiChatPanel)│      JSON CanvasElement[] Batch           └───────────┬────────────┘
+└────────┬────────┘                                                       │
          │                                                                ▼
-         ▼                                                    ┌────────────────────────┐
-┌─────────────────┐                                           │ Outbound Request Queue │
-│ All Peers in    │                                           │ (Enforces 3000ms delay)│
-│ Collaborative   │                                           └───────────┬────────────┘
-│ Room Viewport   │                                                       │
-└─────────────────┘                                                       ▼
-                                                              ┌────────────────────────┐
-                                                              │ Engine Dispatch        │
-                                                              │ Gemini / Ollama        │
-                                                              │ (Exponential Backoff)  │
-                                                              └───────────┬────────────┘
-                                                                          │ (If offline / 429)
-                                                                          ▼
-                                                              ┌────────────────────────┐
-                                                              │  Procedural Fallback   │
-                                                              │   Synthesis Engine     │
-                                                              └────────────────────────┘
+         │ emitElementsBatchCreate                                    ┌────────────────────────┐
+         ▼                                                            │  In-Memory 2hr Cache   │
+┌─────────────────┐                                                   │ (Matches prompt+style) │
+│ Socket.io Relay │                                                   └───────────┬────────────┘
+│ (Room broadcast)│                                                               │ (Cache miss)
+└────────┬────────┘                                                               ▼
+         │                                                            ┌────────────────────────┐
+         ▼                                                            │ Outbound Request Queue │
+┌─────────────────┐                                                   │ (Enforces 3000ms delay)│
+│ All Peers in    │                                                   └───────────┬────────────┘
+│ Collaborative   │                                                               │
+│ Room Viewport   │                                                               ▼
+└─────────────────┘                                                   ┌────────────────────────┐
+                                                                      │ AI Model Failover Chain│
+                                                                      │ Gemini 3.8 Flash       │
+                                                                      │   ▼ (on timeout / 503) │
+                                                                      │ Gemini 3.6 Flash       │
+                                                                      │   ▼ (on failure)       │
+                                                                      │ Local Ollama (llama3.2)│
+                                                                      └───────────┬────────────┘
+                                                                                  │ (If all fail)
+                                                                                  ▼
+                                                                      ┌────────────────────────┐
+                                                                      │  Procedural Fallback   │
+                                                                      │   Synthesis Engine     │
+                                                                      └────────────────────────┘
 ```
 
-### 5-Layer Rate-Limit Shield Architecture
+### AI Model Failover Chain
+An AI turn walks an ordered chain of backends:
+- `GEMINI_MODEL` (default: `gemini-3.8-flash`)
+- `GEMINI_FALLBACK_MODELS` (default: `gemini-3.6-flash`)
+- Local **Ollama** model (`llama3.2` at `http://127.0.0.1:11434`)
+- Offline **Procedural Engine** (deterministic diagram synthesis)
 
-Google Gemini's free tier has strict concurrency and Requests-Per-Minute (RPM) limits (~15 RPM). To prevent rate limit exhaustion (`HTTP 429 Resource Exhausted`) and guarantee 100% uptime for collaborative sessions, the backend implements a **5-layer defensive shield**:
+If a Gemini model suffers a `503 Service Unavailable` or transient timeout, the request immediately fails over to the next candidate model instead of failing the user or degrading to offline shapes. The payload reports which model actually answered and attaches a user-facing notice.
 
-| Layer | Mechanism | Implementation Detail |
-| :--- | :--- | :--- |
-| **Layer 1: IP Rate Limiting** | Express In-Memory Token Limiter | Restricts clients to a maximum of **10 AI diagram requests per minute per IP address** (`server/index.ts`). |
-| **Layer 2: Response Caching** | Normalizing In-Memory Cache (2hr TTL) | Caches generated graphs using a normalized key `schema|provider|model|type|detail|direction|lowercase_prompt`. Repeated prompts (e.g. popular templates) return immediately in **<1ms** with zero model calls. |
-| **Layer 3: Request Pacing Queue** | Serial FIFO Promise Queue | Queues all outbound calls to the active engine and enforces an inter-call spacing window — **3000ms** for Gemini, `OLLAMA_MIN_INTERVAL_MS` (default 250ms) for local Ollama. This prevents simultaneous users from triggering burst spikes. |
-| **Layer 4: Exponential Backoff & Retry** | Jittered Retry Loop | If Gemini returns `429 Too Many Requests` or `503 Service Unavailable`, the queue automatically pauses and retries up to 3 times with exponential backoff (`1500ms`, `3000ms`, `6000ms`). Local Ollama calls use a single attempt with a long `OLLAMA_TIMEOUT_MS` (default 180s) to absorb model loading. |
-| **Layer 5: Procedural Fallback Engine** | Offline Algorithmic Diagram Synthesis | If no engine is configured, if retries are exhausted, or if the model backend is down, the system transparently falls back to a deterministic procedural generator. The user always receives a clean, connected diagram without any application error. |
+### Semantic Graph Representation & Quality Gate
+1. The AI model returns an abstract semantic graph constrained by JSON Schema:
+   - `nodes`: Unique ID, human label, category (`service`, `database`, `step`, `concept`, etc.), and role description.
+   - `edges`: Source ID, target ID, relationship label, and optional style.
+2. **Quality Gate**: The graph is inspected for node counts and edge connectivity. If the output is sparse or disconnected, a targeted 1-turn retry is automatically executed.
+3. **Layout Engines (`server/ai/layout.ts`)**:
+   - Layered Sugiyama DAG layout for flowcharts.
+   - Radial hub-and-spoke tree layout for mind maps.
+   - Column grid layout for brainstorm / Kanban boards.
+   - Swimlane tiered layout for cloud and system architecture diagrams.
+4. **Smart Connector Generation (`server/ai/elements.ts`)**:
+   - Shapes are emitted with anchor snapping.
+   - Relational `wire` elements with cubic Bézier routing connect shapes seamlessly.
 
-### Diagram Synthesis Styles & Structured Output
-The generator maps natural language into specific graph topologies:
-- **Mind Map (`mindmap`)**: Radial tree layout with a central topic node, colored primary branches, and secondary sub-topic nodes with directional arrows.
-- **Flowchart (`flowchart`)**: Sequential top-down or left-to-right DAG with start/end terminals, process rectangles, decision diamonds, and labeled connectors.
-- **Sticky Board (`brainstorm`)**: Kanban/SWOT matrix with themed column headers and color-coded sticky notes organized in a 2D grid.
-- **System Architecture (`architecture`)**: Layered architectural schematic depicting client tiers, API gateways, microservices, messaging queues, and databases with interconnecting bus lines.
+### Conversational Diagram Revision (`/api/ai/revise-diagram`)
+The server supports interactive diagram editing:
+- Client transmits current graph structure, conversation history, and new natural language instructions.
+- The AI model computes additions, modifications, and deletions.
+- Client applies differential updates atomically as an undo/redo checkpoint on the whiteboard.

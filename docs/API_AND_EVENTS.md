@@ -15,7 +15,7 @@ All request and response payloads use `application/json`.
 ### System & Health
 
 #### `GET /health` or `GET /api/health`
-Checks server status, uptime, MongoDB database connectivity, latency, active rooms, and connected WebSocket clients.
+Checks server status, uptime, MongoDB database connectivity, active rooms count, and connected WebSocket clients.
 
 **Response (`200 OK`):**
 ```json
@@ -62,7 +62,7 @@ Checks server status, uptime, MongoDB database connectivity, latency, active roo
 ### Authentication
 
 #### `POST /api/auth/register`
-Registers a new user account.
+Registers a new user account with hashed password storage.
 * **Rate limit**: 15 requests / minute per IP.
 * **Request Body**:
   ```json
@@ -91,7 +91,7 @@ Registers a new user account.
   ```
 
 #### `POST /api/auth/login`
-Authenticates with email or username.
+Authenticates an existing user with email or username.
 * **Rate limit**: 15 requests / minute per IP.
 * **Request Body**:
   ```json
@@ -217,7 +217,7 @@ Fetches all rooms created by the authenticated user.
   ```
 
 #### `GET /api/room/:roomId`
-Returns status and metadata for a specific room.
+Returns status, participant count, and metadata for a specific room.
 * **Response (`200 OK`)**:
   ```json
   {
@@ -235,7 +235,7 @@ Returns status and metadata for a specific room.
   ```
 
 #### `DELETE /api/rooms/:roomId`
-Permanently deletes a room and clears all persisted elements.
+Permanently deletes a room, notifies connected clients, and purges database state.
 * **Headers**: `Authorization: Bearer <token>`
 * **Response (`200 OK`)**:
   ```json
@@ -247,33 +247,82 @@ Permanently deletes a room and clears all persisted elements.
 
 ---
 
-### AI Diagram Generation
+### AI Diagram & Mind Map Generation
 
-#### `POST /api/ai/generate-diagram`
-Generates structured canvas elements (shapes, sticky notes, directional connector arrows, text labels) using Google Gemini 3.8 Flash from natural language prompts. Protected by a 5-layer rate-limit shield, 2hr in-memory response caching, request pacing queue, and automatic procedural fallback.
+#### `GET /api/ai/config`
+Retrieves the active server AI backend configuration for client badges and model transparency.
 
-* **Rate limit**: 10 requests / minute per IP address.
-* **Request Body**:
-  ```json
-  {
-    "prompt": "User Authentication & OAuth 2.0 Flow with JWT tokens",
-    "style": "flowchart",
-    "viewportCenter": {
-      "x": 450,
-      "y": 320
-    }
-  }
-  ```
-  * `prompt` (*string, required*): The natural language concept or architecture to visualize.
-  * `style` (*string, optional*): One of `"mindmap"`, `"flowchart"`, `"brainstorm"`, `"architecture"`. Default is `"mindmap"`.
-  * `viewportCenter` (*object, optional*): Canvas world coordinates `{ x: number, y: number }` indicating where to center the generated diagram.
 * **Response (`200 OK`)**:
   ```json
   {
     "success": true,
+    "provider": "gemini",
+    "model": "gemini-3.8-flash",
+    "label": "Gemini 3.8 Flash"
+  }
+  ```
+  * `provider`: `"gemini"` | `"ollama"` | `"fallback"`
+  * `model`: Model name (e.g. `"gemini-3.8-flash"`, `"llama3.2"`, `"procedural"`)
+  * `label`: Human-readable display label
+
+---
+
+#### `POST /api/ai/generate-diagram`
+Generates structured canvas elements from natural language prompts using Gemini or local Ollama, with automated model failover and offline procedural fallback.
+
+* **Rate limit**: 10 requests / minute per IP address.
+* **Headers**: `Authorization: Bearer <token>` (optional; unauthenticated calls credit the answering AI model as author).
+* **Request Body**:
+  ```json
+  {
+    "prompt": "User Authentication & OAuth 2.0 Flow with JWT tokens",
+    "type": "flowchart",
+    "detail": "balanced",
+    "direction": "horizontal",
+    "canvasCenter": {
+      "x": 450,
+      "y": 320
+    },
+    "sessionId": "ai_1725705600000_abc"
+  }
+  ```
+  * `prompt` (*string, required*): The natural language concept or architecture to visualize (up to 1200 characters).
+  * `type` (*string, optional*): One of `"mindmap"`, `"flowchart"`, `"brainstorm"`, `"architecture"`. Defaults to `"mindmap"`.
+  * `detail` (*string, optional*): Level of detail: `"concise"` (4-6 nodes), `"balanced"` (8-12 nodes), `"detailed"` (15+ nodes). Defaults to `"balanced"`.
+  * `direction` (*string, optional*): Flow orientation: `"horizontal"`, `"vertical"`, `"radial"`, or `"free"`.
+  * `canvasCenter` (*object, optional*): World coordinate `{ x: number, y: number }` indicating where the diagram should be anchored.
+  * `sessionId` (*string, optional*): Client-generated session identifier used to namespace elements and link follow-up revisions.
+
+* **Response (`200 OK`)**:
+  ```json
+  {
+    "success": true,
+    "sessionId": "ai_1725705600000_abc",
+    "type": "flowchart",
+    "detail": "balanced",
+    "direction": "horizontal",
+    "graph": {
+      "summary": "OAuth 2.0 authorization code grant flow with JWT verification",
+      "nodes": [
+        {
+          "id": "node_1",
+          "label": "Client Application",
+          "kind": "service",
+          "role": "Client application initiating login"
+        }
+      ],
+      "edges": [
+        {
+          "id": "edge_1",
+          "from": "node_1",
+          "to": "node_2",
+          "label": "Redirect /authorize"
+        }
+      ]
+    },
     "elements": [
       {
-        "id": "ai-geom-1725705601234-0",
+        "id": "ai_1725705600000_abc_shape_0",
         "type": "shape",
         "shapeType": "roundrect",
         "x": 350,
@@ -283,36 +332,73 @@ Generates structured canvas elements (shapes, sticky notes, directional connecto
         "fillColor": "#3b82f6",
         "strokeColor": "#1d4ed8",
         "strokeWidth": 2,
-        "text": "Start: User Visits Site",
-        "textColor": "#ffffff",
-        "fontSize": 15
-      },
-      {
-        "id": "ai-geom-1725705601234-1",
-        "type": "shape",
-        "shapeType": "arrow",
-        "x": 450,
-        "y": 180,
-        "width": 40,
-        "height": 60,
-        "strokeColor": "#64748b",
-        "strokeWidth": 2
+        "text": "Client Application"
       }
     ],
-    "cached": false,
-    "fallback": false,
-    "count": 8
+    "engine": {
+      "provider": "gemini",
+      "model": "gemini-3.8-flash",
+      "label": "Gemini 3.8 Flash"
+    },
+    "isFallback": false,
+    "fromCache": false,
+    "notice": null
   }
   ```
-* **Error Responses**:
-  * `400 Bad Request`: When `prompt` is missing, empty, or not a string.
-  * `500 Internal Server Error`: Critical generation failure (procedural fallback ensures this is exceptionally rare).
+
+---
+
+#### `POST /api/ai/revise-diagram`
+Stateless endpoint for iteratively revising an existing diagram from follow-up user instructions.
+
+* **Rate limit**: 20 requests / minute per IP address.
+* **Headers**: `Authorization: Bearer <token>` (optional).
+* **Request Body**:
+  ```json
+  {
+    "instruction": "Add a Redis cache between API Gateway and PostgreSQL database",
+    "graph": {
+      "summary": "Current architecture",
+      "nodes": [ ... ],
+      "edges": [ ... ]
+    },
+    "history": [
+      { "role": "user", "content": "Create a microservice architecture" },
+      { "role": "assistant", "content": "Generated microservice architecture with API Gateway and PostgreSQL" }
+    ],
+    "type": "architecture",
+    "detail": "balanced",
+    "direction": "horizontal",
+    "canvasCenter": { "x": 500, "y": 300 },
+    "sessionId": "ai_1725705600000_abc"
+  }
+  ```
+
+* **Response (`200 OK`)**:
+  ```json
+  {
+    "success": true,
+    "sessionId": "ai_1725705600000_abc",
+    "graph": { ... },
+    "elements": [ ... ],
+    "changes": [
+      "Added Redis Cache node between API Gateway and PostgreSQL",
+      "Rerouted query edge through cache layer"
+    ],
+    "engine": {
+      "provider": "gemini",
+      "model": "gemini-3.8-flash",
+      "label": "Gemini 3.8 Flash"
+    },
+    "notice": null
+  }
+  ```
 
 ---
 
 ## 2. Socket.io Real-Time Protocol
 
-Clients establish a connection to `/socket.io/` using WebSocket or HTTP long-polling fallback.
+Clients establish a connection to `/socket.io/` using WebSocket with HTTP long-polling fallback.
 
 ---
 
@@ -323,8 +409,8 @@ Clients establish a connection to `/socket.io/` using WebSocket or HTTP long-pol
 | `join-room` | `{ roomId, user, token }` | Joins a room, validates credentials, and initializes state. |
 | `stroke-live-start` | `{ strokeId, point, color, size, isHighlighter }` | Starts streaming a live pen stroke. |
 | `stroke-live-point` | `{ strokeId, point }` | Streams an incremental coordinate point. |
-| `element-create` | `CanvasElement` | Finalizes a single completed element (stroke, shape, sticky, text, icon). |
-| `elements-batch-create` | `{ elements: CanvasElement[] }` | Atomically adds and broadcasts an array of elements (used by AI Diagram Generator). |
+| `element-create` | `CanvasElement` | Finalizes a single completed element (stroke, shape, sticky, text, icon, wire). |
+| `elements-batch-create` | `CanvasElement[]` | Atomically adds and broadcasts an array of elements (used by AI Diagram Generator). |
 | `element-update` | `CanvasElement` | Updates coordinates, dimensions, content, or styling of an element. |
 | `element-delete` | `{ elementId }` | Deletes a single canvas element. |
 | `elements-batch-delete` | `{ elementIds: string[] }` | Deletes multiple elements simultaneously. |
@@ -355,7 +441,7 @@ Clients establish a connection to `/socket.io/` using WebSocket or HTTP long-pol
 | `stroke-live-started` | `{ userId, strokeId, point, color, size, isHighlighter }` | Real-time stroke starting by another participant. |
 | `stroke-live-pointed` | `{ strokeId, point }` | Incoming coordinate point for an active stroke. |
 | `element-created` | `CanvasElement` | A new persistent element has been added to the board. |
-| `elements-batch-created` | `{ elements: CanvasElement[] }` | Multiple elements created and added simultaneously to the board. |
+| `elements-batch-created` | `CanvasElement[]` | Multiple elements created and added simultaneously to the board. |
 | `element-updated` | `CanvasElement` | An existing element has been edited, moved, or resized. |
 | `element-deleted` | `{ elementId }` | An element has been removed from the canvas. |
 | `elements-batch-deleted` | `{ elementIds }` | Multiple elements removed in batch. |
