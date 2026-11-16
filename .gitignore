@@ -17,7 +17,10 @@ server/data/
 **/server/data/
 
 # Office documents and report artifacts
-*.docx
 *.doc
 *.pptx
 *.xlsx
+
+# Allow project report
+!Generated_Project_Report.docx
+!docs/Generated_Project_Report.docx

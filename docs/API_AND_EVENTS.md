@@ -6,7 +6,7 @@ This document provides a comprehensive specification of all backend REST endpoin
 
 ## 1. REST API Endpoints
 
-Base URL: `http://localhost:3000` (development) or `https://your-backend-service.onrender.com` (production).
+Base URL: `http://localhost:3000` (development) or `https://whiteboard-io-1.onrender.com` (production).
 
 All request and response payloads use `application/json`.
 

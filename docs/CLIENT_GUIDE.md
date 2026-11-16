@@ -2,6 +2,9 @@
 
 This guide details the internal frontend architecture, state management hooks, canvas rendering pipeline, persistence utilities, and component hierarchy of **Whiteboard.io**.
 
+> [!TIP]
+> **Live Production Deployment**: [https://whiteboard-io-1.onrender.com/](https://whiteboard-io-1.onrender.com/)
+
 ---
 
 ## 1. Component Hierarchy & Layout
