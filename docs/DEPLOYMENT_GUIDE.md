@@ -40,7 +40,7 @@ In this mode, the Node.js Express server automatically builds and serves the Rea
      *(Runs `node server/dist/server.js`)*.
 5. In **Environment Variables**, add:
    - `PORT`: `3000` *(Render provides this automatically, but setting 3000 ensures consistency)*
-   - `APP_URL`: `https://whiteboard-app.onrender.com`
+   - `APP_URL`: `https://whiteboard-io-1.onrender.com`
    - `MONGODB_URI`: `mongodb+srv://<user>:<password>@cluster0.mongodb.net/whiteboard?retryWrites=true&w=majority`
    - `AI_PROVIDER`: `gemini` *(or `ollama` for a self-hosted local model)*
    - `GEMINI_API_KEY`: `your-google-gemini-api-key` *(From [Google AI Studio](https://aistudio.google.com/app/apikey))*

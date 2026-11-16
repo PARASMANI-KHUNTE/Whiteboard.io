@@ -2,6 +2,10 @@
 
 This document details the architectural design, communication protocols, data models, persistence layers, and real-time synchronization pipelines of **Whiteboard.io**.
 
+> [!TIP]
+> **Live Production Deployment**: [https://whiteboard-io-1.onrender.com/](https://whiteboard-io-1.onrender.com/)
+> **Formal Project Report**: The comprehensive Master's project report is available in [docs/Generated_Project_Report.docx](Generated_Project_Report.docx).
+
 ---
 
 ## 1. High-Level Architecture Overview

@@ -27,14 +27,15 @@ def validate():
     assert "Whiteboard.io" in full_text
     assert "Parasmani Khunte" in full_text
     assert "MCA Semester 3" in full_text
-    assert "Google Gemini 2.5 Flash" in full_text or "gemini-2.5-flash" in full_text
+    assert "Google Gemini 3.8 Flash" in full_text or "gemini-3.8" in full_text
+    assert "Ollama" in full_text
+    assert "https://whiteboard-io-1.onrender.com/" in full_text
     assert "WebRTC" in full_text
     assert "Socket.io" in full_text
     assert "PBKDF2" in full_text
     assert "No formal automated test suite was identified in the analyzed repository." in full_text
     
     # Check Abstract word count
-    # Let's find the abstract text
     abstract_match = re.search(r"ABSTRACT\s+―+\s+(.*?)\s+Keywords:", full_text, re.DOTALL)
     if abstract_match:
         abstract_body = abstract_match.group(1).strip()

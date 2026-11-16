@@ -481,7 +481,7 @@ def build_report():
         "commits mutations to MongoDB, entirely eliminating database write contention. To provide cohesive communication without "
         "external dependencies, Whiteboard.io incorporates a decentralized WebRTC peer-to-peer audio mesh featuring anti-glare "
         "negotiation and real-time speech frequency analysis using the Web Audio API. Furthermore, the platform integrates "
-        "Google Gemini 2.5 Flash to dynamically transform natural language descriptions into interactive, spatial canvas diagrams. "
+        "Google Gemini 3.8 Flash and local Ollama models to dynamically transform natural language descriptions into interactive, spatial canvas diagrams. "
         "A dedicated five-layer defensive shield—comprising IP rate limiting, response caching, request pacing, exponential "
         "backoff, and offline procedural synthesis—guarantees uninterrupted system availability under heavy workload constraints. "
         "The resulting application delivers an intuitive, secure, and production-ready distributed collaboration environment."
@@ -497,7 +497,7 @@ def build_report():
     r_kw_lbl.bold = True
     r_kw_lbl.font.color.rgb = RGBColor(27, 54, 93)
     
-    r_kw_val = p_kw.add_run("Collaborative Whiteboard, Real-Time Synchronization, Socket.io, WebRTC Audio Mesh, MongoDB, Optimistic UI, Google Gemini 2.5 Flash, Rate-Limiting Shield, Distributed Systems.")
+    r_kw_val = p_kw.add_run("Collaborative Whiteboard, Real-Time Synchronization, Socket.io, WebRTC Audio Mesh, MongoDB, Optimistic UI, Google Gemini 3.8 Flash, Ollama, Rate-Limiting Shield, Distributed Systems.")
     r_kw_val.font.name = "Times New Roman"
     r_kw_val.font.size = Pt(11)
     r_kw_val.font.italic = True
@@ -542,13 +542,13 @@ def build_report():
         ("    4.6 RESTful API Design Specification", "17"),
         ("    4.7 Socket.io Real-Time Protocol Specification", "18"),
         ("    4.8 WebRTC Voice Chat Mesh Architecture", "19"),
-        ("    4.9 Google Gemini AI Diagramming Architecture", "20"),
+        ("    4.9 Multi-Engine AI Diagramming & Failover Architecture", "20"),
         ("    4.10 Security, Authentication & Governance Design", "21"),
         ("5. Implementation Details", "22"),
         ("    5.1 Server Entry & Express/Socket Gateway (server/index.ts)", "22"),
         ("    5.2 MongoDB Persistence Engine & Indexes (server/db.ts)", "23"),
         ("    5.3 Authentication, Tokenization & Hashing (server/auth.ts)", "24"),
-        ("    5.4 Google Gemini AI Engine & Fallback (server/gemini.ts)", "25"),
+        ("    5.4 Multi-Engine AI Pipeline & Layout Modules (server/ai/)", "25"),
         ("    5.5 Client Core & HTML5 Canvas Engine (client/src/components/Canvas.tsx)", "26"),
         ("    5.6 Real-Time Collaboration Hook (client/src/hooks/useSocket.ts)", "27"),
         ("    5.7 WebRTC Audio Mesh Hook (client/src/hooks/useVoiceChat.ts)", "28"),
@@ -680,7 +680,7 @@ def build_report():
         ("Figure 1", "High-Level System Architecture of Whiteboard.io", "13"),
         ("Figure 2", "Real-Time Collaborative Drawing & Persistence Pipeline", "14"),
         ("Figure 3", "MongoDB Document Schemas and Inter-Collection Relationships", "15"),
-        ("Figure 4", "Google Gemini 2.5 Flash Diagram Generation & 5-Layer Rate-Limit Shield", "20"),
+        ("Figure 4", "Multi-Engine AI Diagram Generation Pipeline & Failover Shield", "20"),
     ]
     
     t_lof = doc.add_table(rows=len(figures_list), cols=3)
@@ -738,7 +738,7 @@ def build_report():
                "In modern software engineering, academic instruction, architectural design, and cross-functional enterprise workflows, visual communication has become indispensable. Distributed teams across different geographic locations regularly require shared drawing environments to conceptualize complex architectures, brainstorm feature requirements, map workflows, and execute collaborative design sprints. Traditional analog whiteboards, while highly intuitive, are physically constrained to co-located environments. The rapid global shift towards hybrid and remote working paradigms has catalyzed urgent demand for cloud-native digital whiteboards capable of mimicking the immediacy, fluidity, and natural expressiveness of physical marker boards while unlocking digital superpowers such as boundless viewports, real-time multi-client synchronization, embedded audio communication, and artificial intelligence-driven diagram synthesis.")
     
     add_body_p(doc, 
-               "Existing commercial offerings frequently operate as bloated monolithic platforms with steep subscription tiers, proprietary data lock-ins, high latency over centralized cloud brokers, and disconnected third-party communication channels requiring users to operate separate conference calling tools alongside the canvas. Whiteboard.io was conceptualized and developed to address these structural limitations by delivering a modern, lightweight, highly responsive, and real-time distributed whiteboard platform operating entirely in the web browser without client-side plugins.")
+               "Existing commercial offerings frequently operate as bloated monolithic platforms with steep subscription tiers, proprietary data lock-ins, high latency over centralized cloud brokers, and disconnected third-party communication channels requiring users to operate separate conference calling tools alongside the canvas. Whiteboard.io was conceptualized and developed to address these structural limitations by delivering a modern, lightweight, highly responsive, and real-time distributed whiteboard platform operating entirely in the web browser without client-side plugins, actively deployed and accessible at https://whiteboard-io-1.onrender.com/.")
 
     add_styled_heading(doc, "1.2 Problem Statement", 2)
     add_body_p(doc, 
@@ -770,7 +770,7 @@ def build_report():
 
     add_styled_heading(doc, "1.4 Proposed Whiteboard.io Architecture", 2)
     add_body_p(doc, 
-               "To solve these challenges, Whiteboard.io implements a decoupled, event-driven client-server architecture combining an expressive React 19 single-page application with a Node.js/Express backend, Socket.io real-time gateways, MongoDB native persistence, WebRTC peer-to-peer audio mesh, and an intelligent Google Gemini 2.5 Flash diagram synthesis engine.")
+               "To solve these challenges, Whiteboard.io implements a decoupled, event-driven client-server architecture combining an expressive React 19 single-page application with a Node.js/Express backend, Socket.io real-time gateways, MongoDB native persistence, WebRTC peer-to-peer audio mesh, and an intelligent Google Gemini 3.8 Flash and local Ollama diagram synthesis engine.")
     
     add_body_p(doc, 
                "The platform maintains an authoritative in-memory room state map on the server (`Map<string, RoomData>`), enabling sub-millisecond event broadcasting and conflict resolution across participants. Persistence to MongoDB is performed asynchronously via a debounced write pipeline (400–1000ms delay), ensuring zero database write contention during high-velocity drawing sessions. Voice chat is orchestrated over a fully decentralized WebRTC audio mesh using Socket.io for signaling and STUN servers for NAT traversal, augmented by an active Web Audio API frequency visualizer. Generative AI diagramming is fortified by a multi-layered defensive rate-limit shield featuring in-memory caching, request pacing, exponential backoff, and a deterministic offline procedural fallback engine.")
@@ -784,7 +784,7 @@ def build_report():
                  bold_prefix="Client Subsystem: ")
     
     add_bullet_p(doc, 
-                 "Built using Node.js, Express, Socket.io, and the MongoDB Native Driver (v7.6). Implements PBKDF2-SHA512 password hashing with 100,000 iterations, Google OAuth 2.0 verification, dynamic room isolation, host permission governance, vote-to-clear consensus timers, and the Gemini 2.5 Flash diagramming engine.",
+                 "Built using Node.js, Express, Socket.io, and the MongoDB Native Driver (v7.6). Implements PBKDF2-SHA512 password hashing with 100,000 iterations, Google OAuth 2.0 verification, dynamic room isolation, host permission governance, vote-to-clear consensus timers, and the Google Gemini 3.8 Flash & Ollama diagramming engine.",
                  bold_prefix="Backend Subsystem: ")
 
     doc.add_page_break()
@@ -815,7 +815,7 @@ def build_report():
                  bold_prefix="4. Decentralized WebRTC Voice Communication: ")
     
     add_bullet_p(doc, 
-                 "Build an automated diagram synthesis pipeline leveraging Google Gemini 2.5 Flash that converts natural language prompts into fully formatted, spatially coordinated whiteboard nodes (mind maps, flowcharts, Kanban boards, and architecture diagrams), protected by a 5-layer rate-limiting shield and an offline procedural fallback generator.",
+                 "Build a resilient multi-engine diagram synthesis pipeline leveraging Google Gemini 3.8 Flash and local Ollama models that converts natural language prompts and follow-up revisions into structured whiteboard nodes, protected by a 5-layer rate-limiting shield, automated model failover, and procedural fallback.",
                  bold_prefix="5. AI-Powered Diagram Generation & Shield: ")
 
     add_styled_heading(doc, "2.2 Functional & Operational Scope", 2)
@@ -894,7 +894,7 @@ def build_report():
         ["Security / Crypto", "Node.js Crypto", "Built-in native", "PBKDF2-SHA512 password hashing, salt generation, and secure UUID generation."],
         ["Voice Media", "WebRTC 1.0", "W3C Standard", "Decentralized peer-to-peer audio streaming mesh directly between browsers."],
         ["Audio Processing", "Web Audio API", "W3C Standard", "AnalyserNode frequency analysis, volume RMS calculation, speaking halos."],
-        ["Generative AI", "Google Gemini API", "gemini-2.5-flash", "Natural language diagram generation with structured JSON schema output."],
+        ["Generative AI", "Gemini & Ollama", "gemini-3.8 / llama3.2", "Multi-engine diagram generation with model failover chain and JSON schema output."],
         ["Bundler / Server", "esbuild & tsx", "^0.25.0 / ^4.21.0", "High-speed TypeScript transpilation and server production bundling."]
     ]
     
@@ -1096,7 +1096,9 @@ def build_report():
         ["GET", "/api/rooms/my-rooms", "Returns all persistent rooms created by the authenticated user.", "Bearer Token", "None"],
         ["GET", "/api/room/:roomId", "Retrieves room metadata, participant count, and element count.", "None", "None"],
         ["DELETE", "/api/rooms/:roomId", "Deletes room metadata and purges all persisted canvas elements.", "Bearer Token", "None"],
-        ["POST", "/api/ai/generate-diagram", "Generates structured canvas diagram elements via Gemini 2.5 Flash.", "Optional", "10 req / min"]
+        ["GET", "/api/ai/config", "Exposes active AI engine configuration (Gemini, Ollama, Fallback).", "None", "None"],
+        ["POST", "/api/ai/generate-diagram", "Generates structured canvas elements with model failover.", "Optional", "10 req / min"],
+        ["POST", "/api/ai/revise-diagram", "Stateless conversational revision of existing diagram graphs.", "Optional", "20 req / min"]
     ]
     format_custom_table(api_table, api_widths, api_headers, api_rows)
 
@@ -1145,11 +1147,11 @@ def build_report():
     add_body_p(doc, 
                "For NAT and firewall traversal, Google's public STUN servers (`stun:stun.l.google.com:19302`, `stun1`, `stun2`) are configured by default, with custom STUN/TURN injection available via environment variables (`VITE_STUN_URLS`, `VITE_TURN_URL`). Local audio streams are captured with hardware echo cancellation, noise suppression, and automatic gain control. A Web Audio `AnalyserNode` calculates RMS volume and emits `audio-level` events every 80ms, powering real-time pulsing speaking halos around multiplayer cursors. For restricted iframe contexts, an interactive audio synthesizer generates harmonic sine wave cadences, ensuring seamless demonstration capabilities.")
 
-    add_styled_heading(doc, "4.9 Google Gemini AI Diagramming Architecture", 2)
+    add_styled_heading(doc, "4.9 Multi-Engine AI Diagramming & Failover Architecture", 2)
     add_body_p(doc, 
-               "The diagram generation engine (`server/gemini.ts`) transforms plain English descriptions into styled, interactive canvas diagrams using the `gemini-2.5-flash` model. Because Google Gemini's free tier permits approximately 15 requests per minute, the backend introduces a 5-layer rate-limiting shield to guarantee zero downtime:")
+               "The diagram generation pipeline (`server/ai/`) transforms natural language prompts into styled, interactive canvas diagrams using a multi-engine failover chain: Google Gemini 3.8 Flash (primary cloud), Gemini 3.6 Flash (cloud fallback), and local Ollama llama3.2 (offline local engine). To guarantee 100% operational availability under heavy traffic or upstream outages, the backend introduces a 5-layer defensive shield with automated model failover:")
     
-    add_figure(doc, "diagram_ai_pipeline.png", "Figure 4: Google Gemini 2.5 Flash Diagram Generation & 5-Layer Rate-Limit Shield")
+    add_figure(doc, "diagram_ai_pipeline.png", "Figure 4: Multi-Engine AI Diagram Generation Pipeline & Failover Shield")
     
     add_bullet_p(doc, "Layer 1 (IP Rate Limiting): Express in-memory token limiter caps calls at 10 requests / min / IP.", bold_prefix="Layer 1: ")
     add_bullet_p(doc, "Layer 2 (In-Memory Response Cache): 2-hour TTL cache indexed by `type:prompt`. Repeated requests return in <1ms with 0 Gemini quota consumed.", bold_prefix="Layer 2: ")
@@ -1203,12 +1205,12 @@ def build_report():
     add_body_p(doc, 
                "Additionally, `server/auth.ts` houses the debounced persistence controller `saveRoomElementsDebounced(roomId, elements, delayMs = 1000)`. When elements change, pending timers in `pendingElementSaves = new Map<string, NodeJS.Timeout>()` are cleared and rescheduled. When the timer fires, `saveRoomElements()` executes an atomic `bulkWrite` containing unordered `updateOne` upserts coupled with a `deleteMany` pass for deleted elements, ensuring robust canvas synchronization with MongoDB.")
 
-    add_styled_heading(doc, "5.4 Google Gemini AI Engine & Fallback (server/gemini.ts)", 2)
+    add_styled_heading(doc, "5.4 Multi-Engine AI Pipeline & Layout Modules (server/ai/)", 2)
     add_body_p(doc, 
-               "`server/gemini.ts` orchestrates the Generative AI diagramming pipeline. It defines TypeScript interfaces for `DiagramType` ('mindmap', 'flowchart', 'brainstorm', 'architecture') and `RawAiNode`. It contains the in-memory response cache `diagramCache = new Map<string, CachedDiagram>()` with a 2-hour TTL and a 10-minute periodic cleanup interval.")
+               "The AI subsystem is engineered as a modular package in `server/ai/` comprising `generate.ts`, `providers.ts`, `layout.ts`, `elements.ts`, `normalize.ts`, `prompt.ts`, `fallback.ts`, and `types.ts`. It orchestrates structured schema generation across cloud Gemini models and local Ollama instances, backed by a 2-hour in-memory cache and a 3,000ms/250ms serial request pacing queue.")
     
     add_body_p(doc, 
-               "Outbound calls to Google's REST API (`models/gemini-2.5-flash:generateContent`) are throttled through `scheduleThrottledTask()`, which enforces a 3,000ms inter-call spacing window. Calls use `callGeminiWithRetry()` with exponential backoff on HTTP 429/503. If retries are exhausted or no API key exists, `generateProceduralFallback()` executes, deterministically generating clean geometric shapes and sticky notes aligned along radial or flowchart topologies.")
+               "Each AI turn walks an ordered failover chain (GEMINI_MODEL -> GEMINI_FALLBACK_MODELS -> OLLAMA_MODEL -> Procedural fallback). If an upstream model returns 503 or times out, the engine immediately fails over to the next candidate model. Furthermore, `server/ai/layout.ts` computes professional layouts: layered Sugiyama DAGs for flowcharts, radial tree coordinates for mind maps, column grids for Kanban cards, and tiered lanes for architectures. The stateless `POST /api/ai/revise-diagram` endpoint and client `AiChatPanel.tsx` enable conversational, multi-turn diagram refinements with differential canvas updates.")
 
     add_styled_heading(doc, "5.5 Client Core & HTML5 Canvas Engine (client/src/components/Canvas.tsx)", 2)
     add_body_p(doc, 
@@ -1285,7 +1287,8 @@ def build_report():
         ["TC-VOTE-02", "Governance", "Vote to Clear Board (Timeout Reject)", "User A starts vote; 15 seconds elapse without votes.", "Vote expires; vote-clear-ended emitted with passed: false; canvas preserved."],
         ["TC-VOICE-01", "WebRTC Voice", "Voice Mesh Connection", "Two users join voice chat in same room.", "STUN negotiation succeeds, direct peer-to-peer audio stream established."],
         ["TC-VOICE-02", "WebRTC Voice", "Speaking Indicator Visualization", "User speaks into microphone (RMS > 0.08).", "audio-level emitted over socket; green speaking halo pulses around cursor."],
-        ["TC-AI-01", "AI Diagramming", "Generate Mind Map via Gemini", "POST /api/ai/generate-diagram with prompt & type: mindmap.", "Gemini 2.5 Flash returns structured nodes; converted to canvas shapes/stickies."],
+        ["TC-AI-01", "AI Diagramming", "Generate Mind Map via Gemini", "POST /api/ai/generate-diagram with prompt & type: mindmap.", "Gemini 3.8 Flash returns structured graph; converted to canvas shapes/wires."],
+        ["TC-AI-02", "AI Diagramming", "Conversational Revision via Chat", "POST /api/ai/revise-diagram with instruction & graph.", "Server returns revised graph; client applies atomic differential updates."],
         ["TC-AI-02", "AI Diagramming", "AI Response Caching Validation", "Submit identical AI prompt within 2 hours.", "Returned from in-memory cache in <1ms without calling Google Gemini API."],
         ["TC-AI-03", "AI Diagramming", "Procedural Fallback on Failure", "Trigger AI generation with invalid API key.", "Graceful fallback engages; clean procedural layout returned without error."]
     ]
@@ -1319,7 +1322,7 @@ def build_report():
                  bold_prefix="Multi-Tiered Authentication & Security: ")
     
     add_bullet_p(doc, 
-                 "Harnessed Google Gemini 2.5 Flash to automatically synthesize structured visual diagrams from natural language prompts, fortified by a 5-layer defensive shield that guarantees 100% operational availability.",
+                 "Harnessed Google Gemini 3.8 Flash, Gemini 3.6 Flash, and local Ollama to automatically synthesize structured visual diagrams and conversational revisions, fortified by a 5-layer defensive shield and automated model failover.",
                  bold_prefix="Generative AI Diagram Synthesis: ")
     
     add_body_p(doc, 
@@ -1367,7 +1370,7 @@ def build_report():
         "[5] MongoDB Inc. \"MongoDB Node.js Driver (v7.6) API Reference: Connection Pooling, Bulk Write Operations, and TTL Indexes.\" MongoDB Manual, 2024. Available: https://www.mongodb.com/docs/drivers/node/",
         "[6] World Wide Web Consortium (W3C). \"WebRTC 1.0: Real-Time Communication Between Browsers.\" W3C Recommendation, 2021. Available: https://www.w3.org/TR/webrtc/",
         "[7] World Wide Web Consortium (W3C). \"Web Audio API: Processing and Synthesizing Audio in Web Applications.\" W3C Candidate Recommendation, 2021. Available: https://www.w3.org/TR/webaudio/",
-        "[8] Google DeepMind. \"Google Gemini API Documentation: Gemini 2.5 Flash Model Overview and Structured JSON Schema Generation.\" Google Cloud, 2025. Available: https://ai.google.dev/docs",
+        "[8] Google DeepMind. \"Google Gemini API Documentation: Gemini 3.8 Flash Model Overview and Structured JSON Schema Generation.\" Google Cloud, 2025. Available: https://ai.google.dev/docs",
         "[9] Rescorla, E. \"RFC 8829: JavaScript Session Establishment Protocol (JSEP) for WebRTC.\" Internet Engineering Task Force (IETF), 2021. Available: https://www.rfc-editor.org/rfc/rfc8829.html",
         "[10] Rosenberg, J., et al. \"RFC 8489: Session Traversal Utilities for NAT (STUN).\" Internet Engineering Task Force (IETF), 2020. Available: https://www.rfc-editor.org/rfc/rfc8489.html",
         "[11] Kaliski, B. \"RFC 8018: PKCS #5: Password-Based Cryptography Specification Version 2.1 (PBKDF2).\" Internet Engineering Task Force (IETF), 2017. Available: https://www.rfc-editor.org/rfc/rfc8018.html",
