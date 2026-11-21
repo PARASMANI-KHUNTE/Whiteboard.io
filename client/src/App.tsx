@@ -1327,6 +1327,19 @@ export default function App() {
     );
   }
 
+  const isBlockingOverlayOpen =
+    !authUser ||
+    showAuthModal ||
+    showCreateRoomModal ||
+    showShareModal ||
+    showAdminModal ||
+    showAiModal ||
+    isAiChatOpen ||
+    confirmModalState.isOpen ||
+    voteToClear?.active === true ||
+    isKicked ||
+    (Boolean(authUser) && !roomId && !hasChosenSessionMode);
+
   return (
     <div
       id="collaborative-whiteboard-app"
@@ -1390,6 +1403,7 @@ export default function App() {
         currentUserId={currentUser.id}
         currentUserName={currentUser.name}
         canWrite={canWrite}
+        shortcutsBlocked={isBlockingOverlayOpen}
         theme={theme}
         onRestrictedAttempt={() =>
           addNotification('Drawing is restricted by room admin', 'warning')
