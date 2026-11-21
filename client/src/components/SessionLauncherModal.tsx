@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { AuthUser, SessionRoom } from '../types';
 import { Users, Palette, Sparkles, ArrowRight, Hash, LogIn } from 'lucide-react';
+import { useModalA11y } from '../hooks/useModalA11y';
 
 interface SessionLauncherModalProps {
   isOpen: boolean;
@@ -15,6 +16,7 @@ interface SessionLauncherModalProps {
 
 export const SessionLauncherModal: React.FC<SessionLauncherModalProps> = ({
   isOpen,
+  onClose,
   authUser,
   myRooms = [],
   onStartSolo,
@@ -23,6 +25,8 @@ export const SessionLauncherModal: React.FC<SessionLauncherModalProps> = ({
 }) => {
   const [joinCodeInput, setJoinCodeInput] = useState('');
   const [joinError, setJoinError] = useState<string | null>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useModalA11y({ isOpen, onClose, dialogRef });
 
   if (!isOpen) return null;
 
@@ -43,7 +47,12 @@ export const SessionLauncherModal: React.FC<SessionLauncherModalProps> = ({
       className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 dark:bg-black/80 backdrop-blur-sm animate-in fade-in duration-200"
     >
       <div
+        ref={dialogRef}
         id="session-launcher-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="session-launcher-title"
+        tabIndex={-1}
         className="w-full max-w-2xl bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 text-slate-900 dark:text-slate-100"
       >
         {/* Header Banner */}
@@ -57,7 +66,7 @@ export const SessionLauncherModal: React.FC<SessionLauncherModalProps> = ({
               Whiteboard Workspace
             </span>
           </div>
-          <h2 className="text-xl sm:text-2xl font-bold tracking-tight text-white mb-1">
+          <h2 id="session-launcher-title" className="text-xl sm:text-2xl font-bold tracking-tight text-white mb-1">
             Welcome, {authUser?.name || 'Artist'}!
           </h2>
           <p className="text-xs sm:text-sm text-slate-300 max-w-md">

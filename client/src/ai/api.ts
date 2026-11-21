@@ -1,4 +1,5 @@
 import { BACKEND_URL } from "../config";
+import { apiFetch } from "../utils/apiFetch";
 import type {
   AiChatTurn,
   AiDiagramPayload,
@@ -65,7 +66,7 @@ export interface GenerateDiagramRequest extends BaseRequest {
 }
 
 export async function requestDiagram(request: GenerateDiagramRequest): Promise<AiDiagramPayload> {
-  const res = await fetch(`${BACKEND_URL}/api/ai/generate-diagram`, {
+  const res = await apiFetch("/api/ai/generate-diagram", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -96,7 +97,7 @@ export interface ReviseDiagramRequest extends BaseRequest {
 }
 
 export async function requestRevision(request: ReviseDiagramRequest): Promise<AiDiagramPayload> {
-  const res = await fetch(`${BACKEND_URL}/api/ai/revise-diagram`, {
+  const res = await apiFetch("/api/ai/revise-diagram", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",

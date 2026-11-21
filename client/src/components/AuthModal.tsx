@@ -1,7 +1,8 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { X, Lock, Mail, User as UserIcon, Check, Eye, EyeOff, Sparkles, LogIn, UserPlus, Chrome, LogOut } from 'lucide-react';
 import { AuthUser } from '../types';
+import { useModalA11y } from '../hooks/useModalA11y';
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -64,6 +65,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       setIsGoogleLoading(false);
     }
   }, [isOpen]);
+
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useModalA11y({ isOpen, onClose, dialogRef });
 
   if (!isOpen) return null;
 
@@ -151,7 +155,12 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       }}
     >
       <div
+        ref={dialogRef}
         id="auth-modal-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="auth-modal-title"
+        tabIndex={-1}
         className="w-full max-w-md bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden text-slate-900 dark:text-slate-100"
       >
         {/* Header */}
@@ -161,7 +170,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               W
             </div>
             <div>
-              <h2 className="text-sm font-semibold text-slate-900 dark:text-white">
+              <h2 id="auth-modal-title" className="text-sm font-semibold text-slate-900 dark:text-white">
                 {currentUser && !currentUser.isGuest ? 'Account Profile' : 'Whiteboard Authentication'}
               </h2>
               <p className="text-xs text-slate-500 dark:text-slate-400">

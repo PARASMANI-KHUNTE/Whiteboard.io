@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { X, Copy, Check, Share2, Users, Shield, Globe } from 'lucide-react';
+import { useModalA11y } from '../hooks/useModalA11y';
 
 interface ShareRoomModalProps {
   isOpen: boolean;
@@ -32,6 +33,9 @@ export const ShareRoomModal: React.FC<ShareRoomModalProps> = ({
       if (linkTimerRef.current) clearTimeout(linkTimerRef.current);
     };
   }, []);
+
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useModalA11y({ isOpen, onClose, dialogRef });
 
   if (!isOpen) return null;
 
@@ -93,7 +97,12 @@ export const ShareRoomModal: React.FC<ShareRoomModalProps> = ({
       }}
     >
       <div
+        ref={dialogRef}
         id="share-room-modal-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="share-room-modal-title"
+        tabIndex={-1}
         className="w-full max-w-md bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden text-slate-900 dark:text-slate-100"
       >
         {/* Header */}
@@ -103,7 +112,7 @@ export const ShareRoomModal: React.FC<ShareRoomModalProps> = ({
               <Share2 className="w-4 h-4" />
             </div>
             <div>
-              <h2 className="text-sm font-semibold text-slate-900 dark:text-white">Share Room Code</h2>
+              <h2 id="share-room-modal-title" className="text-sm font-semibold text-slate-900 dark:text-white">Share Room Code</h2>
               <p className="text-xs text-slate-500 dark:text-slate-400">Invite collaborators to this session</p>
             </div>
           </div>

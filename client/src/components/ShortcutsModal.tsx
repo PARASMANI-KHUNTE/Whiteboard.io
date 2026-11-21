@@ -1,7 +1,8 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Keyboard, Search, X } from 'lucide-react';
 import { SHORTCUT_SECTIONS } from '../utils/shortcuts';
+import { useModalA11y } from '../hooks/useModalA11y';
 
 interface ShortcutsModalProps {
   isOpen: boolean;
@@ -13,20 +14,16 @@ const MOD_HINT = 'On macOS use ⌘ instead of Ctrl';
 export const ShortcutsModal: React.FC<ShortcutsModalProps> = ({ isOpen, onClose }) => {
   const [query, setQuery] = useState('');
 
+  const dialogRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    if (!isOpen) {
-      setQuery('');
-      return;
-    }
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.stopPropagation();
-        onClose();
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, onClose]);
+    if (!isOpen) setQuery('');
+  }, [isOpen]);
+  useModalA11y({
+    isOpen,
+    onClose,
+    dialogRef,
+    initialFocusSelector: 'input[type="text"]',
+  });
 
   const filteredSections = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -53,9 +50,11 @@ export const ShortcutsModal: React.FC<ShortcutsModalProps> = ({ isOpen, onClose 
       }}
     >
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
-        aria-label="Keyboard shortcuts"
+        aria-labelledby="shortcuts-modal-title"
+        tabIndex={-1}
         className="w-full sm:max-w-3xl max-h-[88vh] sm:max-h-[82vh] flex flex-col bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-t-3xl sm:rounded-3xl shadow-2xl animate-slide-up"
       >
         {/* Header */}
@@ -64,7 +63,7 @@ export const ShortcutsModal: React.FC<ShortcutsModalProps> = ({ isOpen, onClose 
             <Keyboard className="w-5 h-5" />
           </div>
           <div className="min-w-0 flex-1">
-            <h2 className="text-base sm:text-lg font-bold text-slate-900 dark:text-white leading-tight">
+            <h2 id="shortcuts-modal-title" className="text-base sm:text-lg font-bold text-slate-900 dark:text-white leading-tight">
               Keyboard shortcuts
             </h2>
             <p className="text-xs text-slate-500 dark:text-slate-400 truncate">
