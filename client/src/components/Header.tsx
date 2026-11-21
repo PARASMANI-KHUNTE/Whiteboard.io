@@ -225,6 +225,8 @@ export const Header: React.FC<HeaderProps> = ({
         {isHost && (
           <button
             id="admin-panel-toggle-btn"
+            type="button"
+            aria-label="Open room host admin settings"
             onClick={onOpenAdminModal}
             className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-amber-50 dark:bg-amber-950/40 hover:bg-amber-100 dark:hover:bg-amber-900/60 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-800 text-xs font-semibold transition-colors cursor-pointer"
             title="Room Host Admin Settings"
@@ -237,6 +239,8 @@ export const Header: React.FC<HeaderProps> = ({
         {/* About Whiteboard.io & Alternatives Comparison */}
         <button
           id="about-app-btn"
+          type="button"
+          aria-label="About Whiteboard.io"
           onClick={() => setShowAboutModal(true)}
           title="About Whiteboard.io & Why It's Different"
           className="p-2 text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
@@ -247,6 +251,8 @@ export const Header: React.FC<HeaderProps> = ({
         {/* Dark / Light Theme Toggle */}
         <button
           id="theme-toggle-btn"
+          type="button"
+          aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
           onClick={onToggleTheme}
           title={theme === 'dark' ? 'Switch to Light Theme' : 'Switch to Dark Theme'}
           className="p-2 text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
@@ -293,6 +299,8 @@ export const Header: React.FC<HeaderProps> = ({
         {/* User Identity & Profile Button */}
         <button
           id="user-profile-btn"
+          type="button"
+          aria-label="Open account profile"
           onClick={() => {
             setTempName(currentUser.name);
             setShowProfileModal(true);
@@ -315,6 +323,8 @@ export const Header: React.FC<HeaderProps> = ({
         {(!authUser || authUser.isGuest) && (
           <button
             id="sign-in-prompt-btn"
+            type="button"
+            aria-label="Sign in or register"
             onClick={onOpenAuthModal}
             className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-medium text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-700 transition-colors cursor-pointer"
             title="Sign in or register to save your rooms"
@@ -328,6 +338,8 @@ export const Header: React.FC<HeaderProps> = ({
         {onToggleAiChat && (
           <button
             id="ai-chat-header-btn"
+            type="button"
+            aria-label={isAiChatOpen ? 'Minimize AI chat' : 'Open AI chat'}
             onClick={onToggleAiChat}
             aria-pressed={isAiChatOpen}
             title={
@@ -353,6 +365,8 @@ export const Header: React.FC<HeaderProps> = ({
         {onOpenAiModal && (
           <button
             id="ai-diagram-header-btn"
+            type="button"
+            aria-label="Generate AI diagram"
             onClick={onOpenAiModal}
             className="flex items-center gap-1.5 px-2.5 py-1.5 sm:px-3.5 sm:py-2 rounded-xl text-xs sm:text-sm font-bold transition-all shadow-md cursor-pointer active:scale-95 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white shadow-indigo-500/20"
             title="Generate Mindmaps, Flowcharts & Sticky Boards with Gemini AI"
@@ -367,6 +381,8 @@ export const Header: React.FC<HeaderProps> = ({
         {isSoloMode ? (
           <button
             id="share-go-live-btn"
+            type="button"
+            aria-label="Share and go live"
             onClick={onShareAndGoLive}
             className="flex items-center gap-1.5 px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all shadow-md cursor-pointer active:scale-95 bg-gradient-to-r from-blue-600 via-indigo-600 to-violet-600 hover:from-blue-700 hover:to-violet-700 text-white shadow-blue-500/20"
             title="Convert this solo canvas to a collaborative room and invite friends"
@@ -377,6 +393,8 @@ export const Header: React.FC<HeaderProps> = ({
         ) : (
           <button
             id="share-room-modal-btn"
+            type="button"
+            aria-label="Share room code or invite link"
             onClick={onOpenShareModal}
             className="flex items-center gap-1.5 px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all shadow-xs cursor-pointer active:scale-95 bg-slate-900 dark:bg-blue-600 text-white hover:bg-slate-800 dark:hover:bg-blue-700"
             title="Share room code or invite link"
@@ -396,18 +414,25 @@ export const Header: React.FC<HeaderProps> = ({
               if (e.target === e.currentTarget) setShowProfileModal(false);
             }}
           >
-            <div className="bg-white dark:bg-slate-900 rounded-2xl p-6 w-full max-w-sm border border-slate-200 dark:border-slate-800 shadow-2xl animate-in zoom-in-95 duration-150 text-slate-900 dark:text-slate-100">
+            <div
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="profile-dialog-title"
+              className="bg-white dark:bg-slate-900 rounded-2xl p-6 w-full max-w-sm border border-slate-200 dark:border-slate-800 shadow-2xl animate-in zoom-in-95 duration-150 text-slate-900 dark:text-slate-100"
+            >
               <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800 mb-4">
                 <div className="flex items-center gap-2">
                   <div className="w-7 h-7 rounded-lg bg-blue-600 text-white flex items-center justify-center text-xs font-bold">
                     W
                   </div>
-                  <h3 className="font-bold text-slate-900 dark:text-white text-base">
+                  <h3 id="profile-dialog-title" className="font-bold text-slate-900 dark:text-white text-base">
                     Profile & Identity
                   </h3>
                 </div>
                 {theme === 'dark' ? (
                   <button
+                    type="button"
+                    aria-label="Switch to light theme"
                     onClick={onToggleTheme}
                     className="p-1.5 rounded-lg text-amber-400 hover:bg-slate-800 transition-colors"
                     title="Switch to Light mode"
@@ -416,8 +441,10 @@ export const Header: React.FC<HeaderProps> = ({
                   </button>
                 ) : (
                   <button
+                    type="button"
+                    aria-label="Switch to dark theme"
                     onClick={onToggleTheme}
-                    className="p-1.5 rounded-lg text-slate-500 hover:bg-slate-100 transition-colors"
+                    className="p-1.5 rounded-lg text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
                     title="Switch to Dark mode"
                   >
                     <Moon className="w-4 h-4" />
@@ -444,12 +471,14 @@ export const Header: React.FC<HeaderProps> = ({
                           Signed In
                         </span>
                       </div>
-                      <p className="text-[11px] text-slate-400 truncate">@{authUser.username}</p>
+                      <p className="text-[11px] text-slate-400 dark:text-slate-500 truncate">@{authUser.username}</p>
                       <p className="text-[10px] text-slate-500 dark:text-slate-400 truncate">{authUser.email}</p>
                     </div>
                   </div>
                   <button
                     id="modal-signout-btn"
+                    type="button"
+                    aria-label="Sign out"
                     onClick={() => {
                       onLogout();
                       setShowProfileModal(false);
@@ -467,6 +496,7 @@ export const Header: React.FC<HeaderProps> = ({
                     <p className="text-[11px] text-blue-600/80 dark:text-blue-400">Save rooms by signing in</p>
                   </div>
                   <button
+                    type="button"
                     onClick={() => {
                       setShowProfileModal(false);
                       onOpenAuthModal();
@@ -480,10 +510,11 @@ export const Header: React.FC<HeaderProps> = ({
 
               {/* Display Name Input */}
               <div className="mb-4">
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+                <label htmlFor="profile-display-name" className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
                   Display Name
                 </label>
                 <input
+                  id="profile-display-name"
                   type="text"
                   value={tempName}
                   onChange={(e) => setTempName(e.target.value)}
@@ -495,13 +526,16 @@ export const Header: React.FC<HeaderProps> = ({
 
               {/* Cursor / Avatar Color */}
               <div className="mb-5">
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+                <div id="profile-color-label" className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
                   Cursor & Avatar Color
-                </label>
-                <div className="flex gap-2">
+                </div>
+                <div role="group" aria-labelledby="profile-color-label" className="flex gap-2">
                   {PALETTE.map((color) => (
                     <button
                       key={color}
+                      type="button"
+                      aria-label={`Use ${color} cursor and avatar color`}
+                      aria-pressed={currentUser.color === color}
                       onClick={() => onUpdateUserColor(color)}
                       style={{ backgroundColor: color }}
                       className={`w-7 h-7 rounded-full transition-transform cursor-pointer ${
@@ -518,6 +552,7 @@ export const Header: React.FC<HeaderProps> = ({
               <div className="flex items-center justify-between pt-2 border-t border-slate-100 dark:border-slate-800">
                 {authUser && !authUser.isGuest ? (
                   <button
+                    type="button"
                     onClick={() => {
                       onLogout();
                       setShowProfileModal(false);
@@ -533,12 +568,14 @@ export const Header: React.FC<HeaderProps> = ({
 
                 <div className="flex items-center gap-2">
                   <button
+                    type="button"
                     onClick={() => setShowProfileModal(false)}
                     className="px-3 py-1.5 text-xs font-medium text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg cursor-pointer transition-colors"
                   >
                     Cancel
                   </button>
                   <button
+                    type="button"
                     onClick={() => {
                       if (tempName.trim()) {
                         onUpdateUserName(tempName.trim());

@@ -29,6 +29,9 @@ export const ZoomControls: React.FC<ZoomControlsProps> = ({
       {onToggleHand && (
         <>
           <button
+            type="button"
+            aria-label={isHandTool ? 'Switch back to pen tool' : 'Switch to pan tool'}
+            aria-pressed={isHandTool}
             onClick={onToggleHand}
             className={`p-2 sm:p-2 rounded-xl transition-colors cursor-pointer flex items-center justify-center min-w-[36px] min-h-[36px] sm:min-w-[32px] sm:min-h-[32px] ${
               isHandTool
@@ -45,6 +48,8 @@ export const ZoomControls: React.FC<ZoomControlsProps> = ({
 
       {/* Zoom Out Button */}
       <button
+        type="button"
+        aria-label="Zoom out"
         onClick={onZoomOut}
         disabled={zoom <= 0.25}
         className="p-2 sm:p-2 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center min-w-[36px] min-h-[36px] sm:min-w-[32px] sm:min-h-[32px]"
@@ -55,6 +60,8 @@ export const ZoomControls: React.FC<ZoomControlsProps> = ({
 
       {/* Percentage / Reset Button */}
       <button
+        type="button"
+        aria-label={`Reset zoom to 100 percent, currently ${percentage} percent`}
         onClick={onResetZoom}
         className="px-2 py-1 text-xs font-mono font-bold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors cursor-pointer min-w-[48px] text-center"
         title="Click to reset zoom to 100% and center view"
@@ -64,6 +71,8 @@ export const ZoomControls: React.FC<ZoomControlsProps> = ({
 
       {/* Zoom In Button */}
       <button
+        type="button"
+        aria-label="Zoom in"
         onClick={onZoomIn}
         disabled={zoom >= 3.0}
         className="p-2 sm:p-2 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center min-w-[36px] min-h-[36px] sm:min-w-[32px] sm:min-h-[32px]"
@@ -76,6 +85,8 @@ export const ZoomControls: React.FC<ZoomControlsProps> = ({
 
       {/* Reset Pan / Center View */}
       <button
+        type="button"
+        aria-label="Recenter view"
         onClick={onResetZoom}
         className="p-2 sm:p-2 text-slate-400 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-colors cursor-pointer flex items-center justify-center min-w-[36px] min-h-[36px] sm:min-w-[32px] sm:min-h-[32px]"
         title="Reset view (Center canvas at 100%)"

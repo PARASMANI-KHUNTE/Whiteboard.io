@@ -64,35 +64,38 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
   return (
     <div
       id="admin-panel-modal-overlay"
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-xs animate-in fade-in duration-150"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 dark:bg-black/60 backdrop-blur-xs animate-in fade-in duration-150"
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
     >
       <div
         id="admin-panel-modal-dialog"
-        className="w-full max-w-lg bg-white rounded-2xl border border-slate-200 shadow-2xl overflow-hidden"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="admin-panel-title"
+        className="w-full max-w-lg bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden text-slate-900 dark:text-slate-100"
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 bg-slate-50/50">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/40">
           <div className="flex items-center gap-2">
             <div className="w-8 h-8 rounded-lg bg-indigo-600 text-white flex items-center justify-center font-bold text-sm shadow-xs">
               <Shield className="w-4 h-4" />
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h2 className="text-sm font-semibold text-slate-900">Session Admin & Privileges</h2>
+                <h2 id="admin-panel-title" className="text-sm font-semibold text-slate-900 dark:text-white">Session Admin & Privileges</h2>
                 {isHost ? (
-                  <span className="px-2 py-0.5 bg-indigo-100 text-indigo-700 text-[10px] font-semibold rounded-full">
+                  <span className="px-2 py-0.5 bg-indigo-100 dark:bg-indigo-950/70 text-indigo-700 dark:text-indigo-300 text-[10px] font-semibold rounded-full">
                     👑 Host / Admin
                   </span>
                 ) : (
-                  <span className="px-2 py-0.5 bg-slate-100 text-slate-600 text-[10px] font-medium rounded-full">
+                  <span className="px-2 py-0.5 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-[10px] font-medium rounded-full">
                     Participant
                   </span>
                 )}
               </div>
-              <p className="text-xs text-slate-500">
+              <p className="text-xs text-slate-500 dark:text-slate-400">
                 {isHost
                   ? `Room ${roomId || ''} • Manage permissions, writing access, or remove users`
                   : `Room ${roomId || ''} • Administered by ${creatorName || 'Room Host'}`}
@@ -100,8 +103,10 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
             </div>
           </div>
           <button
+            type="button"
+            aria-label="Close admin panel"
             onClick={onClose}
-            className="p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors cursor-pointer"
+            className="p-1 rounded-lg text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
           >
             <X className="w-4 h-4" />
           </button>
@@ -110,20 +115,22 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
         <div className="p-6 space-y-5 max-h-[80vh] overflow-y-auto">
           {/* Global Whiteboard Lock Toggle (Admin only) */}
           {isHost ? (
-            <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between gap-3">
+            <div className="p-4 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-xl flex items-center justify-between gap-3">
               <div className="flex items-center gap-3">
                 <div
                   className={`p-2 rounded-lg ${
-                    isLocked ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700'
+                    isLocked
+                      ? 'bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300'
+                      : 'bg-blue-100 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300'
                   }`}
                 >
                   {isLocked ? <Lock className="w-4 h-4" /> : <Unlock className="w-4 h-4" />}
                 </div>
                 <div>
-                  <div className="text-xs font-semibold text-slate-900">
+                  <div className="text-xs font-semibold text-slate-900 dark:text-white">
                     {isLocked ? 'Whiteboard Locked (View-Only)' : 'Whiteboard Unlocked'}
                   </div>
-                  <div className="text-[11px] text-slate-500">
+                  <div className="text-[11px] text-slate-500 dark:text-slate-400">
                     {isLocked
                       ? 'All non-admin participants are restricted to read-only'
                       : 'Participants can write according to individual permissions'}
@@ -131,6 +138,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                 </div>
               </div>
               <button
+                type="button"
                 onClick={() => onToggleLock(!isLocked)}
                 className={`px-3 py-1.5 rounded-xl text-xs font-medium transition-colors cursor-pointer flex items-center gap-1.5 shadow-xs ${
                   isLocked
@@ -152,11 +160,11 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
               </button>
             </div>
           ) : (
-            <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl flex items-center gap-3">
-              <ShieldAlert className="w-5 h-5 text-indigo-500 shrink-0" />
-              <div className="text-xs text-slate-600 leading-relaxed">
-                <span className="font-semibold text-slate-900">{roomName || 'This room'}</span> is managed by{' '}
-                <span className="font-medium text-slate-800">{creatorName || 'the session host'}</span>. Only the host
+            <div className="p-3.5 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-xl flex items-center gap-3">
+              <ShieldAlert className="w-5 h-5 text-indigo-500 dark:text-indigo-400 shrink-0" />
+              <div className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+                <span className="font-semibold text-slate-900 dark:text-white">{roomName || 'This room'}</span> is managed by{' '}
+                <span className="font-medium text-slate-800 dark:text-slate-200">{creatorName || 'the session host'}</span>. Only the host
                 can alter member permissions or remove participants.
               </div>
             </div>
@@ -164,12 +172,12 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
 
           {/* Participant List */}
           <div>
-            <div className="flex items-center justify-between text-xs font-semibold text-slate-700 mb-2.5">
+            <div className="flex items-center justify-between text-xs font-semibold text-slate-700 dark:text-slate-200 mb-2.5">
               <div className="flex items-center gap-1.5">
-                <Users className="w-3.5 h-3.5 text-slate-500" />
+                <Users className="w-3.5 h-3.5 text-slate-500 dark:text-slate-400" />
                 <span>Room Participants ({userList.length})</span>
               </div>
-              <span className="text-[11px] text-slate-400 font-normal">Active in real-time</span>
+              <span className="text-[11px] text-slate-400 dark:text-slate-500 font-normal">Active in real-time</span>
             </div>
 
             <div className="space-y-2">
@@ -181,7 +189,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                 return (
                   <div
                     key={u.id}
-                    className="p-3 rounded-xl border border-slate-200 bg-white hover:bg-slate-50/50 flex items-center justify-between gap-3 transition-colors"
+                    className="p-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/60 hover:bg-slate-50/50 dark:hover:bg-slate-800 flex items-center justify-between gap-3 transition-colors"
                   >
                     {/* User Identity */}
                     <div className="flex items-center gap-2.5 min-w-0">
@@ -193,7 +201,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                         {isUserHost && (
                           <span
                             title="Session Host"
-                            className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-amber-400 rounded-full flex items-center justify-center text-[8px] text-slate-900 font-bold border border-white shadow-xs"
+                            className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-amber-400 rounded-full flex items-center justify-center text-[8px] text-slate-900 font-bold border border-white dark:border-slate-900 shadow-xs"
                           >
                             👑
                           </span>
@@ -201,24 +209,24 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                       </div>
                       <div className="min-w-0">
                         <div className="flex items-center gap-1.5">
-                          <span className="text-xs font-medium text-slate-900 truncate">{u.name}</span>
+                          <span className="text-xs font-medium text-slate-900 dark:text-white truncate">{u.name}</span>
                           {isUserSelf && (
-                            <span className="text-[10px] text-blue-600 bg-blue-50 px-1.5 py-0.2 rounded font-medium">
+                            <span className="text-[10px] text-blue-600 dark:text-blue-300 bg-blue-50 dark:bg-blue-950/60 px-1.5 py-0.2 rounded font-medium">
                               You
                             </span>
                           )}
                         </div>
-                        <div className="flex items-center gap-1.5 text-[11px] text-slate-500">
+                        <div className="flex items-center gap-1.5 text-[11px] text-slate-500 dark:text-slate-400">
                           {isUserHost ? (
-                            <span className="text-indigo-600 font-medium flex items-center gap-0.5">
+                            <span className="text-indigo-600 dark:text-indigo-400 font-medium flex items-center gap-0.5">
                               <Crown className="w-3 h-3" /> Admin
                             </span>
                           ) : canUserWrite ? (
-                            <span className="text-emerald-600 font-medium flex items-center gap-0.5">
+                            <span className="text-emerald-600 dark:text-emerald-400 font-medium flex items-center gap-0.5">
                               <CheckCircle className="w-3 h-3" /> Can Write
                             </span>
                           ) : (
-                            <span className="text-amber-600 font-medium flex items-center gap-0.5">
+                            <span className="text-amber-600 dark:text-amber-400 font-medium flex items-center gap-0.5">
                               <Ban className="w-3 h-3" /> View Only
                             </span>
                           )}
@@ -232,12 +240,14 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                         <>
                           {/* Revoke / Grant Write Permission */}
                           <button
+                            type="button"
                             onClick={() => onSetPermission(u.id, !canUserWrite)}
+                            aria-label={canUserWrite ? `Revoke writing permission for ${u.name}` : `Grant writing permission to ${u.name}`}
                             title={canUserWrite ? 'Revoke writing permission' : 'Grant writing permission'}
                             className={`px-2.5 py-1 text-xs font-medium rounded-lg border transition-colors cursor-pointer flex items-center gap-1 ${
                               canUserWrite
-                                ? 'text-amber-700 bg-amber-50 hover:bg-amber-100 border-amber-200'
-                                : 'text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border-emerald-200'
+                                ? 'text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/50 hover:bg-amber-100 dark:hover:bg-amber-950/80 border-amber-200 dark:border-amber-900/70'
+                                : 'text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/50 hover:bg-emerald-100 dark:hover:bg-emerald-950/80 border-emerald-200 dark:border-emerald-900/70'
                             }`}
                           >
                             {canUserWrite ? (
@@ -257,6 +267,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                           {confirmKickId === u.id ? (
                             <div className="flex items-center gap-1">
                               <button
+                                type="button"
                                 onClick={() => {
                                   onKickUser(u.id, 'Removed by room host');
                                   setConfirmKickId(null);
@@ -266,24 +277,28 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                                 Confirm Kick
                               </button>
                               <button
+                                type="button"
+                                aria-label="Cancel kick confirmation"
                                 onClick={() => setConfirmKickId(null)}
-                                className="p-1 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100 cursor-pointer"
+                                className="p-1 text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-200 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
                               >
                                 <X className="w-3.5 h-3.5" />
                               </button>
                             </div>
                           ) : (
                             <button
+                              type="button"
                               onClick={() => setConfirmKickId(u.id)}
+                              aria-label={`Remove ${u.name} from room`}
                               title="Remove user from room"
-                              className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                              className="p-1.5 text-slate-400 dark:text-slate-500 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/50 rounded-lg transition-colors cursor-pointer"
                             >
                               <UserX className="w-4 h-4" />
                             </button>
                           )}
                         </>
                       ) : (
-                        <div className="text-[11px] text-slate-400 px-2 py-1">
+                        <div className="text-[11px] text-slate-400 dark:text-slate-500 px-2 py-1">
                           {isUserHost ? 'Host' : canUserWrite ? 'Editor' : 'Viewer'}
                         </div>
                       )}
@@ -314,6 +329,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
               {confirmDeleteRoom ? (
                 <div className="flex items-center gap-2 pt-1 animate-in fade-in duration-150">
                   <button
+                    type="button"
                     onClick={() => {
                       if (roomId) onDeleteRoom?.(roomId);
                       setConfirmDeleteRoom(false);
@@ -325,6 +341,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                     <span>Yes, Delete Room Permanently</span>
                   </button>
                   <button
+                    type="button"
                     onClick={() => setConfirmDeleteRoom(false)}
                     className="px-3 py-2 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-medium transition-colors cursor-pointer"
                   >
@@ -333,6 +350,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                 </div>
               ) : (
                 <button
+                  type="button"
                   onClick={() => setConfirmDeleteRoom(true)}
                   className="px-3.5 py-2 bg-white dark:bg-slate-800 hover:bg-rose-50 dark:hover:bg-rose-950/40 text-rose-600 dark:text-rose-400 border border-rose-200 dark:border-rose-900/60 hover:border-rose-300 rounded-xl text-xs font-semibold transition-colors cursor-pointer flex items-center gap-1.5 shadow-2xs"
                 >
@@ -344,8 +362,9 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
           )}
 
           <button
+            type="button"
             onClick={onClose}
-            className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium text-xs rounded-xl transition-colors cursor-pointer"
+            className="w-full py-2.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-medium text-xs rounded-xl transition-colors cursor-pointer"
           >
             Close
           </button>

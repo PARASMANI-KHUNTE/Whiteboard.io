@@ -172,6 +172,10 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
     }
   }, [authUser, authToken, roomId]);
 
+  const dismissNotification = useCallback((id: string) => {
+    setNotifications((prev) => prev.filter((n) => n.id !== id));
+  }, []);
+
   const addNotification = useCallback((text: string, type: 'info' | 'success' | 'warning' = 'info') => {
     const id = Math.random().toString(36).substring(2, 9);
     setNotifications((prev) => [...prev.slice(-3), { id, text, type }]);
@@ -970,5 +974,6 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
     updateUserColor,
     switchRoom,
     addNotification,
+    dismissNotification,
   };
 }

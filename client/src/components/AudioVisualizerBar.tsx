@@ -54,6 +54,7 @@ export const AudioVisualizerBar: React.FC<AudioVisualizerBarProps> = ({
   onOpenInNewTab,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const volumePopoverRef = useRef<HTMLDivElement | null>(null);
   const [showVolumeSlider, setShowVolumeSlider] = useState(false);
   const [showErrorModal, setShowErrorModal] = useState(false);
 
@@ -63,6 +64,34 @@ export const AudioVisualizerBar: React.FC<AudioVisualizerBarProps> = ({
       setShowErrorModal(true);
     }
   }, [error]);
+
+  // Close the volume popover with Escape or an outside click.
+  useEffect(() => {
+    if (!showVolumeSlider) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setShowVolumeSlider(false);
+    };
+    const onPointerDown = (event: PointerEvent) => {
+      if (!volumePopoverRef.current?.contains(event.target as Node)) {
+        setShowVolumeSlider(false);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    document.addEventListener('pointerdown', onPointerDown);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      document.removeEventListener('pointerdown', onPointerDown);
+    };
+  }, [showVolumeSlider]);
+
+  useEffect(() => {
+    if (!showErrorModal) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setShowErrorModal(false);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [showErrorModal]);
 
   // Render wave animation on canvas
   useEffect(() => {
@@ -136,12 +165,12 @@ export const AudioVisualizerBar: React.FC<AudioVisualizerBarProps> = ({
         id="voice-chat-visualizer-container"
         className={`flex items-center gap-2.5 px-3 py-1 rounded-full border transition-all select-none shadow-xs ${
           isSpeaking
-            ? 'bg-white border-blue-400 ring-2 ring-blue-100'
+            ? 'bg-white dark:bg-slate-900 border-blue-400 ring-2 ring-blue-100 dark:ring-blue-950'
             : isVoiceConnected
             ? isMuted
-              ? 'bg-amber-50/70 border-amber-200'
-              : 'bg-white border-slate-300'
-            : 'bg-white border-slate-200'
+              ? 'bg-amber-50/70 dark:bg-amber-950/40 border-amber-200 dark:border-amber-900/70'
+              : 'bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-700'
+            : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800'
         }`}
       >
         {/* Status Indicator Dot & Label */}
@@ -157,7 +186,7 @@ export const AudioVisualizerBar: React.FC<AudioVisualizerBarProps> = ({
                 : 'bg-slate-300'
             }`}
           />
-          <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider hidden lg:inline">
+          <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider hidden lg:inline">
             {isSpeaking
               ? 'Speaking'
               : isVoiceConnected
@@ -170,7 +199,7 @@ export const AudioVisualizerBar: React.FC<AudioVisualizerBarProps> = ({
                 : 'Voice Live'
               : 'Voice Chat'}
             {activeSpeakers.length > 0 && (
-              <span className="ml-1 text-[10px] text-blue-600 font-semibold lowercase">
+              <span className="ml-1 text-[10px] text-blue-600 dark:text-blue-400 font-semibold lowercase">
                 ({activeSpeakers.length})
               </span>
             )}
@@ -181,13 +210,15 @@ export const AudioVisualizerBar: React.FC<AudioVisualizerBarProps> = ({
         <canvas ref={canvasRef} width={52} height={14} className="hidden sm:block opacity-90" />
 
         {/* Voice Controls Divider */}
-        <div className="flex items-center gap-1 border-l border-slate-100 pl-1.5 sm:pl-2">
+        <div className="flex items-center gap-1 border-l border-slate-100 dark:border-slate-800 pl-1.5 sm:pl-2">
           {!isVoiceConnected ? (
             <>
               {/* Connect Voice Button */}
               <button
+                type="button"
                 id="join-voice-btn"
                 onClick={onJoinVoice}
+                aria-label="Join real-time voice chat"
                 title="Connect to Real-time Voice Chat"
                 className="px-2 py-1 rounded-md text-xs font-semibold bg-blue-600 text-white hover:bg-blue-700 transition-colors cursor-pointer flex items-center gap-1 shadow-xs"
               >
@@ -198,10 +229,12 @@ export const AudioVisualizerBar: React.FC<AudioVisualizerBarProps> = ({
 
               {/* Simulation Demo Button */}
               <button
+                type="button"
                 id="toggle-simulated-voice-btn"
+                aria-pressed={isSimulated}
                 onClick={onToggleSimulated}
                 title="Test with simulated audio harmonics (No mic needed)"
-                className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-md transition-colors cursor-pointer flex items-center gap-1"
+                className="p-1.5 text-slate-400 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-md transition-colors cursor-pointer flex items-center gap-1"
               >
                 <Sparkles className="w-3.5 h-3.5 text-amber-500" />
                 <span className="text-[10px] font-medium hidden sm:inline">Simulate</span>
@@ -211,13 +244,16 @@ export const AudioVisualizerBar: React.FC<AudioVisualizerBarProps> = ({
             <>
               {/* Mute / Unmute Button */}
               <button
+                type="button"
                 id="toggle-mic-mute-btn"
+                aria-pressed={isMuted}
+                aria-label={isMuted ? 'Unmute microphone' : 'Mute microphone'}
                 onClick={onToggleMute}
                 title={isMuted ? 'Unmute microphone' : 'Mute microphone'}
                 className={`p-1.5 rounded-md transition-colors cursor-pointer ${
                   isMuted
-                    ? 'bg-amber-100 text-amber-700 hover:bg-amber-200'
-                    : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+                    ? 'bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 hover:bg-amber-200 dark:hover:bg-amber-950'
+                    : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-white'
                 }`}
               >
                 {isMuted ? <MicOff className="w-3.5 h-3.5" /> : <Mic className="w-3.5 h-3.5" />}
@@ -225,46 +261,60 @@ export const AudioVisualizerBar: React.FC<AudioVisualizerBarProps> = ({
 
               {/* Deafen / Undeafen Button */}
               <button
+                type="button"
                 id="toggle-deafen-btn"
+                aria-pressed={isDeafened}
+                aria-label={isDeafened ? 'Undeafen (unmute voices)' : 'Deafen (mute voices)'}
                 onClick={onToggleDeafen}
                 title={isDeafened ? 'Undeafen (unmute voices)' : 'Deafen (mute voices)'}
                 className={`p-1.5 rounded-md transition-colors cursor-pointer ${
                   isDeafened
-                    ? 'bg-rose-100 text-rose-700 hover:bg-rose-200'
-                    : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+                    ? 'bg-rose-100 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 hover:bg-rose-200 dark:hover:bg-rose-950'
+                    : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-white'
                 }`}
               >
                 {isDeafened ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5" />}
               </button>
 
               {/* Volume Slider Popover */}
-              <div className="relative flex items-center">
+              <div ref={volumePopoverRef} className="relative flex items-center">
                 <button
+                  type="button"
                   id="toggle-volume-slider-btn"
-                  onClick={() => setShowVolumeSlider((prev) => !prev)}
+                  aria-label={`Voice volume ${Math.round(volume * 100)}%`}
+                  aria-haspopup="true"
+                  aria-expanded={showVolumeSlider}
+                  aria-controls="voice-volume-popover"
                   title={`Voice Volume (${Math.round(volume * 100)}%)`}
+                  onClick={() => setShowVolumeSlider((prev) => !prev)}
                   className={`p-1.5 rounded-md transition-colors cursor-pointer ${
                     showVolumeSlider
-                      ? 'bg-blue-100 text-blue-700'
-                      : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+                      ? 'bg-blue-100 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300'
+                      : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-white'
                   }`}
                 >
                   <Headphones className="w-3.5 h-3.5" />
                 </button>
 
                 {showVolumeSlider && (
-                  <div className="absolute top-full right-0 mt-2 p-2.5 bg-white rounded-lg shadow-xl border border-slate-200 z-50 flex items-center gap-2 min-w-[150px]">
-                    <Volume2 className="w-3.5 h-3.5 text-slate-500" />
+                  <div
+                    id="voice-volume-popover"
+                    role="group"
+                    aria-label="Voice volume"
+                    className="absolute top-full right-0 mt-2 p-2.5 bg-white dark:bg-slate-900 rounded-lg shadow-xl border border-slate-200 dark:border-slate-700 z-50 flex items-center gap-2 min-w-[150px]"
+                  >
+                    <Volume2 className="w-3.5 h-3.5 text-slate-500 dark:text-slate-400" />
                     <input
                       type="range"
                       min="0"
                       max="1"
                       step="0.05"
                       value={volume}
+                      aria-label="Voice volume level"
                       onChange={(e) => onSetVolume?.(parseFloat(e.target.value))}
-                      className="w-20 h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
+                      className="w-20 h-1.5 bg-slate-200 dark:bg-slate-700 rounded-lg appearance-none cursor-pointer accent-blue-600"
                     />
-                    <span className="text-[11px] font-mono text-slate-600 min-w-[28px]">
+                    <span className="text-[11px] font-mono text-slate-600 dark:text-slate-300 min-w-[28px]">
                       {Math.round(volume * 100)}%
                     </span>
                   </div>
@@ -273,10 +323,12 @@ export const AudioVisualizerBar: React.FC<AudioVisualizerBarProps> = ({
 
               {/* Disconnect Voice */}
               <button
+                type="button"
                 id="leave-voice-btn"
                 onClick={onLeaveVoice}
+                aria-label="Disconnect from voice chat"
                 title="Disconnect from voice chat"
-                className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-md transition-colors cursor-pointer"
+                className="p-1.5 text-slate-400 dark:text-slate-500 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/50 rounded-md transition-colors cursor-pointer"
               >
                 <PhoneOff className="w-3.5 h-3.5" />
               </button>
@@ -286,10 +338,12 @@ export const AudioVisualizerBar: React.FC<AudioVisualizerBarProps> = ({
           {/* Error / Diagnostic Icon */}
           {error && (
             <button
+              type="button"
               id="voice-error-indicator-btn"
               onClick={() => setShowErrorModal(true)}
+              aria-label="Voice chat setup error: view details"
               title={error}
-              className="p-1 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded-md cursor-pointer animate-bounce"
+              className="p-1 text-rose-500 dark:text-rose-400 hover:text-rose-700 dark:hover:text-rose-300 hover:bg-rose-50 dark:hover:bg-rose-950/50 rounded-md cursor-pointer animate-bounce"
             >
               <AlertCircle className="w-3.5 h-3.5" />
             </button>
@@ -301,23 +355,28 @@ export const AudioVisualizerBar: React.FC<AudioVisualizerBarProps> = ({
       {showErrorModal && (
         <div
           id="voice-troubleshoot-modal"
-          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-xs p-4"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 dark:bg-black/60 backdrop-blur-xs p-4"
         >
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-md w-full p-6 text-slate-800 animate-in fade-in zoom-in-95 duration-200">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="voice-troubleshoot-title"
+            className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl max-w-md w-full p-6 text-slate-800 dark:text-slate-200 animate-in fade-in zoom-in-95 duration-200"
+          >
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center">
+              <div className="w-10 h-10 rounded-xl bg-rose-50 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400 flex items-center justify-center">
                 <AlertCircle className="w-5 h-5" />
               </div>
               <div>
-                <h3 className="text-base font-bold text-slate-900">Voice Chat Setup</h3>
-                <p className="text-xs text-slate-500">Microphone permission notice</p>
+                <h3 id="voice-troubleshoot-title" className="text-base font-bold text-slate-900 dark:text-white">Voice Chat Setup</h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400">Microphone permission notice</p>
               </div>
             </div>
 
-            <div className="mt-4 p-3.5 bg-slate-50 rounded-xl border border-slate-200/80 text-xs text-slate-600 leading-relaxed">
+            <div className="mt-4 p-3.5 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200/80 dark:border-slate-700 text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
               {isIframeRestricted ? (
                 <>
-                  <p className="font-semibold text-slate-800 mb-1">
+                  <p className="font-semibold text-slate-800 dark:text-slate-100 mb-1">
                     Running inside an embedded preview iframe:
                   </p>
                   <p>
@@ -332,32 +391,35 @@ export const AudioVisualizerBar: React.FC<AudioVisualizerBarProps> = ({
 
             <div className="mt-6 flex flex-col sm:flex-row items-center gap-2.5">
               <button
+                type="button"
                 id="voice-open-new-tab-btn"
                 onClick={() => {
                   onOpenInNewTab();
                   setShowErrorModal(false);
                 }}
-                className="w-full sm:w-auto flex-1 flex items-center justify-center gap-1.5 px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-semibold transition-colors cursor-pointer shadow-sm"
+                className="w-full sm:w-auto flex-1 flex items-center justify-center gap-1.5 px-4 py-2.5 bg-slate-900 dark:bg-slate-700 hover:bg-slate-800 dark:hover:bg-slate-600 text-white rounded-xl text-xs font-semibold transition-colors cursor-pointer shadow-sm"
               >
                 <ExternalLink className="w-3.5 h-3.5" />
                 <span>Open in New Tab (Enable Mic)</span>
               </button>
 
               <button
+                type="button"
                 id="voice-use-sim-btn"
                 onClick={() => {
                   setShowErrorModal(false);
                   onToggleSimulated();
                 }}
-                className="w-full sm:w-auto px-4 py-2.5 bg-blue-50 text-blue-700 hover:bg-blue-100 rounded-xl text-xs font-semibold transition-colors cursor-pointer flex items-center justify-center gap-1.5"
+                className="w-full sm:w-auto px-4 py-2.5 bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-950 rounded-xl text-xs font-semibold transition-colors cursor-pointer flex items-center justify-center gap-1.5"
               >
                 <Sparkles className="w-3.5 h-3.5 text-amber-500" />
                 <span>Test Simulation</span>
               </button>
 
               <button
+                type="button"
                 onClick={() => setShowErrorModal(false)}
-                className="w-full sm:w-auto px-3 py-2.5 text-slate-500 hover:text-slate-800 text-xs font-medium cursor-pointer"
+                className="w-full sm:w-auto px-3 py-2.5 text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-100 text-xs font-medium cursor-pointer"
               >
                 Close
               </button>

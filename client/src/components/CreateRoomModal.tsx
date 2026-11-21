@@ -85,6 +85,9 @@ export const CreateRoomModal: React.FC<CreateRoomModalProps> = ({
     >
       <div
         id="create-room-modal-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="create-room-title"
         className="w-full max-w-lg bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden text-slate-900 dark:text-slate-100"
       >
         {/* Header */}
@@ -94,13 +97,15 @@ export const CreateRoomModal: React.FC<CreateRoomModalProps> = ({
               <Plus className="w-4 h-4" />
             </div>
             <div>
-              <h2 className="text-sm font-semibold text-slate-900 dark:text-white">Create Session Room</h2>
+              <h2 id="create-room-title" className="text-sm font-semibold text-slate-900 dark:text-white">Create Session Room</h2>
               <p className="text-xs text-slate-500 dark:text-slate-400">Host your own collaborative session with full admin privileges</p>
             </div>
           </div>
           <button
+            type="button"
+            aria-label="Close create room dialog"
             onClick={onClose}
-            className="p-1 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+            className="p-1 rounded-lg text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
           >
             <X className="w-4 h-4" />
           </button>
@@ -108,17 +113,18 @@ export const CreateRoomModal: React.FC<CreateRoomModalProps> = ({
 
         <div className="p-6 space-y-5 max-h-[80vh] overflow-y-auto">
           {error && (
-            <div className="p-3 bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-900/50 text-rose-700 dark:text-rose-300 text-xs rounded-xl">
+            <div role="alert" className="p-3 bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-900/50 text-rose-700 dark:text-rose-300 text-xs rounded-xl">
               {error}
             </div>
           )}
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
-              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+              <label htmlFor="create-room-name" className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
                 Room Name <span className="text-rose-500">*</span>
               </label>
               <input
+                id="create-room-name"
                 type="text"
                 value={roomName}
                 onChange={(e) => setRoomName(e.target.value)}
@@ -129,12 +135,13 @@ export const CreateRoomModal: React.FC<CreateRoomModalProps> = ({
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+              <label htmlFor="create-room-code" className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
                 Custom Join Code (Optional)
               </label>
               <div className="relative">
-                <Hash className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <Hash className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" aria-hidden="true" />
                 <input
+                  id="create-room-code"
                   type="text"
                   value={customCode}
                   onChange={(e) => setCustomCode(e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, ''))}
@@ -155,6 +162,7 @@ export const CreateRoomModal: React.FC<CreateRoomModalProps> = ({
               </div>
               <input
                 type="checkbox"
+                aria-label="Lock canvas on entry"
                 checked={isLocked}
                 onChange={(e) => setIsLocked(e.target.checked)}
                 className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500 cursor-pointer"
@@ -204,6 +212,8 @@ export const CreateRoomModal: React.FC<CreateRoomModalProps> = ({
                         </span>
                       ) : (
                         <button
+                          type="button"
+                          aria-label={`Switch to room ${r.name}`}
                           onClick={() => {
                             (onSelectRoom || onJoinRoom)?.(r.id);
                             onClose();
@@ -219,6 +229,8 @@ export const CreateRoomModal: React.FC<CreateRoomModalProps> = ({
                       {confirmDeleteId === r.id ? (
                         <div className="flex items-center gap-1 animate-in fade-in duration-150">
                           <button
+                            type="button"
+                            aria-label={`Confirm delete room ${r.name}`}
                             onClick={async () => {
                               setIsDeletingId(r.id);
                               await onDeleteRoom?.(r.id);
@@ -231,17 +243,21 @@ export const CreateRoomModal: React.FC<CreateRoomModalProps> = ({
                             {isDeletingId === r.id ? '...' : 'Confirm'}
                           </button>
                           <button
+                            type="button"
+                            aria-label="Cancel delete room"
                             onClick={() => setConfirmDeleteId(null)}
-                            className="p-1 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-700 cursor-pointer"
+                            className="p-1 text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-200 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-700 cursor-pointer"
                           >
                             <X className="w-3.5 h-3.5" />
                           </button>
                         </div>
                       ) : (
                         <button
+                          type="button"
+                          aria-label={`Delete room ${r.name}`}
                           onClick={() => setConfirmDeleteId(r.id)}
                           title="Delete this room"
-                          className="p-1 text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors cursor-pointer"
+                          className="p-1 text-slate-400 dark:text-slate-500 hover:text-rose-600 dark:hover:text-rose-400 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors cursor-pointer"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
@@ -281,6 +297,8 @@ export const CreateRoomModal: React.FC<CreateRoomModalProps> = ({
                         </span>
                       ) : (
                         <button
+                          type="button"
+                          aria-label={`Rejoin room ${r.name}`}
                           onClick={() => {
                             (onSelectRoom || onJoinRoom)?.(r.id);
                             onClose();
