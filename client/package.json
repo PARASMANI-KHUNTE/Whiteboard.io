@@ -7,7 +7,8 @@
     "dev": "vite --port 5173",
     "client": "vite --port 5173",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.1.14",
