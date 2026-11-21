@@ -7,6 +7,7 @@ import type {
   DiagramType,
 } from '../ai/types';
 import { fetchAiEngine, requestDiagram } from '../ai/api';
+import { useModalA11y } from '../hooks/useModalA11y';
 import {
   Sparkles,
   Brain,
@@ -143,17 +144,8 @@ export const AiGenerateModal: React.FC<AiGenerateModalProps> = ({
     }
   }, [isOpen, canClearBoard]);
 
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        handleCancel();
-      }
-    };
-    if (isOpen) {
-      window.addEventListener('keydown', handleKeyDown);
-      return () => window.removeEventListener('keydown', handleKeyDown);
-    }
-  }, [isOpen]);
+  // Escape handling is provided by useModalA11y below.
+
 
   // Show the real engine: Gemini in the cloud, or whichever local Ollama model.
   useEffect(() => {
@@ -195,6 +187,9 @@ export const AiGenerateModal: React.FC<AiGenerateModalProps> = ({
       clearInterval(progressInterval);
     };
   }, [isGenerating, isReady]);
+
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useModalA11y({ isOpen, onClose: handleCancel, dialogRef });
 
   if (!isOpen) return null;
 
@@ -252,7 +247,14 @@ export const AiGenerateModal: React.FC<AiGenerateModalProps> = ({
       }}
       className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/65 backdrop-blur-sm animate-fade-in"
     >
-      <div className="relative w-full max-w-2xl bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden flex flex-col max-h-[90vh]">
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="ai-generate-modal-title"
+        tabIndex={-1}
+        className="relative w-full max-w-2xl bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden flex flex-col max-h-[90vh]"
+      >
         {/* Header */}
         <div className="relative px-6 py-5 border-b border-slate-100 dark:border-slate-800/80 bg-gradient-to-r from-indigo-50/50 via-purple-50/30 to-white dark:from-indigo-950/20 dark:via-purple-950/10 dark:to-slate-900 flex items-center justify-between">
           <div className="flex items-center space-x-3">
@@ -260,7 +262,7 @@ export const AiGenerateModal: React.FC<AiGenerateModalProps> = ({
               <Sparkles className="w-5 h-5 animate-pulse" />
             </div>
             <div>
-              <h3 className="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
+              <h3 id="ai-generate-modal-title" className="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
                 Generate with AI
                 <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700 dark:bg-indigo-900/60 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800">
                   {engineLabel}

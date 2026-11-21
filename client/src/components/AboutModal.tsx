@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useRef } from 'react';
 import { createPortal } from 'react-dom';
 import {
   X,
@@ -10,6 +10,7 @@ import {
   XCircle,
   Heart,
 } from 'lucide-react';
+import { useModalA11y } from '../hooks/useModalA11y';
 
 interface AboutModalProps {
   isOpen: boolean;
@@ -22,6 +23,9 @@ export const AboutModal: React.FC<AboutModalProps> = ({
   onClose,
   onOpenAiModal,
 }) => {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useModalA11y({ isOpen, onClose, dialogRef });
+
   if (!isOpen) return null;
 
   return createPortal(
@@ -31,7 +35,14 @@ export const AboutModal: React.FC<AboutModalProps> = ({
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="bg-white dark:bg-slate-900 rounded-3xl w-full max-w-2xl max-h-[90vh] flex flex-col border border-slate-200/80 dark:border-slate-800 shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 text-slate-900 dark:text-slate-100">
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="about-modal-title"
+        tabIndex={-1}
+        className="bg-white dark:bg-slate-900 rounded-3xl w-full max-w-2xl max-h-[90vh] flex flex-col border border-slate-200/80 dark:border-slate-800 shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 text-slate-900 dark:text-slate-100"
+      >
         {/* Modal Header */}
         <div className="px-6 py-5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-slate-50/50 dark:bg-slate-900/50">
           <div className="flex items-center gap-3">
@@ -39,7 +50,7 @@ export const AboutModal: React.FC<AboutModalProps> = ({
               W
             </div>
             <div>
-              <h2 className="text-lg sm:text-xl font-black tracking-tight flex items-center gap-2">
+              <h2 id="about-modal-title" className="text-lg sm:text-xl font-black tracking-tight flex items-center gap-2">
                 About Whiteboard<span className="text-blue-600 dark:text-blue-400">.io</span>
                 <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-blue-50 dark:bg-blue-950/80 text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-800">
                   v2.0

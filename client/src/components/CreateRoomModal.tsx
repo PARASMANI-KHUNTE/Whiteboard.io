@@ -1,8 +1,9 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { X, Plus, Lock, Unlock, Hash, ArrowRight, Trash2, Clock } from 'lucide-react';
 import { SessionRoom } from '../types';
 import { getRecentRooms, RecentRoom } from '../utils/recentRooms';
+import { useModalA11y } from '../hooks/useModalA11y';
 
 interface CreateRoomModalProps {
   isOpen: boolean;
@@ -49,6 +50,9 @@ export const CreateRoomModal: React.FC<CreateRoomModalProps> = ({
     }
   }, [isOpen]);
 
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useModalA11y({ isOpen, onClose, dialogRef });
+
   if (!isOpen) return null;
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -84,7 +88,12 @@ export const CreateRoomModal: React.FC<CreateRoomModalProps> = ({
       }}
     >
       <div
+        ref={dialogRef}
         id="create-room-modal-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="create-room-modal-title"
+        tabIndex={-1}
         className="w-full max-w-lg bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden text-slate-900 dark:text-slate-100"
       >
         {/* Header */}
@@ -94,7 +103,7 @@ export const CreateRoomModal: React.FC<CreateRoomModalProps> = ({
               <Plus className="w-4 h-4" />
             </div>
             <div>
-              <h2 className="text-sm font-semibold text-slate-900 dark:text-white">Create Session Room</h2>
+              <h2 id="create-room-modal-title" className="text-sm font-semibold text-slate-900 dark:text-white">Create Session Room</h2>
               <p className="text-xs text-slate-500 dark:text-slate-400">Host your own collaborative session with full admin privileges</p>
             </div>
           </div>
