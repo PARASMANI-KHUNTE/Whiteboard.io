@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
 import { Socket } from 'socket.io-client';
 import { RemoteUser } from '../types';
 
@@ -90,6 +90,25 @@ export function useVoiceChat({
   const remoteAudioElementsRef = useRef<Record<string, HTMLAudioElement>>({});
   // ICE candidate queue to prevent "remote description was null" race condition
   const pendingCandidatesRef = useRef<Record<string, RTCIceCandidateInit[]>>({});
+
+  // Voice belongs to one room/socket. Track the active pair so a room switch
+  // tears it down and an in-flight getUserMedia cannot resurrect it later.
+  const voiceRoomRef = useRef<string | null>(roomId);
+  const voiceSocketRef = useRef<Socket | null>(socket);
+  const voiceEpochRef = useRef(0);
+  /** Sockets we intentionally left; their `disconnect` event needs no cleanup. */
+  const expectedDisconnectsRef = useRef<Set<Socket>>(new Set());
+
+  // Notify peers on the socket we are leaving before switching/reconnecting.
+  const announceVoiceLeft = useCallback((target: Socket | null) => {
+    try {
+      if (target?.connected) {
+        target.emit('voice-status-update', { voiceConnected: false, isMuted: true });
+      }
+    } catch (_) {
+      // Socket already torn down; nothing to announce.
+    }
+  }, []);
 
   // Helper to ensure an active AudioContext
   const getOrCreateAudioContext = useCallback(() => {
@@ -188,18 +207,70 @@ export function useVoiceChat({
     setActiveSpeakers([]);
   }, []);
 
-  // Flush queued ICE candidates after remote description is set
+  // A room change (or socket reconnect) invalidates every voice resource: the
+  // mic, peers and "connected" UI state must never leak into the new room.
+  // Layout effect so the notice reaches the old socket before useSocket's
+  // passive cleanup disconnects it.
+  useLayoutEffect(() => {
+    const previousRoom = voiceRoomRef.current;
+    const previousSocket = voiceSocketRef.current;
+    const changed = previousRoom !== roomId || previousSocket !== socket;
+
+    voiceRoomRef.current = roomId;
+    voiceSocketRef.current = socket;
+
+    if (!changed) return;
+
+    voiceEpochRef.current += 1;
+    announceVoiceLeft(previousSocket);
+    if (previousSocket) expectedDisconnectsRef.current.add(previousSocket);
+    cleanupAll();
+    setError(null);
+    setIsIframeRestricted(false);
+  }, [roomId, socket, cleanupAll, announceVoiceLeft]);
+
+  // Socket.IO reconnects in place and kick/delete handlers call disconnect()
+  // without changing roomId or the socket object. Clean up voice on any real
+  // disconnect too, ignoring the old socket we just left during a room switch.
+  useEffect(() => {
+    if (!socket) return;
+    const handleDisconnect = () => {
+      if (expectedDisconnectsRef.current.delete(socket)) return;
+      voiceEpochRef.current += 1;
+      cleanupAll();
+      setError(null);
+      setIsIframeRestricted(false);
+    };
+    socket.on('disconnect', handleDisconnect);
+    return () => {
+      socket.off('disconnect', handleDisconnect);
+    };
+  }, [socket, cleanupAll]);
+
+  // Flush queued ICE candidates after remote description is set. Only remove
+  // candidates that were applied successfully; keep failures for a retry.
   const flushPendingCandidates = useCallback(async (targetUserId: string, pc: RTCPeerConnection) => {
     const pending = pendingCandidatesRef.current[targetUserId];
-    if (pending && pending.length > 0) {
-      delete pendingCandidatesRef.current[targetUserId];
-      for (const candidate of pending) {
-        try {
-          await pc.addIceCandidate(new RTCIceCandidate(candidate));
-        } catch (e) {
-          console.warn('Failed to add buffered ICE candidate:', e);
-        }
+    if (!pending || pending.length === 0) return;
+
+    const attempted = new Set(pending);
+    const failed: RTCIceCandidateInit[] = [];
+    for (const candidate of Array.from(pending)) {
+      try {
+        await pc.addIceCandidate(new RTCIceCandidate(candidate));
+      } catch (e) {
+        console.warn('Failed to add buffered ICE candidate:', e);
+        failed.push(candidate);
       }
+    }
+
+    // Preserve any candidates that arrived while the awaits were in flight.
+    const current = pendingCandidatesRef.current[targetUserId] ?? [];
+    const remaining = [...failed, ...current.filter((candidate) => !attempted.has(candidate))];
+    if (remaining.length > 0) {
+      pendingCandidatesRef.current[targetUserId] = remaining;
+    } else {
+      delete pendingCandidatesRef.current[targetUserId];
     }
   }, []);
 
@@ -221,6 +292,9 @@ export function useVoiceChat({
           existing.close();
         } catch (_) {}
         delete peerConnectionsRef.current[targetUserId];
+        // Candidates buffered for the old connection must not be applied to
+        // this replacement peer.
+        delete pendingCandidatesRef.current[targetUserId];
       }
 
       const pc = new RTCPeerConnection(ICE_SERVERS);
@@ -334,12 +408,26 @@ export function useVoiceChat({
     });
   }, [socket, currentUser.id, users, initiateOfferToUser]);
 
+  // A delayed solo→multiplayer start can capture the pre-conversion callback.
+  // Keep the latest socket-backed version in a ref and call through it.
+  const initiatePeerConnectionsRef = useRef(initiatePeerConnections);
+  initiatePeerConnectionsRef.current = initiatePeerConnections;
+
   // Start real microphone voice chat
   const startVoiceChat = useCallback(async () => {
-    if (!roomId) {
+    // Read the room from a ref: the solo→multiplayer flow schedules this call
+    // right after convertToMultiplayerRoom(), so the closure's roomId is stale.
+    const activeRoom = voiceRoomRef.current;
+    if (!activeRoom) {
       if (onNotification) onNotification('Please join or create a multiplayer room to use voice chat.', 'warning');
       return false;
     }
+
+    // The solo→multiplayer flow may call a callback created before the new
+    // socket existed; always use the current ones from refs.
+    const activeSocket = voiceSocketRef.current;
+    const startEpoch = voiceEpochRef.current;
+    const startRoom = activeRoom;
 
     cleanupAll();
     setError(null);
@@ -362,6 +450,13 @@ export function useVoiceChat({
         },
       });
 
+      // The room/socket may have changed while the permission prompt was open.
+      // Never attach a stream from the old room to the new one.
+      if (voiceEpochRef.current !== startEpoch || voiceRoomRef.current !== startRoom) {
+        stream.getTracks().forEach((track) => track.stop());
+        return false;
+      }
+
       localStreamRef.current = stream;
 
       // Setup Web Audio Context for visualizer and volume
@@ -382,16 +477,16 @@ export function useVoiceChat({
       setIsMuted(false);
       setIsSimulated(false);
 
-      if (socket) {
-        socket.emit('voice-status-update', {
+      if (activeSocket) {
+        activeSocket.emit('voice-status-update', {
           voiceConnected: true,
           isMuted: false,
           isDeafened,
         });
       }
 
-      // Initiate WebRTC mesh connections
-      initiatePeerConnections();
+      // Initiate WebRTC mesh connections using the current room's callback.
+      initiatePeerConnectionsRef.current();
 
       // Audio analysis loop
       let lastAudioEmit = 0;
@@ -413,9 +508,9 @@ export function useVoiceChat({
         setIsSpeaking(speakingNow);
 
         const now = Date.now();
-        if (now - lastAudioEmit > 80 && socket) {
+        if (now - lastAudioEmit > 80 && activeSocket) {
           lastAudioEmit = now;
-          socket.emit('audio-level', {
+          activeSocket.emit('audio-level', {
             level: normalized,
             isSpeaking: speakingNow,
           });
@@ -428,6 +523,11 @@ export function useVoiceChat({
       onNotification?.('Voice Chat Connected! You are now live.', 'success');
       return true;
     } catch (err: any) {
+      // Permission prompts outlive room switches. A late rejection must not
+      // overwrite the new room's clean state or notify the new room.
+      if (voiceEpochRef.current !== startEpoch || voiceRoomRef.current !== startRoom) {
+        return false;
+      }
       console.warn('Microphone activation failed:', err);
       const isDenied =
         err?.name === 'NotAllowedError' ||
@@ -631,17 +731,14 @@ export function useVoiceChat({
     const handleVoiceOffer = async (payload: { fromUserId: string; offer: any }) => {
       try {
         let pc: RTCPeerConnection | undefined = peerConnectionsRef.current[payload.fromUserId];
-        // If connection exists in a non-stable state or has a collision, recreate cleanly
+        // If connection exists in a non-stable state or has a collision,
+        // recreate it through the helper so stale ICE candidates are discarded.
         if (pc && pc.signalingState !== 'stable') {
-          try {
-            pc.close();
-          } catch (_) {}
-          delete peerConnectionsRef.current[payload.fromUserId];
-          pc = undefined;
+          pc = createPeerConnection(payload.fromUserId, true);
         }
 
         if (!pc) {
-          pc = createPeerConnection(payload.fromUserId, true);
+          pc = createPeerConnection(payload.fromUserId);
         }
 
         await pc.setRemoteDescription(new RTCSessionDescription(payload.offer));
@@ -789,12 +886,14 @@ export function useVoiceChat({
     };
   }, [isVoiceConnected]);
 
-  // Clean up when unmounting
-  useEffect(() => {
+  // Clean up when unmounting. Layout effect so the leave notice is emitted
+  // before useSocket's passive cleanup disconnects the socket.
+  useLayoutEffect(() => {
     return () => {
+      announceVoiceLeft(voiceSocketRef.current);
       cleanupAll();
     };
-  }, [cleanupAll]);
+  }, [cleanupAll, announceVoiceLeft]);
 
   return {
     isVoiceConnected,

@@ -16,6 +16,7 @@ import { useSocket } from './hooks/useSocket';
 import { useVoiceChat } from './hooks/useVoiceChat';
 import { useTheme } from './hooks/useTheme';
 import { useModalA11y } from './hooks/useModalA11y';
+import { useTouchPointerBridge } from './hooks/useTouchPointerBridge';
 import { Header } from './components/Header';
 import { Toolbar } from './components/Toolbar';
 import { Canvas } from './components/Canvas';
@@ -34,11 +35,12 @@ import { isColorBlack, isColorWhite } from './utils/themeColors';
 import { routeWire } from './utils/wireGeometry';
 import { loadAiSession, saveAiSession, clearAiSession } from './utils/aiSessionStorage';
 import { forgetRecentRoom, rememberRecentRoom } from './utils/recentRooms';
+import { subscribeToSessionExpired } from './utils/authSession';
 import type { AiDiagramPayload, AiSessionState } from './ai/types';
 
 /** A reversible local edit recorded for Ctrl+Z / Ctrl+Shift+Z. */
 type HistoryOperation =
-  | { kind: 'create'; elements: CanvasElement[]; at: number }
+  | { kind: 'create'; elements: CanvasElement[]; cascadeDeleted?: CanvasElement[]; at: number }
   | { kind: 'delete'; elements: CanvasElement[]; at: number }
   | { kind: 'update'; before: CanvasElement[]; after: CanvasElement[]; at: number }
   | {
@@ -46,10 +48,28 @@ type HistoryOperation =
       kind: 'batch';
       created: CanvasElement[];
       deleted: CanvasElement[];
+      /** Wires attached to `created` that undo had to remove as well. */
+      cascadeDeleted?: CanvasElement[];
       before: CanvasElement[];
       after: CanvasElement[];
       at: number;
     };
+
+/** Wires attached to a created element that a cascading undo must remove. */
+function collectCascadeWires(
+  elements: Record<string, CanvasElement>,
+  created: CanvasElement[],
+  excluded: CanvasElement[] = []
+): WireElement[] {
+  const createdIds = new Set(created.map((element) => element.id));
+  const excludedIds = new Set(excluded.map((element) => element.id));
+  return Object.values(elements).filter(
+    (element): element is WireElement =>
+      element.type === 'wire' &&
+      !excludedIds.has(element.id) &&
+      (createdIds.has(element.fromId) || createdIds.has(element.toId))
+  );
+}
 
 /**
  * Compare two canvas elements ignoring `updatedAt`, which changes on every
@@ -70,6 +90,9 @@ const HISTORY_LIMIT = 100;
 export default function App() {
   // Theme hook
   const { theme, toggleTheme } = useTheme();
+
+  // Let touch/pen gestures drive the mouse-based object manipulation handlers.
+  useTouchPointerBridge();
 
   const [currentTool, setCurrentTool] = useState<ToolType>('pen');
   const [currentColor, setCurrentColor] = useState<string>(() => (theme === 'dark' ? '#ffffff' : '#0f172a'));
@@ -113,6 +136,7 @@ export default function App() {
     authUser,
     token,
     isLoading: isAuthLoading,
+    authError,
     myRooms,
     login,
     register,
@@ -169,10 +193,24 @@ export default function App() {
     socket,
   } = useSocket(undefined, authUser, token);
 
+  // Surface session expiry from REST/AI/socket callers. useAuth performs the
+  // actual recovery; this only keeps the user informed.
+  useEffect(() => subscribeToSessionExpired((detail) => {
+    addNotification(detail.reason, detail.recoverable ? 'info' : 'warning');
+  }), [addNotification]);
+
+  useEffect(() => {
+    if (authError) addNotification(authError, 'warning');
+  }, [authError, addNotification]);
+
   // Keep the latest element map available to undo/redo without re-creating
   // callbacks on every room update.
   const elementsRef = useRef<Record<string, CanvasElement>>(elements);
   elementsRef.current = elements;
+
+  // Mirrors the server rule: the host or the sole participant may clear a
+  // board without going through the vote-to-clear flow.
+  const canDirectClear = isSoloMode || isHost || Object.keys(users).length <= 1;
 
   // AI chat is persisted per board (room code, or "solo") so a reload brings
   // back the same conversation and diagram context.
@@ -258,6 +296,22 @@ export default function App() {
       bumpHistory();
     },
     [bumpHistory]
+  );
+
+  /** Record a board clear as one undoable batch instead of discarding history. */
+  const recordBoardClearHistory = useCallback(
+    (previous: CanvasElement[]) => {
+      if (previous.length === 0) return;
+      pushHistory({
+        kind: 'batch',
+        created: [],
+        deleted: previous,
+        before: [],
+        after: [],
+        at: Date.now(),
+      });
+    },
+    [pushHistory]
   );
 
   const handleLogout = useCallback(async () => {
@@ -560,17 +614,31 @@ export default function App() {
   );
 
   const handleAiGenerated = useCallback(
-    (payload: AiDiagramPayload, options: { origin: { x: number; y: number }; replaceBoard: boolean }) => {
+    async (payload: AiDiagramPayload, options: { origin: { x: number; y: number }; replaceBoard: boolean }) => {
       if (!canWrite) {
         addNotification('You do not have permission to edit this board', 'warning');
         return;
       }
 
+      if (options.replaceBoard && !canDirectClear) {
+        addNotification('Only the room host can clear a shared board', 'warning');
+        return;
+      }
+
       if (options.replaceBoard) {
         aiClearGuardUntilRef.current = Date.now() + 2500;
-        emitClearBoardDirect();
-        // The clear is intentional and not undoable; the AI turn itself is.
-        resetHistory();
+        // Capture before the server broadcast clears local state, and wait for
+        // authorization: a participant may have joined while AI was in flight.
+        const previous = Object.values(elementsRef.current) as CanvasElement[];
+        const cleared = await emitClearBoardDirect();
+        if (cleared) {
+          recordBoardClearHistory(previous);
+        } else {
+          addNotification(
+            'Board was not cleared (only the host can clear a shared board); inserted without replacing.',
+            'warning'
+          );
+        }
       }
 
       applyAiElements(payload.sessionId, payload.elements);
@@ -617,8 +685,9 @@ export default function App() {
       addNotification,
       applyAiElements,
       applyAiSession,
+      canDirectClear,
       emitClearBoardDirect,
-      resetHistory,
+      recordBoardClearHistory,
     ]
   );
 
@@ -702,29 +771,22 @@ export default function App() {
     if (!operation) return;
 
     if (operation.kind === 'create') {
-      // Cascade to connectors attached to created objects.
-      const ids = new Set(operation.elements.map((element) => element.id));
-      (Object.values(elementsRef.current) as CanvasElement[]).forEach((element) => {
-        if (element.type === 'wire' && (ids.has(element.fromId) || ids.has(element.toId))) {
-          ids.add(element.id);
-        }
-      });
-      emitElementsBatchDelete(Array.from(ids));
+      // Cascade to connectors attached to created objects. Remember them so
+      // redo can restore exactly what this undo removed.
+      const cascadeDeleted = collectCascadeWires(elementsRef.current, operation.elements, operation.elements);
+      operation.cascadeDeleted = cascadeDeleted;
+      emitElementsBatchDelete([...operation.elements.map((element) => element.id), ...cascadeDeleted.map((element) => element.id)]);
     } else if (operation.kind === 'delete') {
       emitElementsBatchCreate(operation.elements);
     } else if (operation.kind === 'batch') {
       // Drop the turn's creations (plus any connectors now dangling off them),
       // restore anything it removed, then roll updates back.
-      const ids = new Set(operation.created.map((element) => element.id));
-      (Object.values(elementsRef.current) as CanvasElement[]).forEach((element) => {
-        if (
-          element.type === 'wire' &&
-          !ids.has(element.id) &&
-          (ids.has(element.fromId) || ids.has(element.toId))
-        ) {
-          ids.add(element.id);
-        }
-      });
+      const cascadeDeleted = collectCascadeWires(elementsRef.current, operation.created, [
+        ...operation.created,
+        ...operation.deleted,
+      ]);
+      operation.cascadeDeleted = cascadeDeleted;
+      const ids = new Set([...operation.created.map((element) => element.id), ...cascadeDeleted.map((element) => element.id)]);
       if (ids.size > 0) emitElementsBatchDelete(Array.from(ids));
       if (operation.deleted.length > 0) emitElementsBatchCreate(operation.deleted);
       operation.before.forEach((element) => emitElementUpdate(element));
@@ -743,10 +805,12 @@ export default function App() {
 
     if (operation.kind === 'create') {
       emitElementsBatchCreate(operation.elements);
+      if (operation.cascadeDeleted?.length) emitElementsBatchCreate(operation.cascadeDeleted);
     } else if (operation.kind === 'delete') {
       emitElementsBatchDelete(operation.elements.map((element) => element.id));
     } else if (operation.kind === 'batch') {
       if (operation.created.length > 0) emitElementsBatchCreate(operation.created);
+      if (operation.cascadeDeleted?.length) emitElementsBatchCreate(operation.cascadeDeleted);
       if (operation.deleted.length > 0) {
         emitElementsBatchDelete(operation.deleted.map((element) => element.id));
       }
@@ -781,19 +845,29 @@ export default function App() {
       setConfirmModalState({
         isOpen: true,
         title: 'Clear Whiteboard?',
-        message: 'This will erase all strokes, sticky notes, text, shapes, and stickers from your canvas. This action cannot be undone.',
+        message: 'This will erase all strokes, sticky notes, text, shapes, and stickers from your canvas. You can undo this with Ctrl+Z.',
         confirmText: 'Clear Board',
         cancelText: 'Cancel',
         variant: 'danger',
-        onConfirm: () => {
-          emitClearBoardDirect();
-          resetHistory();
-          addNotification('Whiteboard cleared', 'info');
+        onConfirm: async () => {
           setConfirmModalState((prev) => ({ ...prev, isOpen: false }));
+          // Capture before the server broadcast clears local elements, but only
+          // commit history/success if the server actually authorized the clear.
+          const previous = Object.values(elementsRef.current) as CanvasElement[];
+          const cleared = await emitClearBoardDirect();
+          if (cleared) {
+            recordBoardClearHistory(previous);
+            addNotification('Whiteboard cleared', 'info');
+          } else {
+            addNotification(
+              'Board was not cleared. Check your connection and that you are the room host.',
+              'warning'
+            );
+          }
         },
       });
     }
-  }, [canWrite, users, elements, emitVoteClearStart, emitClearBoardDirect, addNotification, resetHistory]);
+  }, [canWrite, users, elements, emitVoteClearStart, emitClearBoardDirect, addNotification, recordBoardClearHistory]);
 
   // Export board as PNG (matches the current viewport pan & zoom)
   const handleExport = useCallback(() => {
@@ -1245,6 +1319,15 @@ export default function App() {
 
   const isMultiplayer = Object.keys(users).length > 1;
 
+  useModalA11y({
+    isOpen: isKicked,
+    onClose: () => {
+      resetKickedState();
+      switchRoom(null);
+    },
+    dialogRef: kickedDialogRef,
+  });
+
   if (isAuthLoading) {
     return (
       <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-slate-900 text-white font-sans">
@@ -1256,14 +1339,18 @@ export default function App() {
     );
   }
 
-  useModalA11y({
-    isOpen: isKicked,
-    onClose: () => {
-      resetKickedState();
-      switchRoom(null);
-    },
-    dialogRef: kickedDialogRef,
-  });
+  const isBlockingOverlayOpen =
+    !authUser ||
+    showAuthModal ||
+    showCreateRoomModal ||
+    showShareModal ||
+    showAdminModal ||
+    showAiModal ||
+    isAiChatOpen ||
+    confirmModalState.isOpen ||
+    voteToClear?.active === true ||
+    isKicked ||
+    (Boolean(authUser) && !roomId && !hasChosenSessionMode);
 
   return (
     <div
@@ -1329,6 +1416,7 @@ export default function App() {
         currentUserId={currentUser.id}
         currentUserName={currentUser.name}
         canWrite={canWrite}
+        shortcutsBlocked={isBlockingOverlayOpen}
         theme={theme}
         onRestrictedAttempt={() =>
           addNotification('Drawing is restricted by room admin', 'warning')
@@ -1406,9 +1494,11 @@ export default function App() {
       {/* Authentication Modal */}
       <ErrorBoundary fallbackTitle="Authentication Dialog">
         <AuthModal
-          isOpen={!authUser || showAuthModal}
+          // If session recovery failed, explain via toast and let the user
+          // dismiss instead of trapping them in an unclosable login dialog.
+          isOpen={(!authUser && !authError) || showAuthModal}
           onClose={() => {
-            if (authUser) setShowAuthModal(false);
+            if (authUser || authError) setShowAuthModal(false);
           }}
           currentUser={authUser}
           onLogin={login}
@@ -1510,6 +1600,7 @@ export default function App() {
               }
         }
         authToken={token}
+        canClearBoard={canDirectClear}
       />
 
       {/* Docked follow-up chat for the current session (null session shows an empty state) */}

@@ -34,6 +34,8 @@ interface AiGenerateModalProps {
   ) => void;
   canvasCenter: { x: number; y: number };
   authToken?: string | null;
+  /** Only the host (or a sole participant) may replace the whole board. */
+  canClearBoard?: boolean;
 }
 
 interface TemplateOption {
@@ -104,6 +106,7 @@ export const AiGenerateModal: React.FC<AiGenerateModalProps> = ({
   onGenerated,
   canvasCenter,
   authToken,
+  canClearBoard = true,
 }) => {
   const [selectedType, setSelectedType] = useState<DiagramType>('mindmap');
   const [detail, setDetail] = useState<DetailLevel>('detailed');
@@ -132,6 +135,17 @@ export const AiGenerateModal: React.FC<AiGenerateModalProps> = ({
     setError(null);
     onClose();
   };
+
+  // Never carry a destructive "replace board" choice into a room where the
+  // user is not allowed to clear it (e.g. after switching rooms).
+  useEffect(() => {
+    if (!isOpen || !canClearBoard) {
+      setReplaceBoard(false);
+    }
+  }, [isOpen, canClearBoard]);
+
+  // Escape handling is provided by useModalA11y below.
+
 
   // Show the real engine: Gemini in the cloud, or whichever local Ollama model.
   useEffect(() => {
@@ -210,7 +224,7 @@ export const AiGenerateModal: React.FC<AiGenerateModalProps> = ({
 
       if (controller.signal.aborted) return;
 
-      onGenerated(payload, { origin: canvasCenter, replaceBoard });
+      onGenerated(payload, { origin: canvasCenter, replaceBoard: replaceBoard && canClearBoard });
       onClose();
       setPrompt('');
       setIsReady(false);
@@ -504,15 +518,21 @@ export const AiGenerateModal: React.FC<AiGenerateModalProps> = ({
 
               {/* Insertion Options & Action Buttons */}
               <div className="pt-2 flex items-center justify-between border-t border-slate-100 dark:border-slate-800">
-                <label className="flex items-center space-x-2 text-xs text-slate-600 dark:text-slate-400 cursor-pointer select-none">
-                  <input
-                    type="checkbox"
-                    checked={replaceBoard}
-                    onChange={(e) => setReplaceBoard(e.target.checked)}
-                    className="rounded text-indigo-600 focus:ring-indigo-500 dark:bg-slate-800 dark:border-slate-700"
-                  />
-                  <span>Clear existing board before inserting</span>
-                </label>
+                {canClearBoard ? (
+                  <label className="flex items-center space-x-2 text-xs text-slate-600 dark:text-slate-400 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={replaceBoard}
+                      onChange={(e) => setReplaceBoard(e.target.checked)}
+                      className="rounded text-indigo-600 focus:ring-indigo-500 dark:bg-slate-800 dark:border-slate-700"
+                    />
+                    <span>Clear existing board before inserting</span>
+                  </label>
+                ) : (
+                  <span className="text-xs text-slate-400 dark:text-slate-500">
+                    Only the room host can clear a shared board.
+                  </span>
+                )}
 
                 <div className="flex items-center space-x-2.5">
                   <button
