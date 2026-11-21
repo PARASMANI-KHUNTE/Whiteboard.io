@@ -21,6 +21,28 @@ export default defineConfig(({ mode }) => {
     build: {
       outDir: path.resolve(__dirname, 'dist'),
       emptyOutDir: true,
+      rollupOptions: {
+        output: {
+          manualChunks(id) {
+            if (!id.includes('node_modules')) return undefined;
+
+            const normalizedId = id.replace(/\\/g, '/');
+            if (/\/node_modules\/(react|react-dom|scheduler|react-is)\//.test(normalizedId)) {
+              return 'react-vendor';
+            }
+            if (normalizedId.includes('/node_modules/lucide-react/')) {
+              return 'icons';
+            }
+            if (
+              /\/node_modules\/(socket\.io-client|engine\.io-client|socket\.io-parser|engine\.io-parser)\//
+                .test(normalizedId)
+            ) {
+              return 'socket-vendor';
+            }
+            return 'vendor';
+          },
+        },
+      },
     },
     server: {
       port: 5173,
