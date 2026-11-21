@@ -102,7 +102,7 @@ def create_system_architecture_diagram(output_path="diagram_architecture.png"):
                                      linewidth=1.8, edgecolor=c_db_border, facecolor=c_db)
     ax.add_patch(rect_db)
     ax.text(3.0, 1.55, "PERSISTENCE TIER (MongoDB Native Driver 7)", ha='center', va='center', fontsize=9.5, fontweight='bold', color="#b45309")
-    ax.text(3.0, 0.9, "• users (UUID, PBKDF2 hash, TTL guest index)\n• tokens (Session auth tokens with 30-day TTL)\n• rooms (Metadata, creator ownership, lock state)\n• elements & room_elements (Granular atomic items)\n• In-memory store fallback for offline/test mode", ha='center', va='center', fontsize=7.2, color="#78350f")
+    ax.text(3.0, 0.9, "• users (UUID, PBKDF2 hash, TTL guest index)\n• tokens (Session auth tokens with 30-day TTL)\n• rooms (Metadata, creator ownership, lock state)\n• elements & room_elements (Granular atomic items)\n• MONGODB_URI required (no in-memory database)", ha='center', va='center', fontsize=7.2, color="#78350f")
 
     # External AI Service
     rect_ai = patches.FancyBboxPatch((5.8, 0.3), 3.6, 1.5, boxstyle="round,pad=0.1,rounding_size=0.15",

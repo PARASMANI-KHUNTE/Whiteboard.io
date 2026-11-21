@@ -26,7 +26,7 @@ Always adhere to the following 10-step pattern for all tasks, bugs, and features
    - Reviewers inspect the code, request changes, or approve it.
 
 8. **Automated CI/CD Checks**
-   - Run tests, linting, builds, and other quality checks before merging.
+   - GitHub Actions installs dependencies, typechecks both packages, runs the server tests, validates the project report, and builds both packages before merging.
 
 9. **Merge the PR**
    - Merge after required approvals and successful checks.

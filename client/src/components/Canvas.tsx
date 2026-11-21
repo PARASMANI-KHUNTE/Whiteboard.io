@@ -54,6 +54,8 @@ interface CanvasProps {
   currentUserId: string;
   currentUserName: string;
   canWrite?: boolean;
+  /** Suppress all canvas keyboard shortcuts while a blocking dialog is open. */
+  shortcutsBlocked?: boolean;
   theme?: 'light' | 'dark';
   selectedShapeType?: ShapeType;
   selectedIconName?: string;
@@ -111,6 +113,7 @@ export const Canvas: React.FC<CanvasProps> = ({
   currentUserId,
   currentUserName,
   canWrite = true,
+  shortcutsBlocked = false,
   theme = 'light',
   selectedShapeType = 'rectangle',
   selectedIconName = 'star',
@@ -838,6 +841,12 @@ export const Canvas: React.FC<CanvasProps> = ({
   // Keyboard shortcuts, spacebar pan & selection actions
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // The Canvas owns the shortcut sheet and must still be able to close it
+      // with Escape, but no other blocking dialog may let keys reach the board.
+      const dialogCount = document.querySelectorAll('[aria-modal="true"]').length;
+      const blockingDialogOpen = shortcutsBlocked || dialogCount > (shortcutsOpen ? 1 : 0);
+      if (blockingDialogOpen) return;
+
       const target = e.target as HTMLElement | null;
       const tagName = target?.tagName ?? '';
       const isEditable =
@@ -1011,6 +1020,7 @@ export const Canvas: React.FC<CanvasProps> = ({
     zoomOut,
     resetView,
     shortcutsOpen,
+    shortcutsBlocked,
     contextMenu,
   ]);
 
