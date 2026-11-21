@@ -24,6 +24,7 @@ import {
   flushAllPendingSaves,
 } from "./auth";
 import { connectDb, checkDbHealth } from "./db";
+import { resolveSocketIdentity } from "./socketIdentity";
 import { generateDiagram, reviseDiagram } from "./ai/generate";
 import { getProviderSummary } from "./ai/providers";
 import {
@@ -790,14 +791,18 @@ async function startServer() {
       const token = authHeader?.replace("Bearer ", "")?.trim();
       const user = token ? await getUserByToken(token) : null;
 
+      if (!user) {
+        res.status(401).json({ success: false, error: "You must be signed in to delete a room" });
+        return;
+      }
+
       const roomData = rooms.get(roomId);
       const meta = await getRoomMeta(roomId);
       const creatorId = roomData?.creatorId || meta?.creatorId;
-      // Anonymous hosts prove ownership with the stable guest identity they
-      // also use for sockets; authenticated callers are resolved from the token.
-      const requestedCreatorId =
-        typeof req.body?.creatorId === "string" ? req.body.creatorId.trim().slice(0, 128) : "";
-      const requesterId = user?.id || requestedCreatorId;
+      // Ownership is proved by the server-issued session identity only. A
+      // client-supplied creator id is public in room presence and must never
+      // be accepted as proof.
+      const requesterId = user.id;
 
       // Verify authorization: only the room creator may delete a room
       if (creatorId && creatorId !== requesterId) {
@@ -862,24 +867,23 @@ async function startServer() {
         return;
       }
 
-      // Resolve identity server-side whenever a valid token is supplied so that
-      // guests cannot spoof another account's id or host privileges.
+      // Every participant must have a server-issued identity. The id broadcast
+      // in room presence is public, so accepting a client-supplied id would let
+      // any guest claim the host's moderation rights.
       const authenticatedUser = typeof data.token === "string" && data.token
         ? await getUserByToken(data.token)
         : null;
-      const accountId = authenticatedUser ? authenticatedUser.id : null;
-      const providedUser = data.user && typeof data.user === "object" ? data.user : ({} as any);
-      const actualUserId = (accountId || String(providedUser.id || socket.id)).slice(0, 128);
-      const requestedName = String(providedUser.name || "").trim().slice(0, 48);
-      const accountName = authenticatedUser ? String(authenticatedUser.name || "").trim().slice(0, 48) : "";
-      const actualName = requestedName || accountName || "Guest";
-      const requestedColor = typeof providedUser.color === "string" ? providedUser.color : "";
-      const actualColorCandidate = /^#[0-9a-fA-F]{3,8}$/.test(requestedColor)
-        ? requestedColor
-        : authenticatedUser
-        ? authenticatedUser.color
-        : requestedColor;
-      const actualColor = actualColorCandidate || "#3b82f6";
+      const identity = resolveSocketIdentity(authenticatedUser, data.user);
+      if (!identity) {
+        socket.emit("room-error", {
+          message: "Your session is no longer valid. Refresh the page to rejoin.",
+        });
+        return;
+      }
+      const accountId = identity.id;
+      const actualUserId = identity.id;
+      const actualName = identity.name;
+      const actualColor = identity.color;
 
       const room = await getOrCreateRoom(roomId);
 
