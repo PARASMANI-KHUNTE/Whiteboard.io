@@ -118,7 +118,7 @@ export const AiGenerateModal: React.FC<AiGenerateModalProps> = ({
   const [isReady, setIsReady] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [replaceBoard, setReplaceBoard] = useState<boolean>(false);
-  const [engineLabel, setEngineLabel] = useState<string>('Gemini 3.8 Flash');
+  const [engineLabel, setEngineLabel] = useState<string>('Checking AI engine…');
   const [engineProvider, setEngineProvider] = useState<AiEngineConfig['provider'] | null>(null);
 
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -153,11 +153,13 @@ export const AiGenerateModal: React.FC<AiGenerateModalProps> = ({
     const controller = new AbortController();
     fetchAiEngine(controller.signal)
       .then((config) => {
-        if (!config) return;
+        if (!config || controller.signal.aborted) return;
         setEngineProvider(config.provider);
         setEngineLabel(config.label);
       })
-      .catch(() => {});
+      .catch(() => {
+        if (!controller.signal.aborted) setEngineLabel('AI engine');
+      });
     return () => controller.abort();
   }, [isOpen]);
 
@@ -342,7 +344,7 @@ export const AiGenerateModal: React.FC<AiGenerateModalProps> = ({
             <button
               type="button"
               onClick={handleCancel}
-              className="px-6 py-2.5 rounded-xl text-xs font-semibold text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-750 transition-all cursor-pointer border border-slate-200 dark:border-slate-700 shadow-xs active:scale-95"
+              className="px-6 py-2.5 rounded-xl text-xs font-semibold text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all cursor-pointer border border-slate-200 dark:border-slate-700 shadow-xs active:scale-95"
             >
               Cancel Generation
             </button>

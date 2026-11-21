@@ -48,12 +48,14 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
   onDeleteRoom,
 }) => {
   const [confirmKickId, setConfirmKickId] = useState<string | null>(null);
+  const [kickReason, setKickReason] = useState('');
   const [confirmDeleteRoom, setConfirmDeleteRoom] = useState(false);
 
   // Reset destructive-confirmation state whenever the panel is (re)opened.
   useEffect(() => {
     if (isOpen) {
       setConfirmKickId(null);
+      setKickReason('');
       setConfirmDeleteRoom(false);
     }
   }, [isOpen]);
@@ -271,31 +273,53 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
 
                           {/* Kick User */}
                           {confirmKickId === u.id ? (
-                            <div className="flex items-center gap-1">
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  onKickUser(u.id, 'Removed by room host');
-                                  setConfirmKickId(null);
-                                }}
-                                className="px-2 py-1 bg-rose-600 hover:bg-rose-700 text-white text-xs font-medium rounded-lg cursor-pointer transition-colors"
-                              >
-                                Confirm Kick
-                              </button>
-                              <button
-                                type="button"
-                                aria-label="Cancel kick confirmation"
-                                onClick={() => setConfirmKickId(null)}
-                                className="p-1 text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-200 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
-                              >
-                                <X className="w-3.5 h-3.5" />
-                              </button>
+                            <div className="flex flex-col items-end gap-1.5">
+                              <label htmlFor={`kick-reason-${u.id}`} className="text-[10px] font-semibold text-slate-500 dark:text-slate-400">
+                                Reason (optional)
+                              </label>
+                              <input
+                                id={`kick-reason-${u.id}`}
+                                type="text"
+                                value={kickReason}
+                                maxLength={120}
+                                autoFocus
+                                placeholder="Removed by room host"
+                                onChange={(e) => setKickReason(e.target.value)}
+                                className="w-44 px-2 py-1.5 text-xs border border-slate-300 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-rose-400"
+                              />
+                              <div className="flex items-center gap-1">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    onKickUser(u.id, kickReason.trim() || 'Removed by room host');
+                                    setConfirmKickId(null);
+                                    setKickReason('');
+                                  }}
+                                  className="px-2 py-1.5 bg-rose-600 hover:bg-rose-700 text-white text-xs font-medium rounded-lg cursor-pointer transition-colors"
+                                >
+                                  Confirm Kick
+                                </button>
+                                <button
+                                  type="button"
+                                  aria-label="Cancel kick confirmation"
+                                  onClick={() => {
+                                    setConfirmKickId(null);
+                                    setKickReason('');
+                                  }}
+                                  className="p-1.5 min-w-[32px] min-h-[32px] flex items-center justify-center text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-200 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+                                >
+                                  <X className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
                             </div>
                           ) : (
                             <button
                               type="button"
-                              onClick={() => setConfirmKickId(u.id)}
                               aria-label={`Remove ${u.name} from room`}
+                              onClick={() => {
+                                setKickReason('');
+                                setConfirmKickId(u.id);
+                              }}
                               title="Remove user from room"
                               className="p-1.5 text-slate-400 dark:text-slate-500 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/50 rounded-lg transition-colors cursor-pointer"
                             >

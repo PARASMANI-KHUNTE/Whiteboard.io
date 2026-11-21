@@ -39,7 +39,7 @@ export const VoteToClearModal: React.FC<VoteToClearModalProps> = ({
       id="vote-to-clear-banner"
       role="group"
       aria-label="Vote to clear whiteboard"
-      className="fixed bottom-24 right-6 z-50 w-72 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xl p-5 text-slate-900 dark:text-slate-100 animate-in fade-in slide-in-from-bottom-4 duration-200 select-none"
+      className="fixed bottom-24 right-3 sm:right-6 z-30 w-[min(18rem,calc(100vw-1.5rem))] bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xl p-5 text-slate-900 dark:text-slate-100 animate-in fade-in slide-in-from-bottom-4 duration-200 select-none wb-bottom-chat-aware wb-bottom-vote"
     >
       <div className="flex items-center justify-between mb-2">
         <span className="text-[11px] font-bold uppercase tracking-tight text-slate-400 dark:text-slate-500">

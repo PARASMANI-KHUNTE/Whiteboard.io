@@ -1,5 +1,6 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useCallback, useRef } from 'react';
 import { ToolType, ShapeType, WireStyle } from '../types';
+import { usePopoverDismiss } from '../hooks/usePopoverDismiss';
 import { AVAILABLE_ICONS } from '../constants/icons';
 import {
   MousePointer,
@@ -108,6 +109,18 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   const [shapeSearchQuery, setShapeSearchQuery] = useState('');
   const [iconSearchQuery, setIconSearchQuery] = useState('');
   const [isExpanded, setIsExpanded] = useState(false);
+  const toolbarRef = useRef<HTMLDivElement | null>(null);
+
+  const closePickers = useCallback(() => {
+    setShowShapePicker(false);
+    setShowIconPicker(false);
+    setShowWirePicker(false);
+  }, []);
+  usePopoverDismiss(
+    toolbarRef,
+    showShapePicker || showIconPicker || showWirePicker,
+    closePickers
+  );
 
   const filteredShapes = useMemo(() => {
     const q = shapeSearchQuery.trim().toLowerCase();
@@ -147,7 +160,10 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   };
 
   return (
-    <div className="fixed bottom-4 sm:bottom-6 left-1/2 -translate-x-1/2 z-40 flex flex-col items-center gap-2 max-w-[98vw] select-none pointer-events-auto">
+    <div
+      ref={toolbarRef}
+      className="fixed bottom-4 sm:bottom-6 left-1/2 -translate-x-1/2 z-40 flex flex-col items-center gap-2 max-w-[98vw] select-none pointer-events-auto wb-bottom-chat-aware wb-bottom-toolbar"
+    >
       {/* Read-only notification badge when revoked */}
       {!canWrite && (
         <div className="px-3.5 py-1.5 bg-amber-500 text-white text-xs font-semibold rounded-full shadow-lg border border-amber-400 flex items-center gap-1.5 animate-in fade-in slide-in-from-bottom-2 duration-150">
@@ -164,11 +180,13 @@ export const Toolbar: React.FC<ToolbarProps> = ({
               Shapes ({filteredShapes.length})
             </span>
             <button
+              type="button"
+              aria-label="Close shape picker"
               onClick={() => {
                 setShowShapePicker(false);
                 setShapeSearchQuery('');
               }}
-              className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-0.5 rounded cursor-pointer"
+              className="text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-200 p-1.5 min-w-[36px] min-h-[36px] rounded-lg cursor-pointer flex items-center justify-center"
             >
               <X className="w-3.5 h-3.5" />
             </button>
@@ -187,8 +205,10 @@ export const Toolbar: React.FC<ToolbarProps> = ({
             />
             {shapeSearchQuery && (
               <button
+                type="button"
+                aria-label="Clear shape search"
                 onClick={() => setShapeSearchQuery('')}
-                className="absolute right-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-0.5 cursor-pointer"
+                className="absolute right-1.5 text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-200 p-1.5 min-w-[36px] min-h-[36px] flex items-center justify-center rounded-lg cursor-pointer"
               >
                 <X className="w-3 h-3" />
               </button>
@@ -234,11 +254,13 @@ export const Toolbar: React.FC<ToolbarProps> = ({
               Icons &amp; Stickers ({filteredIcons.length})
             </span>
             <button
+              type="button"
+              aria-label="Close icon picker"
               onClick={() => {
                 setShowIconPicker(false);
                 setIconSearchQuery('');
               }}
-              className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-0.5 rounded cursor-pointer"
+              className="text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-200 p-1.5 min-w-[36px] min-h-[36px] rounded-lg cursor-pointer flex items-center justify-center"
             >
               <X className="w-3.5 h-3.5" />
             </button>
@@ -257,8 +279,10 @@ export const Toolbar: React.FC<ToolbarProps> = ({
             />
             {iconSearchQuery && (
               <button
+                type="button"
+                aria-label="Clear icon search"
                 onClick={() => setIconSearchQuery('')}
-                className="absolute right-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-0.5 cursor-pointer"
+                className="absolute right-1.5 text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-200 p-1.5 min-w-[36px] min-h-[36px] flex items-center justify-center rounded-lg cursor-pointer"
               >
                 <X className="w-3 h-3" />
               </button>
@@ -304,8 +328,10 @@ export const Toolbar: React.FC<ToolbarProps> = ({
               Wire Connector Type
             </span>
             <button
+              type="button"
+              aria-label="Close wire picker"
               onClick={() => setShowWirePicker(false)}
-              className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-0.5 rounded cursor-pointer"
+              className="text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-200 p-1.5 min-w-[36px] min-h-[36px] rounded-lg cursor-pointer flex items-center justify-center"
             >
               <X className="w-3.5 h-3.5" />
             </button>
@@ -321,7 +347,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
               className={`p-3 rounded-xl border flex flex-col items-center gap-2 transition-all cursor-pointer ${
                 selectedWireStyle === 'curve' && currentTool === 'wire'
                   ? 'bg-blue-50 dark:bg-blue-950 border-blue-500 text-blue-600 dark:text-blue-400 font-bold shadow-xs ring-1 ring-blue-400'
-                  : 'bg-white dark:bg-slate-800/80 hover:bg-slate-50 dark:hover:bg-slate-750 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200'
+                  : 'bg-white dark:bg-slate-800/80 hover:bg-slate-50 dark:hover:bg-slate-700 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200'
               }`}
             >
               <Spline className="w-5 h-5 text-blue-500" />
@@ -340,7 +366,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
               className={`p-3 rounded-xl border flex flex-col items-center gap-2 transition-all cursor-pointer ${
                 selectedWireStyle === 'line' && currentTool === 'wire'
                   ? 'bg-blue-50 dark:bg-blue-950 border-blue-500 text-blue-600 dark:text-blue-400 font-bold shadow-xs ring-1 ring-blue-400'
-                  : 'bg-white dark:bg-slate-800/80 hover:bg-slate-50 dark:hover:bg-slate-750 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200'
+                  : 'bg-white dark:bg-slate-800/80 hover:bg-slate-50 dark:hover:bg-slate-700 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200'
               }`}
             >
               <Minus className="w-5 h-5 text-blue-500" />
@@ -475,6 +501,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
           {/* Shapes Tool Button */}
           <button
             id="tool-shapes"
+            data-popover-trigger
             disabled={!canWrite}
             onClick={() => {
               setShowShapePicker(!showShapePicker);
@@ -496,6 +523,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
           {/* Stickers / Icons Tool Button */}
           <button
             id="tool-icons"
+            data-popover-trigger
             disabled={!canWrite}
             onClick={() => {
               setShowIconPicker(!showIconPicker);
@@ -557,6 +585,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
           {/* Wire / Connector Tool Button */}
           <button
             id="tool-wire"
+            data-popover-trigger
             disabled={!canWrite}
             onClick={() => {
               if (currentTool === 'wire') {
@@ -594,7 +623,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
           className={`min-h-[40px] px-2 sm:px-2.5 py-1.5 rounded-xl flex items-center gap-1.5 text-xs font-medium transition-all cursor-pointer shrink-0 border ${
             isExpanded
               ? 'bg-blue-50 dark:bg-blue-950 text-blue-600 dark:text-blue-400 border-blue-200 dark:border-blue-800 shadow-xs'
-              : 'bg-slate-50 dark:bg-slate-800/80 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-750'
+              : 'bg-slate-50 dark:bg-slate-800/80 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700'
           }`}
         >
           <SlidersHorizontal className="w-3.5 h-3.5" />

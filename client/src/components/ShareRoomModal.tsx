@@ -24,6 +24,7 @@ export const ShareRoomModal: React.FC<ShareRoomModalProps> = ({
 }) => {
   const [copiedCode, setCopiedCode] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
+  const [copyError, setCopyError] = useState<string | null>(null);
   const codeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const linkTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -52,40 +53,43 @@ export const ShareRoomModal: React.FC<ShareRoomModalProps> = ({
     linkTimerRef.current = setTimeout(() => setCopiedLink(false), 2500);
   };
 
-  const handleCopyCode = async () => {
+  const copyToClipboard = async (text: string): Promise<boolean> => {
     try {
-      await navigator.clipboard.writeText(activeRoomId);
-      setCopiedCode(true);
-      resetCopiedCodeLater();
+      await navigator.clipboard.writeText(text);
+      return true;
     } catch {
-      // Fallback without browser prompt
+      // Fallback for browsers/contexts without the async clipboard API.
       const el = document.createElement('textarea');
-      el.value = activeRoomId;
+      el.value = text;
+      el.setAttribute('readonly', '');
+      el.style.position = 'fixed';
+      el.style.opacity = '0';
       document.body.appendChild(el);
       el.select();
-      document.execCommand('copy');
-      document.body.removeChild(el);
-      setCopiedCode(true);
-      resetCopiedCodeLater();
+      let copied = false;
+      try {
+        copied = document.execCommand('copy');
+      } catch {
+        copied = false;
+      } finally {
+        document.body.removeChild(el);
+      }
+      return copied;
     }
   };
 
+  const handleCopyCode = async () => {
+    const copied = await copyToClipboard(activeRoomId);
+    setCopyError(copied ? null : 'Could not copy the room code. Select it manually instead.');
+    setCopiedCode(copied);
+    if (copied) resetCopiedCodeLater();
+  };
+
   const handleCopyLink = async () => {
-    try {
-      await navigator.clipboard.writeText(roomUrl);
-      setCopiedLink(true);
-      resetCopiedLinkLater();
-    } catch {
-      // Fallback without browser prompt
-      const el = document.createElement('textarea');
-      el.value = roomUrl;
-      document.body.appendChild(el);
-      el.select();
-      document.execCommand('copy');
-      document.body.removeChild(el);
-      setCopiedLink(true);
-      resetCopiedLinkLater();
-    }
+    const copied = await copyToClipboard(roomUrl);
+    setCopyError(copied ? null : 'Could not copy the link. Select it manually instead.');
+    setCopiedLink(copied);
+    if (copied) resetCopiedLinkLater();
   };
 
   return createPortal(
@@ -156,7 +160,7 @@ export const ShareRoomModal: React.FC<ShareRoomModalProps> = ({
           {/* Room Code Card */}
           <div>
             <div id="share-room-code-label" className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
-              Room Code (6-Character ID)
+              Room Code
             </div>
             <div className="flex items-center gap-2">
               <div
@@ -167,7 +171,7 @@ export const ShareRoomModal: React.FC<ShareRoomModalProps> = ({
               </div>
               <button
                 type="button"
-                aria-label="Copy room code"
+                aria-label={copiedCode ? 'Room code copied' : 'Copy room code'}
                 onClick={handleCopyCode}
                 className="px-4 py-3 bg-slate-900 dark:bg-blue-600 hover:bg-slate-800 dark:hover:bg-blue-700 text-white font-medium text-xs rounded-xl shadow-xs transition-colors flex items-center gap-1.5 cursor-pointer"
               >
@@ -191,12 +195,13 @@ export const ShareRoomModal: React.FC<ShareRoomModalProps> = ({
                 id="share-room-url"
                 type="text"
                 readOnly
+                aria-label="Direct shareable link"
                 value={roomUrl}
                 className="flex-1 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 px-3 py-2 rounded-xl text-xs font-mono text-slate-600 dark:text-slate-300 truncate focus:outline-none"
               />
               <button
                 type="button"
-                aria-label="Copy shareable link"
+                aria-label={copiedLink ? 'Link copied' : 'Copy direct shareable link'}
                 onClick={handleCopyLink}
                 className="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium text-xs rounded-xl shadow-xs transition-colors flex items-center gap-1.5 cursor-pointer shrink-0"
               >
@@ -205,6 +210,12 @@ export const ShareRoomModal: React.FC<ShareRoomModalProps> = ({
               </button>
             </div>
           </div>
+
+          {copyError && (
+            <p role="status" className="text-[11px] font-medium text-rose-600 dark:text-rose-400">
+              {copyError}
+            </p>
+          )}
 
           <div className="p-3 bg-blue-50/60 dark:bg-blue-950/40 border border-blue-100 dark:border-blue-900/50 rounded-xl text-[11px] text-blue-800 dark:text-blue-300 leading-relaxed">
             💡 Anyone with this code or link can join the whiteboard and live voice chat immediately on mobile or desktop.

@@ -1,4 +1,5 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { usePopoverDismiss } from '../hooks/usePopoverDismiss';
 import { ShapeElement } from '../types';
 import {
   Trash2,
@@ -86,6 +87,12 @@ export const ShapeItem: React.FC<ShapeItemProps> = ({
   const currentRotRef = useRef(rotation);
   const lastEmitRef = useRef<number>(0);
   const elementRef = useRef<HTMLDivElement | null>(null);
+
+  const closeMenus = useCallback(() => {
+    setShowColorPicker(false);
+    setShowStyleMenu(false);
+  }, []);
+  usePopoverDismiss(elementRef, showColorPicker || showStyleMenu, closeMenus);
 
   const isLocked = Boolean(element.isLocked);
 
@@ -728,9 +735,11 @@ export const ShapeItem: React.FC<ShapeItemProps> = ({
           {/* Quick Rotate 45 deg */}
           {!isLocked && (
             <button
+              type="button"
+              aria-label="Rotate shape 45 degrees"
               onClick={handleQuickRotate}
               title="Rotate 45°"
-              className="p-1 text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg cursor-pointer"
+              className="p-1.5 min-w-[32px] min-h-[32px] flex items-center justify-center text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg cursor-pointer"
             >
               <RotateCw className="w-3.5 h-3.5" />
             </button>
@@ -757,9 +766,13 @@ export const ShapeItem: React.FC<ShapeItemProps> = ({
           {!isLocked && (
             <div className="relative">
               <button
+                type="button"
+                data-popover-trigger
+                aria-label="Stroke style and opacity"
+                aria-expanded={showStyleMenu}
                 onClick={() => setShowStyleMenu(!showStyleMenu)}
                 title="Stroke style & opacity"
-                className={`p-1 rounded-lg cursor-pointer transition-colors ${
+                className={`p-1.5 min-w-[32px] min-h-[32px] flex items-center justify-center rounded-lg cursor-pointer transition-colors ${
                   showStyleMenu
                     ? 'bg-blue-100 dark:bg-blue-950 text-blue-600 dark:text-blue-400'
                     : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800'
@@ -786,7 +799,7 @@ export const ShapeItem: React.FC<ShapeItemProps> = ({
                           className={`flex-1 py-1 text-xs rounded font-medium transition-colors cursor-pointer border ${
                             strokeWidth === sw.val
                               ? 'bg-blue-600 text-white border-blue-600'
-                              : 'bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-750'
+                              : 'bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700'
                           }`}
                         >
                           {sw.label}
@@ -808,7 +821,7 @@ export const ShapeItem: React.FC<ShapeItemProps> = ({
                           className={`py-1 text-xs capitalize rounded font-medium transition-colors cursor-pointer border ${
                             strokeStyle === st
                               ? 'bg-blue-600 text-white border-blue-600'
-                              : 'bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-750'
+                              : 'bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700'
                           }`}
                         >
                           {st}
@@ -830,7 +843,7 @@ export const ShapeItem: React.FC<ShapeItemProps> = ({
                           className={`py-1 text-[11px] rounded font-medium transition-colors cursor-pointer border ${
                             opacity === op.val
                               ? 'bg-blue-600 text-white border-blue-600'
-                              : 'bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-750'
+                              : 'bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700'
                           }`}
                         >
                           {op.label}
@@ -865,9 +878,13 @@ export const ShapeItem: React.FC<ShapeItemProps> = ({
           {!isLocked && (
             <div className="relative">
               <button
+                type="button"
+                data-popover-trigger
+                aria-label="Change shape color"
+                aria-expanded={showColorPicker}
                 onClick={() => setShowColorPicker(!showColorPicker)}
                 title="Change color"
-                className="p-1 text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg cursor-pointer"
+                className="p-1.5 min-w-[32px] min-h-[32px] flex items-center justify-center text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg cursor-pointer"
               >
                 <Palette className="w-3.5 h-3.5" />
               </button>
@@ -880,9 +897,12 @@ export const ShapeItem: React.FC<ShapeItemProps> = ({
                   {PALETTE_COLORS.map((c) => (
                     <button
                       key={c}
+                      type="button"
+                      aria-label={`Use ${c} color`}
+                      aria-pressed={element.color === c}
                       onClick={() => handleColorChange(c)}
                       style={{ backgroundColor: c }}
-                      className={`w-5 h-5 rounded-full border border-slate-300 dark:border-slate-700 hover:scale-110 transition-transform cursor-pointer ${
+                      className={`w-7 h-7 rounded-full border border-slate-300 dark:border-slate-700 hover:scale-110 transition-transform cursor-pointer ${
                         element.color === c ? 'ring-2 ring-blue-500' : ''
                       }`}
                     />

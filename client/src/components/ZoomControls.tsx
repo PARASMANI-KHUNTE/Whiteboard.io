@@ -23,7 +23,7 @@ export const ZoomControls: React.FC<ZoomControlsProps> = ({
   return (
     <div
       id="whiteboard-zoom-controls"
-      className="fixed bottom-20 sm:bottom-6 left-3 sm:left-4 z-40 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border border-slate-200/90 dark:border-slate-800 shadow-xl rounded-2xl p-1 sm:p-1.5 flex items-center gap-0.5 sm:gap-1 select-none pointer-events-auto transition-all text-slate-700 dark:text-slate-200"
+      className="fixed bottom-20 sm:bottom-6 left-3 sm:left-4 z-40 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border border-slate-200/90 dark:border-slate-800 shadow-xl rounded-2xl p-1 sm:p-1.5 flex items-center gap-0.5 sm:gap-1 select-none pointer-events-auto transition-all text-slate-700 dark:text-slate-200 wb-bottom-chat-aware wb-bottom-zoom"
     >
       {/* Hand / Pan Toggle Button (Quick pan toggle for mobile) */}
       {onToggleHand && (
