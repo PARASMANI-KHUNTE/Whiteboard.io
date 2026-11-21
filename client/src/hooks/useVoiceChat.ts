@@ -247,18 +247,30 @@ export function useVoiceChat({
     };
   }, [socket, cleanupAll]);
 
-  // Flush queued ICE candidates after remote description is set
+  // Flush queued ICE candidates after remote description is set. Only remove
+  // candidates that were applied successfully; keep failures for a retry.
   const flushPendingCandidates = useCallback(async (targetUserId: string, pc: RTCPeerConnection) => {
     const pending = pendingCandidatesRef.current[targetUserId];
-    if (pending && pending.length > 0) {
-      delete pendingCandidatesRef.current[targetUserId];
-      for (const candidate of pending) {
-        try {
-          await pc.addIceCandidate(new RTCIceCandidate(candidate));
-        } catch (e) {
-          console.warn('Failed to add buffered ICE candidate:', e);
-        }
+    if (!pending || pending.length === 0) return;
+
+    const attempted = new Set(pending);
+    const failed: RTCIceCandidateInit[] = [];
+    for (const candidate of Array.from(pending)) {
+      try {
+        await pc.addIceCandidate(new RTCIceCandidate(candidate));
+      } catch (e) {
+        console.warn('Failed to add buffered ICE candidate:', e);
+        failed.push(candidate);
       }
+    }
+
+    // Preserve any candidates that arrived while the awaits were in flight.
+    const current = pendingCandidatesRef.current[targetUserId] ?? [];
+    const remaining = [...failed, ...current.filter((candidate) => !attempted.has(candidate))];
+    if (remaining.length > 0) {
+      pendingCandidatesRef.current[targetUserId] = remaining;
+    } else {
+      delete pendingCandidatesRef.current[targetUserId];
     }
   }, []);
 
@@ -280,6 +292,9 @@ export function useVoiceChat({
           existing.close();
         } catch (_) {}
         delete peerConnectionsRef.current[targetUserId];
+        // Candidates buffered for the old connection must not be applied to
+        // this replacement peer.
+        delete pendingCandidatesRef.current[targetUserId];
       }
 
       const pc = new RTCPeerConnection(ICE_SERVERS);
@@ -716,17 +731,14 @@ export function useVoiceChat({
     const handleVoiceOffer = async (payload: { fromUserId: string; offer: any }) => {
       try {
         let pc: RTCPeerConnection | undefined = peerConnectionsRef.current[payload.fromUserId];
-        // If connection exists in a non-stable state or has a collision, recreate cleanly
+        // If connection exists in a non-stable state or has a collision,
+        // recreate it through the helper so stale ICE candidates are discarded.
         if (pc && pc.signalingState !== 'stable') {
-          try {
-            pc.close();
-          } catch (_) {}
-          delete peerConnectionsRef.current[payload.fromUserId];
-          pc = undefined;
+          pc = createPeerConnection(payload.fromUserId, true);
         }
 
         if (!pc) {
-          pc = createPeerConnection(payload.fromUserId, true);
+          pc = createPeerConnection(payload.fromUserId);
         }
 
         await pc.setRemoteDescription(new RTCSessionDescription(payload.offer));
