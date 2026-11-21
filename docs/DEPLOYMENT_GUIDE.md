@@ -2,6 +2,11 @@
 
 This guide provides step-by-step instructions for hosting **Whiteboard.io** in production across multiple deployment topologies.
 
+## Prerequisites
+
+* **Node.js >=20.19.0** (22 LTS recommended; required by the MongoDB 7 driver). The repository includes an `.nvmrc` pinning Node 22.
+* **A reachable MongoDB instance** (Atlas or self-hosted). `MONGODB_URI` is required in practice: the server awaits the connection before listening and exits if it cannot connect. There is no in-memory database fallback.
+
 ---
 
 ## 1. Architecture Topologies
@@ -154,7 +159,7 @@ VITE_TURN_PASSWORD=your_turn_password
 | :--- | :--- | :--- | :--- |
 | `PORT` | HTTP server listening port | No | `3000` |
 | `APP_URL` | Frontend URL allowed for CORS and OAuth return | Yes | `http://localhost:5173` |
-| `MONGODB_URI` | MongoDB connection URI | Yes | `mongodb://127.0.0.1:27017/whiteboard` |
+| `MONGODB_URI` | MongoDB connection URI (required; startup fails if MongoDB is unreachable) | Yes | `mongodb://127.0.0.1:27017/whiteboard` |
 | `AI_PROVIDER` | Which AI engine to use: `gemini`, `ollama`, or `fallback`. Unset auto-picks Gemini when `GEMINI_API_KEY` exists, otherwise Ollama when configured | No | auto |
 | `GEMINI_API_KEY` | Google Gemini API key for AI diagram generation | No (optional; uses Ollama or procedural fallback if unset) | `""` |
 | `GEMINI_MODEL` | Gemini model id (first link in the failover chain) | No | `gemini-3.8-flash` |
