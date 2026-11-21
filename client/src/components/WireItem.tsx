@@ -208,6 +208,8 @@ export const WireOverlay: React.FC<WireOverlayProps> = ({
   }, []);
   usePopoverDismiss(elementRef, showColorPicker || showStyleMenu, closeMenus);
 
+  const isLocked = Boolean(wire.isLocked);
+
   useEffect(() => {
     setLabelText(wire.label || '');
   }, [wire.label]);
@@ -239,7 +241,7 @@ export const WireOverlay: React.FC<WireOverlayProps> = ({
 
   const handleToggleWireType = (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!canWrite) return;
+    if (!canWrite || isLocked) return;
     const nextType: WireStyle = wire.wireType === 'curve' ? 'line' : 'curve';
     onUpdate({
       ...wire,
@@ -250,7 +252,7 @@ export const WireOverlay: React.FC<WireOverlayProps> = ({
 
   const handleCycleArrowStyle = (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!canWrite) return;
+    if (!canWrite || isLocked) return;
     const hasEnd = wire.arrowEnd !== false;
     let nextStart = false;
     let nextEnd = true;
@@ -275,7 +277,7 @@ export const WireOverlay: React.FC<WireOverlayProps> = ({
   };
 
   const handleColorChange = (newColor: string) => {
-    if (!canWrite) return;
+    if (!canWrite || isLocked) return;
     onUpdate({
       ...wire,
       color: newColor,
@@ -285,7 +287,7 @@ export const WireOverlay: React.FC<WireOverlayProps> = ({
   };
 
   const handleWidthChange = (width: number) => {
-    if (!canWrite) return;
+    if (!canWrite || isLocked) return;
     onUpdate({
       ...wire,
       strokeWidth: width,
@@ -294,7 +296,7 @@ export const WireOverlay: React.FC<WireOverlayProps> = ({
   };
 
   const handleStyleChange = (strokeStyle: 'solid' | 'dashed' | 'dotted') => {
-    if (!canWrite) return;
+    if (!canWrite || isLocked) return;
     onUpdate({
       ...wire,
       strokeStyle,
@@ -304,6 +306,7 @@ export const WireOverlay: React.FC<WireOverlayProps> = ({
 
   const handleLabelSubmit = () => {
     setIsEditingLabel(false);
+    if (isLocked) return;
     if (labelCancelRef.current) {
       labelCancelRef.current = false;
       setLabelText(wire.label || '');
@@ -372,8 +375,8 @@ export const WireOverlay: React.FC<WireOverlayProps> = ({
         </div>
       )}
 
-      {/* Floating Action Menu when Wire is Selected */}
-      {isSelected && (
+      {/* Floating Action Menu when Wire is Selected and unlocked */}
+      {isSelected && !isLocked && (
         <div
           className="absolute -translate-x-1/2 -top-14 pointer-events-auto select-none"
           onMouseDown={(e) => e.stopPropagation()}

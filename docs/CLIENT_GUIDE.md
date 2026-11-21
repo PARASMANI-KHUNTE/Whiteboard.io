@@ -110,6 +110,12 @@ To maintain 60 FPS even on whiteboards with thousands of elements, Whiteboard.io
   $$\text{Query Time} = O(\log N + K)$$
 - Powers instantaneous bounding-box collision detection for mouse selections, lasso selections, and point-and-click hit tests.
 
+### Selection Manipulation (`Canvas.tsx`, `elementMutations.ts`)
+- Shift/Ctrl/Cmd-click and marquee selection build a multi-selection. Dragging any selected object moves the whole group while preserving relative positions; Alt-drag still duplicates only the grabbed object.
+- Arrow keys nudge the whole selection, and the selection action bar or context menu can Lock / Unlock every selected object, including strokes, notes, text, shapes, icons, and wires.
+- Locked objects stay selectable so they can be unlocked, but cannot be moved, nudged, edited, reordered, erased, or deleted.
+- Bulk moves and lock changes are recorded in the existing local undo/redo stack; a history barrier keeps a lock toggle from merging into a preceding drag.
+
 ### Smooth Stroke Interpolation & Simplification (`strokeSimplification.ts`)
 - **Real-time Smoothing**: Quadratic Bézier curves (`ctx.quadraticCurveTo`) smooth out intermediate pointer coordinates during live drawing.
 - **Ramer-Douglas-Peucker (RDP) Simplification**: Finalized strokes undergo distance-epsilon point reduction to eliminate redundant collinear points before network broadcast, reducing network payload sizes by up to 70%.

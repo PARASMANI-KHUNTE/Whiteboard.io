@@ -258,6 +258,16 @@ export default function App() {
     bumpHistory();
   }, [bumpHistory]);
 
+  /**
+   * Prevents the next edit from being coalesced into the previous one. Used for
+   * discrete actions (such as locking a selection) that should get their own
+   * undo step even when they happen immediately after a drag.
+   */
+  const breakHistory = useCallback(() => {
+    const last = historyPastRef.current[historyPastRef.current.length - 1];
+    if (last) last.at = 0;
+  }, []);
+
   const pushHistory = useCallback(
     (operation: HistoryOperation) => {
       const past = historyPastRef.current;
@@ -1439,6 +1449,7 @@ export default function App() {
         onElementsBatchCreate={handleElementsBatchCreate}
         onUndo={handleUndo}
         onRedo={handleRedo}
+        onHistoryBarrier={breakHistory}
         onNotify={addNotification}
         onCursorMove={(pos) => {
           setCursorCoords(pos);

@@ -30,6 +30,9 @@ interface IconItemProps {
   onUpdate: (updated: IconElement) => void;
   onDelete: (id: string) => void;
   onDuplicate?: (element: IconElement, offset?: { dx: number; dy: number }) => IconElement | void;
+  onMoveSelectionStart?: () => void;
+  onMoveSelection?: (deltaX: number, deltaY: number) => void;
+  onMoveSelectionEnd?: () => void;
 }
 
 const PALETTE_COLORS = [
@@ -68,6 +71,9 @@ export const IconItem: React.FC<IconItemProps> = ({
   onUpdate,
   onDelete,
   onDuplicate,
+  onMoveSelectionStart,
+  onMoveSelection,
+  onMoveSelectionEnd,
 }) => {
   const [localPos, setLocalPos] = useState<{ x: number; y: number }>({ x: element.x, y: element.y });
   const [localSize, setLocalSize] = useState<number>(element.size || 48);
@@ -161,6 +167,10 @@ export const IconItem: React.FC<IconItemProps> = ({
     e.stopPropagation();
     onSelect?.();
 
+    const moveWholeSelection = isSelected && isMultiSelection && !e.altKey && Boolean(onMoveSelection);
+    if (moveWholeSelection) onMoveSelectionStart?.();
+    let lastDelta = { x: 0, y: 0 };
+
     // Alt-drag duplicates in place and moves the copy.
     let dragElement = element;
     if (e.altKey && onDuplicate) {
@@ -186,12 +196,17 @@ export const IconItem: React.FC<IconItemProps> = ({
       const now = Date.now();
       if (now - lastEmitRef.current > 40) {
         lastEmitRef.current = now;
-        onUpdate({
-          ...dragElement,
-          x: newX,
-          y: newY,
-          updatedAt: now,
-        });
+        if (moveWholeSelection) {
+          lastDelta = { x: deltaX, y: deltaY };
+          onMoveSelection?.(deltaX, deltaY);
+        } else {
+          onUpdate({
+            ...dragElement,
+            x: newX,
+            y: newY,
+            updatedAt: now,
+          });
+        }
       }
     };
 
@@ -199,6 +214,11 @@ export const IconItem: React.FC<IconItemProps> = ({
       setIsDragging(false);
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
+      if (moveWholeSelection) {
+        onMoveSelection?.(lastDelta.x, lastDelta.y);
+        onMoveSelectionEnd?.();
+        return;
+      }
       onUpdate({
         ...dragElement,
         x: currentPosRef.current.x,

@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { StickyNote } from '../types';
-import { Trash2, Move, Palette } from 'lucide-react';
+import { Trash2, Move, Palette, Lock } from 'lucide-react';
 
 interface StickyNoteItemProps {
   note: StickyNote;
@@ -13,6 +13,9 @@ interface StickyNoteItemProps {
   onUpdate: (updated: StickyNote) => void;
   onDelete: (id: string) => void;
   onDuplicate?: (element: StickyNote, offset?: { dx: number; dy: number }) => StickyNote | void;
+  onMoveSelectionStart?: () => void;
+  onMoveSelection?: (deltaX: number, deltaY: number) => void;
+  onMoveSelectionEnd?: () => void;
 }
 
 const STICKY_COLORS = [
@@ -33,6 +36,9 @@ export const StickyNoteItem: React.FC<StickyNoteItemProps> = ({
   onUpdate,
   onDelete,
   onDuplicate,
+  onMoveSelectionStart,
+  onMoveSelection,
+  onMoveSelectionEnd,
 }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [localText, setLocalText] = useState(note.text);
@@ -49,10 +55,11 @@ export const StickyNoteItem: React.FC<StickyNoteItemProps> = ({
     startX: note.x,
     startY: note.y,
   });
+  const isLocked = Boolean(note.isLocked);
 
   // Auto-focus empty note when created so user can immediately type into it
   useEffect(() => {
-    if (canWrite && note.text === '' && textareaRef.current) {
+    if (canWrite && !isLocked && note.text === '' && textareaRef.current) {
       textareaRef.current.focus();
     }
   }, []);
@@ -82,9 +89,13 @@ export const StickyNoteItem: React.FC<StickyNoteItemProps> = ({
   }, []);
 
   const handleMouseDownHeader = (e: React.MouseEvent) => {
-    if (!canWrite) return;
+    if (!canWrite || isLocked) return;
     e.stopPropagation();
     onSelect?.();
+
+    const moveWholeSelection = isSelected && isMultiSelection && !e.altKey && Boolean(onMoveSelection);
+    if (moveWholeSelection) onMoveSelectionStart?.();
+    let lastDelta = { x: 0, y: 0 };
 
     // Alt-drag duplicates in place and moves the copy.
     let dragElement = note;
@@ -113,12 +124,17 @@ export const StickyNoteItem: React.FC<StickyNoteItemProps> = ({
       const now = Date.now();
       if (now - lastEmitRef.current > 40) {
         lastEmitRef.current = now;
-        onUpdate({
-          ...dragElement,
-          x: newX,
-          y: newY,
-          updatedAt: now,
-        });
+        if (moveWholeSelection) {
+          lastDelta = { x: deltaX, y: deltaY };
+          onMoveSelection?.(deltaX, deltaY);
+        } else {
+          onUpdate({
+            ...dragElement,
+            x: newX,
+            y: newY,
+            updatedAt: now,
+          });
+        }
       }
     };
 
@@ -126,6 +142,11 @@ export const StickyNoteItem: React.FC<StickyNoteItemProps> = ({
       setIsDragging(false);
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
+      if (moveWholeSelection) {
+        onMoveSelection?.(lastDelta.x, lastDelta.y);
+        onMoveSelectionEnd?.();
+        return;
+      }
       // Emit final destination
       onUpdate({
         ...dragElement,
@@ -140,7 +161,7 @@ export const StickyNoteItem: React.FC<StickyNoteItemProps> = ({
   };
 
   const handleTextChange = (newText: string) => {
-    if (!canWrite) return;
+    if (!canWrite || isLocked) return;
     setLocalText(newText);
 
     // Debounced real-time persistence
@@ -162,7 +183,7 @@ export const StickyNoteItem: React.FC<StickyNoteItemProps> = ({
       clearTimeout(debounceTimerRef.current);
       debounceTimerRef.current = null;
     }
-    if (localText !== note.text) {
+    if (!isLocked && localText !== note.text) {
       onUpdate({
         ...note,
         text: localText,
@@ -172,6 +193,7 @@ export const StickyNoteItem: React.FC<StickyNoteItemProps> = ({
   };
 
   const handleColorSelect = (color: string) => {
+    if (isLocked) return;
     setShowColorPicker(false);
     onUpdate({
       ...note,
@@ -215,14 +237,20 @@ export const StickyNoteItem: React.FC<StickyNoteItemProps> = ({
       {/* Note Header / Drag Handle */}
       <div
         onMouseDown={handleMouseDownHeader}
-        className="flex items-center justify-between px-3 py-1.5 cursor-grab border-b border-black/5 rounded-t-xl bg-black/[0.02] select-none"
+        className={`flex items-center justify-between px-3 py-1.5 border-b border-black/5 rounded-t-xl bg-black/[0.02] select-none ${
+          isLocked ? 'cursor-default' : 'cursor-grab'
+        }`}
       >
         <div className="flex items-center gap-1.5 opacity-60 text-xs font-medium truncate">
-          <Move className="w-3 h-3 shrink-0" />
+          {isLocked ? (
+            <Lock className="w-3 h-3 shrink-0 text-amber-600" aria-label="Locked" />
+          ) : (
+            <Move className="w-3 h-3 shrink-0" />
+          )}
           <span className="truncate">{note.userName || 'Note'}</span>
         </div>
 
-        {canWrite && !isMultiSelection && (
+        {canWrite && !isLocked && !isMultiSelection && (
           <div className="flex items-center gap-1">
             <div className="relative">
               <button
@@ -270,23 +298,25 @@ export const StickyNoteItem: React.FC<StickyNoteItemProps> = ({
 
       {/* Note Content Area */}
       <div
-        className="p-3 flex-1 min-h-[110px] flex flex-col cursor-text"
-        onClick={() => textareaRef.current?.focus()}
+        className={`p-3 flex-1 min-h-[110px] flex flex-col ${isLocked ? 'cursor-default' : 'cursor-text'}`}
+        onClick={() => {
+          if (!isLocked) textareaRef.current?.focus();
+        }}
       >
         <textarea
           ref={textareaRef}
           value={localText}
-          readOnly={!canWrite}
+          readOnly={!canWrite || isLocked}
           onChange={(e) => handleTextChange(e.target.value)}
-          onFocus={() => canWrite && setIsEditing(true)}
+          onFocus={() => canWrite && !isLocked && setIsEditing(true)}
           onBlur={handleTextBlur}
           onMouseDown={(e) => e.stopPropagation()}
           onClick={(e) => e.stopPropagation()}
           onKeyDown={(e) => e.stopPropagation()}
-          placeholder={canWrite ? "Type your note here..." : "Read-only note"}
+          placeholder={canWrite && !isLocked ? "Type your note here..." : "Locked — unlock to edit"}
           rows={4}
           className={`w-full h-full min-h-[95px] bg-transparent resize-none outline-none font-sans text-sm leading-relaxed select-text cursor-text ${
-            !canWrite ? 'cursor-default' : 'placeholder:text-black/35 placeholder:italic'
+            !canWrite || isLocked ? 'cursor-default' : 'placeholder:text-black/35 placeholder:italic'
           }`}
         />
       </div>
