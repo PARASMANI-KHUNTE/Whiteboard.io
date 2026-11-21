@@ -281,17 +281,11 @@ export default function App() {
     return res;
   }, [roomId, deleteCurrentRoom, deleteRoom, addNotification, switchRoom]);
 
-  // Attach the caller's stable identity when creating a room. Authenticated
-  // users are resolved from their token server-side; guests need this so they
-  // become (and stay) the host of the room they just created.
+  // Ownership is derived from the server-issued session token, so callers do
+  // not send a spoofable creator identity.
   const handleCreateRoom = useCallback(
-    (data: { name: string; customCode?: string; isLocked?: boolean }) =>
-      createRoom({
-        ...data,
-        creatorId: currentUser.id,
-        creatorName: currentUser.name,
-      }),
-    [createRoom, currentUser.id, currentUser.name]
+    (data: { name: string; customCode?: string; isLocked?: boolean }) => createRoom(data),
+    [createRoom]
   );
 
   // Convert current solo canvas to a collaborative multiplayer room

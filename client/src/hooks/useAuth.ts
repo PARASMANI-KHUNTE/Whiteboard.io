@@ -342,8 +342,6 @@ export function useAuth() {
     name: string;
     customCode?: string;
     isLocked?: boolean;
-    creatorId?: string;
-    creatorName?: string;
   }): Promise<{ success: boolean; room?: SessionRoom; error?: string }> => {
     try {
       const currentToken = token || localStorage.getItem(TOKEN_KEY);
