@@ -129,14 +129,14 @@ Whiteboard.io provides end-to-end data durability across cloud and local storage
 │  │ • users, tokens (TTL 30d)        │   │ • soloStorage.ts (Autosave)    │  │
 │  │ • rooms, elements, room_elements │   │ • guestIdentity.ts (UUID/Name) │  │
 │  │ • Native connection pool & retry │   │ • recentRooms.ts (LRU history) │  │
-│  │ • In-memory fallback if no Mongo │   │ • aiSessionStorage.ts (Chat)   │  │
+│  │ • MONGODB_URI required at startup│   │ • aiSessionStorage.ts (Chat)   │  │
 │  └──────────────────────────────────┘   └────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
 1. **Multiplayer Rooms (MongoDB)**:
    - Handled via `server/db.ts` with connection pooling and automated index creation.
-   - Degrades gracefully to in-memory store if `MONGODB_URI` is absent (for lightweight testing or offline development).
+   - `MONGODB_URI` is required: the server awaits this connection before listening and throws if it cannot connect. Room state is cached in memory for real-time fan-out, but there is no in-memory database replacement.
 2. **Solo Whiteboard Storage (`soloStorage.ts`)**:
    - Autosaves offline canvas work directly to browser `localStorage` with a 300ms debounce.
    - Restores user work upon page reload without requiring room creation.
