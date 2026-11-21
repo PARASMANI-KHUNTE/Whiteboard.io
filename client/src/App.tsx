@@ -15,6 +15,7 @@ import { useAuth } from './hooks/useAuth';
 import { useSocket } from './hooks/useSocket';
 import { useVoiceChat } from './hooks/useVoiceChat';
 import { useTheme } from './hooks/useTheme';
+import { useTouchPointerBridge } from './hooks/useTouchPointerBridge';
 import { Header } from './components/Header';
 import { Toolbar } from './components/Toolbar';
 import { Canvas } from './components/Canvas';
@@ -69,6 +70,9 @@ const HISTORY_LIMIT = 100;
 export default function App() {
   // Theme hook
   const { theme, toggleTheme } = useTheme();
+
+  // Let touch/pen gestures drive the mouse-based object manipulation handlers.
+  useTouchPointerBridge();
 
   const [currentTool, setCurrentTool] = useState<ToolType>('pen');
   const [currentColor, setCurrentColor] = useState<string>(() => (theme === 'dark' ? '#ffffff' : '#0f172a'));
