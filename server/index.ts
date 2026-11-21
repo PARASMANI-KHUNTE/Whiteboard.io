@@ -27,6 +27,19 @@ import {
 import { connectDb, checkDbHealth } from "./db";
 import { resolveSocketIdentity } from "./socketIdentity";
 import {
+  isRecord,
+  readBoolean,
+  readFiniteNumber,
+  readPoint,
+  readString,
+  sanitizeElement,
+  sanitizeElementBatch,
+  sanitizeElementIds,
+  MAX_ID_LENGTH,
+  MAX_REASON_LENGTH,
+} from "./socketPayload";
+import { guardSocketHandler } from "./socketHandler";
+import {
   createOAuthState,
   verifyOAuthState,
   OAUTH_NONCE_COOKIE,
@@ -50,6 +63,16 @@ const envPath = fs.existsSync(path.resolve(__dirname, ".env"))
   ? path.resolve(__dirname, ".env")
   : path.resolve(process.cwd(), ".env");
 dotenv.config({ path: envPath });
+
+// Last-resort logging. Socket handler errors are caught locally by `safeOn`;
+// these listeners make any remaining async/fatal failure diagnosable.
+process.on("unhandledRejection", (reason) => {
+  console.error("[Fatal] Unhandled promise rejection:", reason);
+});
+process.on("uncaughtException", (err) => {
+  console.error("[Fatal] Uncaught exception:", err);
+  process.exit(1);
+});
 
 function escapeHtml(str: string): string {
   return str
@@ -891,8 +914,26 @@ async function startServer() {
       return false;
     };
 
+    /**
+     * Socket.IO dispatches listeners without catching thrown errors. A single
+     * malformed payload would otherwise become an uncaughtException and kill
+     * the whole process, so every handler is wrapped and reports a safe error.
+     */
+    const safeOn = <T extends (...args: any[]) => void | Promise<void>>(
+      event: string,
+      handler: T
+    ) => {
+      socket.on(
+        event,
+        guardSocketHandler(handler, (err) => {
+          console.error(`[Socket] Handler "${event}" failed:`, err);
+          socket.emit("room-error", { message: "Could not process that request." });
+        })
+      );
+    };
+
     // Join room
-    socket.on("join-room", async (rawData: { roomId: string; user: { id: string; name: string; color: string; username?: string }; token?: string }) => {
+    safeOn("join-room", async (rawData: { roomId: string; user: { id: string; name: string; color: string; username?: string }; token?: string }) => {
       const data = rawData || ({} as any);
       const rawRoomId = typeof data.roomId === "string" ? data.roomId : "";
       const roomId = rawRoomId
@@ -1067,11 +1108,14 @@ async function startServer() {
     });
 
     // Admin: Set User Writing Permissions (Revoke / Grant)
-    socket.on("admin-set-permission", (payload: { targetUserId: string; canWrite: boolean }) => {
+    safeOn("admin-set-permission", (payload: { targetUserId: string; canWrite: boolean }) => {
       if (!currentRoomId || !currentUser || !currentUser.isHost) return;
+      if (!isRecord(payload)) return;
+      const targetUserId = readString(payload.targetUserId, MAX_ID_LENGTH);
+      const canWrite = readBoolean(payload.canWrite);
+      if (!targetUserId || canWrite === null) return;
       const room = rooms.get(currentRoomId);
       if (!room) return;
-      const { targetUserId, canWrite } = payload;
       if (targetUserId === currentUser.id) return; // Host cannot revoke self
 
       const role: 'editor' | 'viewer' = canWrite ? 'editor' : 'viewer';
@@ -1105,11 +1149,14 @@ async function startServer() {
     });
 
     // Admin: Kick / Remove User from Room
-    socket.on("admin-kick-user", (payload: { targetUserId: string; reason?: string }) => {
+    safeOn("admin-kick-user", (payload: { targetUserId: string; reason?: string }) => {
       if (!currentRoomId || !currentUser || !currentUser.isHost) return;
+      if (!isRecord(payload)) return;
+      const targetUserId = readString(payload.targetUserId, MAX_ID_LENGTH);
+      const reason = readString(payload.reason, MAX_REASON_LENGTH) || undefined;
+      if (!targetUserId) return;
       const room = rooms.get(currentRoomId);
       if (!room) return;
-      const { targetUserId, reason } = payload;
       if (targetUserId === currentUser.id) return; // Cannot kick host
 
       room.kickedUserIds.add(targetUserId);
@@ -1147,16 +1194,19 @@ async function startServer() {
     });
 
     // Admin: Toggle Lock Whiteboard
-    socket.on("admin-toggle-lock", (payload: { isLocked: boolean }) => {
+    safeOn("admin-toggle-lock", (payload: { isLocked: boolean }) => {
       if (!currentRoomId || !currentUser || !currentUser.isHost) return;
+      if (!isRecord(payload)) return;
+      const isLocked = readBoolean(payload.isLocked);
+      if (isLocked === null) return;
       const room = rooms.get(currentRoomId);
       if (!room) return;
-      room.isLocked = payload.isLocked;
+      room.isLocked = isLocked;
 
       // Update live participants and persisted permissions, including users who
       // are currently offline, so a restart/unlock does not leave stale viewers.
-      const nextRole: 'editor' | 'viewer' = payload.isLocked ? 'viewer' : 'editor';
-      const nextCanWrite = !payload.isLocked;
+      const nextRole: 'editor' | 'viewer' = isLocked ? 'viewer' : 'editor';
+      const nextCanWrite = !isLocked;
       Object.keys(room.userPermissions).forEach((userId) => {
         if (userId === room.creatorId) return;
         room.userPermissions[userId] = { canWrite: nextCanWrite, role: nextRole };
@@ -1178,8 +1228,10 @@ async function startServer() {
     });
 
     // Admin: Delete Room
-    socket.on("admin-delete-room", async (payload?: { roomId?: string }) => {
-      const targetRoomId = payload?.roomId || currentRoomId;
+    safeOn("admin-delete-room", async (payload?: { roomId?: string }) => {
+      const targetRoomId = isRecord(payload)
+        ? readString(payload.roomId, MAX_ID_LENGTH) || currentRoomId
+        : currentRoomId;
       if (!targetRoomId || !currentUser) return;
       const room = rooms.get(targetRoomId);
 
@@ -1208,107 +1260,147 @@ async function startServer() {
     });
 
     // Real-time live stroke streaming (Guarded)
-    socket.on("stroke-live-start", (payload: { strokeId: string; point: { x: number; y: number }; color: string; size: number; isHighlighter?: boolean }) => {
+    safeOn("stroke-live-start", (payload: { strokeId: string; point: { x: number; y: number }; color: string; size: number; isHighlighter?: boolean }) => {
       if (!currentRoomId || !checkCanWrite()) return;
+      if (!isRecord(payload)) return;
+      const strokeId = readString(payload.strokeId, MAX_ID_LENGTH);
+      const point = readPoint(payload.point);
+      const color = readString(payload.color, 32);
+      const size = readFiniteNumber(payload.size);
+      if (!strokeId || !point || !color || size === null) return;
       socket.to(currentRoomId).emit("stroke-live-started", {
         userId: currentUser?.id,
-        ...payload,
+        strokeId,
+        point,
+        color,
+        size,
+        isHighlighter: readBoolean(payload.isHighlighter) === true,
       });
     });
 
-    socket.on("stroke-live-point", (payload: { strokeId: string; point: { x: number; y: number } }) => {
+    safeOn("stroke-live-point", (payload: { strokeId: string; point: { x: number; y: number } }) => {
       if (!currentRoomId || !checkCanWrite()) return;
-      socket.to(currentRoomId).emit("stroke-live-pointed", payload);
+      if (!isRecord(payload)) return;
+      const strokeId = readString(payload.strokeId, MAX_ID_LENGTH);
+      const point = readPoint(payload.point);
+      if (!strokeId || !point) return;
+      socket.to(currentRoomId).emit("stroke-live-pointed", { strokeId, point });
     });
 
     // Final element creation (persisted, Guarded)
-    socket.on("element-create", (element: CanvasElement) => {
+    safeOn("element-create", (element: CanvasElement) => {
       if (!currentRoomId || !checkCanWrite()) return;
+      const clean = sanitizeElement(element);
+      if (!clean) return;
       const room = rooms.get(currentRoomId);
       if (!room) return;
-      room.elements[element.id] = element;
+      room.elements[clean.id] = clean as CanvasElement;
       saveRoomElementsDebounced(currentRoomId, room.elements, 400);
-      socket.to(currentRoomId).emit("element-created", element);
+      socket.to(currentRoomId).emit("element-created", clean);
     });
 
     // Batch element creation (e.g. converting solo canvas to multiplayer room, Guarded)
-    socket.on("elements-batch-create", (elementsList: CanvasElement[]) => {
+    safeOn("elements-batch-create", (elementsList: CanvasElement[]) => {
       if (!currentRoomId || !checkCanWrite()) return;
+      const clean = sanitizeElementBatch(elementsList);
+      if (clean.length === 0) return;
       const room = rooms.get(currentRoomId);
-      if (!room || !Array.isArray(elementsList)) return;
-      elementsList.forEach((el) => {
-        if (el && el.id) {
-          room.elements[el.id] = el;
-        }
+      if (!room) return;
+      clean.forEach((el) => {
+        room.elements[el.id] = el as CanvasElement;
       });
       saveRoomElementsDebounced(currentRoomId, room.elements, 400);
-      socket.to(currentRoomId).emit("elements-batch-created", elementsList);
+      socket.to(currentRoomId).emit("elements-batch-created", clean);
     });
 
     // Element update (e.g. moving sticky note or updating text, Guarded)
-    socket.on("element-update", (element: CanvasElement) => {
+    safeOn("element-update", (element: CanvasElement) => {
       if (!currentRoomId || !checkCanWrite()) return;
+      const clean = sanitizeElement(element);
+      if (!clean) return;
       const room = rooms.get(currentRoomId);
       if (!room) return;
-      if (room.elements[element.id]) {
-        room.elements[element.id] = { ...room.elements[element.id], ...element };
+      if (room.elements[clean.id]) {
+        room.elements[clean.id] = { ...room.elements[clean.id], ...clean } as CanvasElement;
       } else {
-        room.elements[element.id] = element;
+        room.elements[clean.id] = clean as CanvasElement;
       }
       saveRoomElementsDebounced(currentRoomId, room.elements, 800);
-      socket.to(currentRoomId).emit("element-updated", element);
+      socket.to(currentRoomId).emit("element-updated", clean);
     });
 
     // Element delete (Guarded)
-    socket.on("element-delete", (payload: { elementId: string }) => {
+    safeOn("element-delete", (payload: { elementId: string }) => {
       if (!currentRoomId || !checkCanWrite()) return;
+      if (!isRecord(payload)) return;
+      const elementId = readString(payload.elementId, MAX_ID_LENGTH);
+      if (!elementId) return;
       const room = rooms.get(currentRoomId);
       if (!room) return;
-      delete room.elements[payload.elementId];
+      delete room.elements[elementId];
       saveRoomElementsDebounced(currentRoomId, room.elements, 400);
-      socket.to(currentRoomId).emit("element-deleted", payload);
+      socket.to(currentRoomId).emit("element-deleted", { elementId });
     });
 
     // Batch elements delete (e.g. eraser dragged across multiple strokes, Guarded)
-    socket.on("elements-batch-delete", (payload: { elementIds: string[] }) => {
+    safeOn("elements-batch-delete", (payload: { elementIds: string[] }) => {
       if (!currentRoomId || !checkCanWrite()) return;
+      const elementIds = sanitizeElementIds(isRecord(payload) ? payload.elementIds : undefined);
+      if (elementIds.length === 0) return;
       const room = rooms.get(currentRoomId);
       if (!room) return;
-      payload.elementIds.forEach((id) => {
+      elementIds.forEach((id) => {
         delete room.elements[id];
       });
       saveRoomElementsDebounced(currentRoomId, room.elements, 400);
-      socket.to(currentRoomId).emit("elements-batch-deleted", payload);
+      socket.to(currentRoomId).emit("elements-batch-deleted", { elementIds });
     });
 
     // Multiplayer cursor movement
-    socket.on("cursor-move", (cursor: { x: number; y: number; tool?: string; isDrawing?: boolean }) => {
+    safeOn("cursor-move", (cursor: { x: number; y: number; tool?: string; isDrawing?: boolean }) => {
       if (!currentRoomId || !currentUser) return;
-      currentUser.cursor = cursor;
+      if (!isRecord(cursor)) return;
+      const point = readPoint(cursor);
+      if (!point) return;
+      const cleanCursor = {
+        ...point,
+        tool: readString(cursor.tool, 32) || undefined,
+        isDrawing: readBoolean(cursor.isDrawing) === true,
+      };
+      currentUser.cursor = cleanCursor;
       socket.to(currentRoomId).emit("cursor-moved", {
         userId: currentUser.id,
-        cursor,
+        cursor: cleanCursor,
       });
     });
 
     // Audio reactivity / Speaking indicator
-    socket.on("audio-level", (data: { level: number; isSpeaking: boolean }) => {
+    safeOn("audio-level", (data: { level: number; isSpeaking: boolean }) => {
       if (!currentRoomId || !currentUser) return;
-      currentUser.audioLevel = data.level;
-      currentUser.isSpeaking = data.isSpeaking;
+      if (!isRecord(data)) return;
+      const level = readFiniteNumber(data.level);
+      if (level === null) return;
+      const isSpeaking = readBoolean(data.isSpeaking) === true;
+      currentUser.audioLevel = level;
+      currentUser.isSpeaking = isSpeaking;
       socket.to(currentRoomId).emit("audio-level-updated", {
         userId: currentUser.id,
-        level: data.level,
-        isSpeaking: data.isSpeaking,
+        level,
+        isSpeaking,
       });
     });
 
     // Voice Chat State & Mute/Deafen update
-    socket.on("voice-status-update", (data: { isMuted?: boolean; isDeafened?: boolean; voiceConnected?: boolean }) => {
+    safeOn("voice-status-update", (data: { isMuted?: boolean; isDeafened?: boolean; voiceConnected?: boolean }) => {
       if (!currentRoomId || !currentUser) return;
-      if (typeof data.isMuted === 'boolean') currentUser.isMuted = data.isMuted;
-      if (typeof data.isDeafened === 'boolean') currentUser.isDeafened = data.isDeafened;
-      if (typeof data.voiceConnected === 'boolean') currentUser.voiceConnected = data.voiceConnected;
+      if (!isRecord(data)) return;
+      const isMuted = readBoolean(data.isMuted);
+      const isDeafened = readBoolean(data.isDeafened);
+      const voiceConnected = readBoolean(data.voiceConnected);
+      if (isMuted === null && isDeafened === null && voiceConnected === null) return;
+      if (isMuted !== null) currentUser.isMuted = isMuted;
+      if (isDeafened !== null) currentUser.isDeafened = isDeafened;
+      if (voiceConnected !== null) currentUser.voiceConnected = voiceConnected;
 
       socket.to(currentRoomId).emit("voice-status-updated", {
         userId: currentUser.id,
@@ -1319,11 +1411,14 @@ async function startServer() {
     });
 
     // WebRTC Voice Signaling Mesh
-    socket.on("voice-offer", (payload: { toUserId: string; offer: any }) => {
+    safeOn("voice-offer", (payload: { toUserId: string; offer: any }) => {
       if (!currentRoomId || !currentUser) return;
+      if (!isRecord(payload)) return;
+      const toUserId = readString(payload.toUserId, MAX_ID_LENGTH);
+      if (!toUserId || !isRecord(payload.offer)) return;
       const room = rooms.get(currentRoomId);
       if (!room) return;
-      const targetUser = room.users[payload.toUserId];
+      const targetUser = room.users[toUserId];
       if (targetUser && targetUser.socketId) {
         io.to(targetUser.socketId).emit("voice-offer", {
           fromUserId: currentUser.id,
@@ -1332,11 +1427,14 @@ async function startServer() {
       }
     });
 
-    socket.on("voice-answer", (payload: { toUserId: string; answer: any }) => {
+    safeOn("voice-answer", (payload: { toUserId: string; answer: any }) => {
       if (!currentRoomId || !currentUser) return;
+      if (!isRecord(payload)) return;
+      const toUserId = readString(payload.toUserId, MAX_ID_LENGTH);
+      if (!toUserId || !isRecord(payload.answer)) return;
       const room = rooms.get(currentRoomId);
       if (!room) return;
-      const targetUser = room.users[payload.toUserId];
+      const targetUser = room.users[toUserId];
       if (targetUser && targetUser.socketId) {
         io.to(targetUser.socketId).emit("voice-answer", {
           fromUserId: currentUser.id,
@@ -1345,11 +1443,14 @@ async function startServer() {
       }
     });
 
-    socket.on("voice-ice-candidate", (payload: { toUserId: string; candidate: any }) => {
+    safeOn("voice-ice-candidate", (payload: { toUserId: string; candidate: any }) => {
       if (!currentRoomId || !currentUser) return;
+      if (!isRecord(payload)) return;
+      const toUserId = readString(payload.toUserId, MAX_ID_LENGTH);
+      if (!toUserId || !isRecord(payload.candidate)) return;
       const room = rooms.get(currentRoomId);
       if (!room) return;
-      const targetUser = room.users[payload.toUserId];
+      const targetUser = room.users[toUserId];
       if (targetUser && targetUser.socketId) {
         io.to(targetUser.socketId).emit("voice-ice-candidate", {
           fromUserId: currentUser.id,
@@ -1360,7 +1461,7 @@ async function startServer() {
 
 
     // Vote to Clear Feature
-    socket.on("vote-clear-start", () => {
+    safeOn("vote-clear-start", () => {
       if (!currentRoomId || !currentUser || !checkCanWrite()) return;
       const targetRoomId = currentRoomId;
       const room = rooms.get(targetRoomId);
@@ -1431,12 +1532,15 @@ async function startServer() {
       }, durationMs);
     });
 
-    socket.on("vote-clear-cast", (data: { vote: boolean }) => {
+    safeOn("vote-clear-cast", (data: { vote: boolean }) => {
       if (!currentRoomId || !currentUser) return;
+      if (!isRecord(data)) return;
+      const vote = readBoolean(data.vote);
+      if (vote === null) return;
       const room = rooms.get(currentRoomId);
       if (!room || !room.voteToClear || !room.voteToClear.active) return;
 
-      room.voteToClear.votes[currentUser.id] = data.vote;
+      room.voteToClear.votes[currentUser.id] = vote;
 
       const userIds = Object.keys(room.users);
       const yesCount = Object.values(room.voteToClear.votes).filter(Boolean).length;
@@ -1466,7 +1570,7 @@ async function startServer() {
       }
     });
 
-    socket.on("vote-clear-cancel", () => {
+    safeOn("vote-clear-cancel", () => {
       if (!currentRoomId || !currentUser) return;
       const room = rooms.get(currentRoomId);
       if (!room || !room.voteToClear || !room.voteToClear.active) return;
@@ -1485,7 +1589,7 @@ async function startServer() {
     });
 
     // Direct clear (if user confirms solo or forced)
-    socket.on("clear-board-direct", () => {
+    safeOn("clear-board-direct", () => {
       if (!currentRoomId || !currentUser || !checkCanWrite()) return;
       const room = rooms.get(currentRoomId);
       if (!room) return;
@@ -1498,7 +1602,7 @@ async function startServer() {
     });
 
     // Disconnect
-    socket.on("disconnect", () => {
+    safeOn("disconnect", () => {
       if (!currentRoomId || !currentUser) return;
       const room = rooms.get(currentRoomId);
       if (!room) return;
