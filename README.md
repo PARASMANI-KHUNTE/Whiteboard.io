@@ -145,6 +145,10 @@ cd Whiteboard.io
 
 # Install client and server dependencies
 npm run build
+
+# Run the checks used by CI
+npm run typecheck
+npm test
 ```
 
 ### 2. Configure Environment Variables
