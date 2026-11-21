@@ -49,6 +49,13 @@ function isTrustedOAuthOrigin(origin: string): boolean {
   return getTrustedOAuthOrigins().has(origin);
 }
 
+interface OAuthResult {
+  success: boolean;
+  error?: string;
+  isDemo?: boolean;
+  message?: string;
+}
+
 export function useAuth() {
   const [user, setUser] = useState<AuthUser | null>(() => {
     try {
@@ -67,7 +74,15 @@ export function useAuth() {
   const [authError, setAuthError] = useState<string | null>(null);
   const recoveringRef = useRef(false);
 
+  // Every credential write advances this counter so an in-flight /auth/me
+  // cannot overwrite a newer OAuth/guest session with stale data.
+  const authGenerationRef = useRef(0);
+  const popupRef = useRef<Window | null>(null);
+  const oauthResolveRef = useRef<((result: OAuthResult) => void) | null>(null);
+  const oauthTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const saveAuth = useCallback((newUser: AuthUser, newToken: string) => {
+    authGenerationRef.current += 1;
     setUser(newUser);
     setToken(newToken);
     localStorage.setItem(TOKEN_KEY, newToken);
@@ -75,6 +90,7 @@ export function useAuth() {
   }, []);
 
   const clearAuth = useCallback(() => {
+    authGenerationRef.current += 1;
     setUser(null);
     setToken(null);
     setMyRooms([]);
@@ -83,9 +99,22 @@ export function useAuth() {
     localStorage.removeItem(USER_KEY);
   }, []);
 
+  const finishOAuth = useCallback((result: OAuthResult) => {
+    if (oauthTimeoutRef.current) clearTimeout(oauthTimeoutRef.current);
+    oauthTimeoutRef.current = null;
+    popupRef.current = null;
+    const resolve = oauthResolveRef.current;
+    oauthResolveRef.current = null;
+    resolve?.(result);
+  }, []);
+
   // Continue as Guest action. Declared before the auth check below so the
   // initial load can provision a server-issued guest session.
-  const continueAsGuest = useCallback(async (name?: string, color?: string): Promise<{ success: boolean; error?: string }> => {
+  const continueAsGuest = useCallback(async (
+    name?: string,
+    color?: string,
+    expectedGeneration?: number
+  ): Promise<{ success: boolean; error?: string }> => {
     try {
       const res = await fetch(`${BACKEND_URL}/api/auth/guest`, {
         method: 'POST',
@@ -95,6 +124,10 @@ export function useAuth() {
       const data = await res.json();
       if (!res.ok || !data.success) {
         return { success: false, error: data.error || 'Guest setup failed' };
+      }
+      // A login may have landed while the guest request was in flight.
+      if (expectedGeneration !== undefined && authGenerationRef.current !== expectedGeneration) {
+        return { success: false, error: 'Session changed while creating guest account.' };
       }
       saveAuth(data.user, data.token);
       setAuthError(null);
@@ -137,6 +170,7 @@ export function useAuth() {
   // Fetch current user on mount (with support for OAuth redirect tokens)
   useEffect(() => {
     const checkAuth = async () => {
+      const generation = authGenerationRef.current;
       // 1. Extract auth_token from URL hash (#auth_token=...) or query parameter if redirected
       let incomingToken: string | null = null;
       if (typeof window !== 'undefined') {
@@ -187,6 +221,8 @@ export function useAuth() {
           headers: { Authorization: `Bearer ${currentToken}` },
         });
         const data = await res.json();
+        // OAuth/guest login may have completed while this request was in flight.
+        if (authGenerationRef.current !== generation) return;
         if (res.ok && data.success && data.user) {
           setUser(data.user);
           localStorage.setItem(USER_KEY, JSON.stringify(data.user));
@@ -208,26 +244,34 @@ export function useAuth() {
     checkAuth();
   }, [recoverSession]);
 
-  // Global window message listener for OAuth popups
+  // The only window message listener for OAuth. Origin alone is not enough:
+  // any same-origin/trusted window could inject credentials, so the message
+  // must also come from the exact popup we opened.
   useEffect(() => {
     const handleOAuthMessage = (event: MessageEvent) => {
-      if (event.data?.type !== 'GOOGLE_OAUTH_SUCCESS') {
-        return;
-      }
+      const type = event.data?.type;
+      if (type !== 'GOOGLE_OAUTH_SUCCESS' && type !== 'GOOGLE_OAUTH_ERROR') return;
+      if (!popupRef.current || event.source !== popupRef.current) return;
+      if (!isTrustedOAuthOrigin(event.origin)) return;
 
-      // Only accept credentials from explicitly trusted origins.
-      if (!isTrustedOAuthOrigin(event.origin)) {
-        return;
-      }
-
-      if (event.data.token && event.data.user) {
+      if (type === 'GOOGLE_OAUTH_SUCCESS') {
+        if (!event.data.token || !event.data.user) {
+          finishOAuth({ success: false, error: 'Google authentication returned invalid credentials.' });
+          return;
+        }
         saveAuth(event.data.user, event.data.token);
+        finishOAuth({ success: true });
+      } else {
+        finishOAuth({ success: false, error: event.data.error || 'Google authentication failed' });
       }
     };
 
     window.addEventListener('message', handleOAuthMessage);
-    return () => window.removeEventListener('message', handleOAuthMessage);
-  }, [saveAuth]);
+    return () => {
+      window.removeEventListener('message', handleOAuthMessage);
+      if (oauthTimeoutRef.current) clearTimeout(oauthTimeoutRef.current);
+    };
+  }, [saveAuth, finishOAuth]);
 
   // Fetch user's created rooms
   const fetchMyRooms = useCallback(async () => {
@@ -337,30 +381,14 @@ export function useAuth() {
           return { success: false, error: 'Popup blocked. Please allow popups for this site to sign in with Google.' };
         }
 
-        return new Promise((resolve) => {
-          const timeout = setTimeout(() => {
-            window.removeEventListener('message', handleMsg);
-            resolve({ success: false, error: 'Google sign-in timed out or was closed.' });
+        popupRef.current = popup;
+        // The shared listener above resolves this promise; there is no second
+        // listener that could saveAuth twice or race with /auth/me.
+        return new Promise<OAuthResult>((resolve) => {
+          oauthResolveRef.current = resolve;
+          oauthTimeoutRef.current = setTimeout(() => {
+            finishOAuth({ success: false, error: 'Google sign-in timed out or was closed.' });
           }, 120000);
-
-          const handleMsg = (event: MessageEvent) => {
-            if (!isTrustedOAuthOrigin(event.origin)) {
-              return;
-            }
-            if (event.data?.type === 'GOOGLE_OAUTH_SUCCESS') {
-              clearTimeout(timeout);
-              window.removeEventListener('message', handleMsg);
-              saveAuth(event.data.user, event.data.token);
-              fetchMyRooms();
-              resolve({ success: true });
-            } else if (event.data?.type === 'GOOGLE_OAUTH_ERROR') {
-              clearTimeout(timeout);
-              window.removeEventListener('message', handleMsg);
-              resolve({ success: false, error: event.data.error || 'Google authentication failed' });
-            }
-          };
-
-          window.addEventListener('message', handleMsg);
         });
       } else {
         return {
