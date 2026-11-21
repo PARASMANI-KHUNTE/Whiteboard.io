@@ -110,6 +110,23 @@ interface ChainResult {
   failed: AiProviderInfo[];
 }
 
+/**
+ * Thrown only after every backend in the chain has failed. Individual provider
+ * reasons are already logged once as the chain tries each backend, so the
+ * message stays a short summary instead of repeating all of them in the
+ * graceful-fallback line.
+ */
+export class AiFailoverError extends Error {
+  readonly reasons: string[];
+
+  constructor(reasons: string[]) {
+    const count = reasons.length;
+    super(`All ${count} configured AI provider${count === 1 ? "" : "s"} failed.`);
+    this.name = "AiFailoverError";
+    this.reasons = reasons;
+  }
+}
+
 function callModelOnce(
   provider: AiProviderInfo,
   message: string,
@@ -145,13 +162,15 @@ async function callModelChain(
       const reason = `${provider.label} (${provider.model}): ${(error as Error).message}`;
       failed.push(provider);
       errors.push(reason);
-      console.warn(`[AI Failover]: ${reason}`);
+      const remaining = chain.length - failed.length;
+      const disposition = remaining > 0
+        ? ` Trying ${remaining} remaining provider${remaining === 1 ? "" : "s"}.`
+        : " No providers left.";
+      console.warn(`[AI Failover]: ${reason.replace(/\.$/, "")}.${disposition}`);
     }
   }
 
-  throw new Error(
-    errors.join(" | ") || "No AI model backend is configured for failover."
-  );
+  throw new AiFailoverError(errors);
 }
 
 function failoverNotice(failed: AiProviderInfo[], chosen: AiProviderInfo): string | undefined {
