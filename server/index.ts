@@ -1520,6 +1520,20 @@ async function startServer() {
           return;
         }
 
+        // A direct clear supersedes any pending vote: cancel it and its timer
+        // so participants do not keep a stale vote that fires a second clear.
+        if (room.voteToClear?.active) {
+          if (room.voteTimer) clearTimeout(room.voteTimer);
+          room.voteToClear = null;
+          room.voteTimer = null;
+          io.to(currentRoomId).emit("vote-clear-ended", {
+            passed: false,
+            yesCount: 0,
+            totalEligible: Object.keys(room.users).length,
+            reason: "cancelled_by_direct_clear",
+          });
+        }
+
         room.elements = {};
         void saveRoomElements(currentRoomId, {});
         io.to(currentRoomId).emit("board-cleared", {

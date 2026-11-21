@@ -817,11 +817,21 @@ export default function App() {
         confirmText: 'Clear Board',
         cancelText: 'Cancel',
         variant: 'danger',
-        onConfirm: () => {
-          recordBoardClearHistory(Object.values(elementsRef.current) as CanvasElement[]);
-          void emitClearBoardDirect();
-          addNotification('Whiteboard cleared', 'info');
+        onConfirm: async () => {
           setConfirmModalState((prev) => ({ ...prev, isOpen: false }));
+          // Capture before the server broadcast clears local elements, but only
+          // commit history/success if the server actually authorized the clear.
+          const previous = Object.values(elementsRef.current) as CanvasElement[];
+          const cleared = await emitClearBoardDirect();
+          if (cleared) {
+            recordBoardClearHistory(previous);
+            addNotification('Whiteboard cleared', 'info');
+          } else {
+            addNotification(
+              'Board was not cleared. Check your connection and that you are the room host.',
+              'warning'
+            );
+          }
         },
       });
     }

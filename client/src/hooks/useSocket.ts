@@ -665,6 +665,8 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
         addNotification(`Vote passed (${result.yesCount}/${result.totalEligible})! Board was cleared.`, 'success');
       } else if (result.reason === 'cancelled_by_initiator') {
         addNotification('Vote to clear was cancelled by initiator.', 'info');
+      } else if (result.reason === 'cancelled_by_direct_clear') {
+        addNotification('Vote to clear was cancelled because the board was cleared directly.', 'info');
       } else {
         addNotification(`Vote failed to clear board (${result.yesCount}/${result.totalEligible} votes).`, 'info');
       }
@@ -807,13 +809,18 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
    * optimistically or a rejected request would desync the client from the room.
    */
   const emitClearBoardDirect = useCallback((): Promise<boolean> => {
-    if (!socketRef.current?.connected || !roomId) {
+    if (!roomId) {
       // Solo canvas: there is no server to acknowledge.
       pendingElementUpdatesRef.current.clear();
       setElements({});
       setLiveStrokes({});
       setBoardClearCount((count) => count + 1);
       return Promise.resolve(true);
+    }
+    if (!socketRef.current?.connected) {
+      // A multiplayer room with no connection cannot be cleared safely: a
+      // local-only clear would be overwritten by the server state on reconnect.
+      return Promise.resolve(false);
     }
 
     return new Promise<boolean>((resolve) => {
