@@ -30,6 +30,7 @@ import {
   isRecord,
   readBoolean,
   readFiniteNumber,
+  readId,
   readPoint,
   readString,
   sanitizeElement,
@@ -1111,7 +1112,7 @@ async function startServer() {
     safeOn("admin-set-permission", (payload: { targetUserId: string; canWrite: boolean }) => {
       if (!currentRoomId || !currentUser || !currentUser.isHost) return;
       if (!isRecord(payload)) return;
-      const targetUserId = readString(payload.targetUserId, MAX_ID_LENGTH);
+      const targetUserId = readId(payload.targetUserId);
       const canWrite = readBoolean(payload.canWrite);
       if (!targetUserId || canWrite === null) return;
       const room = rooms.get(currentRoomId);
@@ -1152,7 +1153,7 @@ async function startServer() {
     safeOn("admin-kick-user", (payload: { targetUserId: string; reason?: string }) => {
       if (!currentRoomId || !currentUser || !currentUser.isHost) return;
       if (!isRecord(payload)) return;
-      const targetUserId = readString(payload.targetUserId, MAX_ID_LENGTH);
+      const targetUserId = readId(payload.targetUserId);
       const reason = readString(payload.reason, MAX_REASON_LENGTH) || undefined;
       if (!targetUserId) return;
       const room = rooms.get(currentRoomId);
@@ -1263,7 +1264,7 @@ async function startServer() {
     safeOn("stroke-live-start", (payload: { strokeId: string; point: { x: number; y: number }; color: string; size: number; isHighlighter?: boolean }) => {
       if (!currentRoomId || !checkCanWrite()) return;
       if (!isRecord(payload)) return;
-      const strokeId = readString(payload.strokeId, MAX_ID_LENGTH);
+      const strokeId = readId(payload.strokeId);
       const point = readPoint(payload.point);
       const color = readString(payload.color, 32);
       const size = readFiniteNumber(payload.size);
@@ -1281,7 +1282,7 @@ async function startServer() {
     safeOn("stroke-live-point", (payload: { strokeId: string; point: { x: number; y: number } }) => {
       if (!currentRoomId || !checkCanWrite()) return;
       if (!isRecord(payload)) return;
-      const strokeId = readString(payload.strokeId, MAX_ID_LENGTH);
+      const strokeId = readId(payload.strokeId);
       const point = readPoint(payload.point);
       if (!strokeId || !point) return;
       socket.to(currentRoomId).emit("stroke-live-pointed", { strokeId, point });
@@ -1333,7 +1334,7 @@ async function startServer() {
     safeOn("element-delete", (payload: { elementId: string }) => {
       if (!currentRoomId || !checkCanWrite()) return;
       if (!isRecord(payload)) return;
-      const elementId = readString(payload.elementId, MAX_ID_LENGTH);
+      const elementId = readId(payload.elementId);
       if (!elementId) return;
       const room = rooms.get(currentRoomId);
       if (!room) return;
@@ -1379,8 +1380,8 @@ async function startServer() {
       if (!currentRoomId || !currentUser) return;
       if (!isRecord(data)) return;
       const level = readFiniteNumber(data.level);
-      if (level === null) return;
-      const isSpeaking = readBoolean(data.isSpeaking) === true;
+      const isSpeaking = readBoolean(data.isSpeaking);
+      if (level === null || isSpeaking === null) return;
       currentUser.audioLevel = level;
       currentUser.isSpeaking = isSpeaking;
       socket.to(currentRoomId).emit("audio-level-updated", {
@@ -1414,7 +1415,7 @@ async function startServer() {
     safeOn("voice-offer", (payload: { toUserId: string; offer: any }) => {
       if (!currentRoomId || !currentUser) return;
       if (!isRecord(payload)) return;
-      const toUserId = readString(payload.toUserId, MAX_ID_LENGTH);
+      const toUserId = readId(payload.toUserId);
       if (!toUserId || !isRecord(payload.offer)) return;
       const room = rooms.get(currentRoomId);
       if (!room) return;
@@ -1430,7 +1431,7 @@ async function startServer() {
     safeOn("voice-answer", (payload: { toUserId: string; answer: any }) => {
       if (!currentRoomId || !currentUser) return;
       if (!isRecord(payload)) return;
-      const toUserId = readString(payload.toUserId, MAX_ID_LENGTH);
+      const toUserId = readId(payload.toUserId);
       if (!toUserId || !isRecord(payload.answer)) return;
       const room = rooms.get(currentRoomId);
       if (!room) return;
@@ -1446,7 +1447,7 @@ async function startServer() {
     safeOn("voice-ice-candidate", (payload: { toUserId: string; candidate: any }) => {
       if (!currentRoomId || !currentUser) return;
       if (!isRecord(payload)) return;
-      const toUserId = readString(payload.toUserId, MAX_ID_LENGTH);
+      const toUserId = readId(payload.toUserId);
       if (!toUserId || !isRecord(payload.candidate)) return;
       const room = rooms.get(currentRoomId);
       if (!room) return;
