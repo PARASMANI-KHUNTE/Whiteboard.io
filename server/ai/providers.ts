@@ -25,6 +25,11 @@ function splitList(value: string | undefined): string[] {
     .filter(Boolean);
 }
 
+/** Formats retry counts without producing strings like "1 attempts". */
+export function attemptCountLabel(count: number): string {
+  return `${count} attempt${count === 1 ? "" : "s"}`;
+}
+
 function ollamaInfo(): AiProviderInfo {
   const model = process.env.OLLAMA_MODEL?.trim() || DEFAULT_OLLAMA_MODEL;
   return { name: "ollama", model, label: "Ollama" };
@@ -283,7 +288,7 @@ async function callGemini(
         if (attempt === maxRetries) {
           const reason = response.status === 429 ? "rate limit" : "service unavailable";
           throw new Error(
-            `Gemini ${reason} after ${maxRetries} attempts (HTTP ${response.status}).`
+            `Gemini ${reason} after ${attemptCountLabel(maxRetries)} (HTTP ${response.status}).`
           );
         }
         const delayMs = getRetryDelayMs(response, attempt);
