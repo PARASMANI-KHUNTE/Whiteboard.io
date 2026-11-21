@@ -10,6 +10,7 @@ import {
   AlertCircle,
   Headphones,
 } from 'lucide-react';
+import { useModalA11y } from '../hooks/useModalA11y';
 
 interface AudioVisualizerBarProps {
   roomId?: string | null;
@@ -23,6 +24,7 @@ interface AudioVisualizerBarProps {
   frequencyData: Uint8Array;
   isSimulated: boolean;
   error: string | null;
+  onClearError: () => void;
   isIframeRestricted: boolean;
   activeSpeakers?: string[];
   onJoinVoice: () => void;
@@ -44,6 +46,7 @@ export const AudioVisualizerBar: React.FC<AudioVisualizerBarProps> = ({
   frequencyData,
   isSimulated,
   error,
+  onClearError,
   isIframeRestricted,
   activeSpeakers = [],
   onJoinVoice,
@@ -57,6 +60,16 @@ export const AudioVisualizerBar: React.FC<AudioVisualizerBarProps> = ({
   const volumePopoverRef = useRef<HTMLDivElement | null>(null);
   const [showVolumeSlider, setShowVolumeSlider] = useState(false);
   const [showErrorModal, setShowErrorModal] = useState(false);
+  const voiceErrorDialogRef = useRef<HTMLDivElement>(null);
+  const closeVoiceErrorModal = () => {
+    setShowErrorModal(false);
+    onClearError();
+  };
+  useModalA11y({
+    isOpen: showErrorModal,
+    onClose: closeVoiceErrorModal,
+    dialogRef: voiceErrorDialogRef,
+  });
 
   // If an error occurs, show error details
   useEffect(() => {
@@ -358,9 +371,12 @@ export const AudioVisualizerBar: React.FC<AudioVisualizerBarProps> = ({
           className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 dark:bg-black/60 backdrop-blur-xs p-4"
         >
           <div
-            role="dialog"
+            ref={voiceErrorDialogRef}
+            role="alertdialog"
             aria-modal="true"
-            aria-labelledby="voice-troubleshoot-title"
+            aria-labelledby="voice-error-title"
+            aria-describedby="voice-error-description"
+            tabIndex={-1}
             className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl max-w-md w-full p-6 text-slate-800 dark:text-slate-200 animate-in fade-in zoom-in-95 duration-200"
           >
             <div className="flex items-center gap-3">
@@ -368,12 +384,12 @@ export const AudioVisualizerBar: React.FC<AudioVisualizerBarProps> = ({
                 <AlertCircle className="w-5 h-5" />
               </div>
               <div>
-                <h3 id="voice-troubleshoot-title" className="text-base font-bold text-slate-900 dark:text-white">Voice Chat Setup</h3>
+                <h3 id="voice-error-title" className="text-base font-bold text-slate-900 dark:text-white">Voice Chat Setup</h3>
                 <p className="text-xs text-slate-500 dark:text-slate-400">Microphone permission notice</p>
               </div>
             </div>
 
-            <div className="mt-4 p-3.5 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200/80 dark:border-slate-700 text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+            <div id="voice-error-description" className="mt-4 p-3.5 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200/80 dark:border-slate-700 text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
               {isIframeRestricted ? (
                 <>
                   <p className="font-semibold text-slate-800 dark:text-slate-100 mb-1">
@@ -395,7 +411,7 @@ export const AudioVisualizerBar: React.FC<AudioVisualizerBarProps> = ({
                 id="voice-open-new-tab-btn"
                 onClick={() => {
                   onOpenInNewTab();
-                  setShowErrorModal(false);
+                  closeVoiceErrorModal();
                 }}
                 className="w-full sm:w-auto flex-1 flex items-center justify-center gap-1.5 px-4 py-2.5 bg-slate-900 dark:bg-slate-700 hover:bg-slate-800 dark:hover:bg-slate-600 text-white rounded-xl text-xs font-semibold transition-colors cursor-pointer shadow-sm"
               >
@@ -407,7 +423,7 @@ export const AudioVisualizerBar: React.FC<AudioVisualizerBarProps> = ({
                 type="button"
                 id="voice-use-sim-btn"
                 onClick={() => {
-                  setShowErrorModal(false);
+                  closeVoiceErrorModal();
                   onToggleSimulated();
                 }}
                 className="w-full sm:w-auto px-4 py-2.5 bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-950 rounded-xl text-xs font-semibold transition-colors cursor-pointer flex items-center justify-center gap-1.5"
@@ -418,7 +434,7 @@ export const AudioVisualizerBar: React.FC<AudioVisualizerBarProps> = ({
 
               <button
                 type="button"
-                onClick={() => setShowErrorModal(false)}
+                onClick={closeVoiceErrorModal}
                 className="w-full sm:w-auto px-3 py-2.5 text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-100 text-xs font-medium cursor-pointer"
               >
                 Close

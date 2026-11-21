@@ -64,7 +64,7 @@ Whiteboard.io is built as a real-time, distributed collaborative workspace consi
 │                               MONGODB DATABASE                              │
 │                                                                             │
 │    - users: Credentials, salt, hash, Google profile, owned room IDs         │
-│    - tokens: SHA-256 session tokens with TTL expiration index               │
+│    - tokens: 32-byte random hex bearer tokens with TTL expiration index     │
 │    - rooms: Room metadata, host identity, locked status                     │
 │    - elements: Batch-persisted canvas elements (strokes, sticky, shapes)    │
 │    - room_elements: Granular atomic document per element index              │
@@ -129,14 +129,14 @@ Whiteboard.io provides end-to-end data durability across cloud and local storage
 │  │ • users, tokens (TTL 30d)        │   │ • soloStorage.ts (Autosave)    │  │
 │  │ • rooms, elements, room_elements │   │ • guestIdentity.ts (UUID/Name) │  │
 │  │ • Native connection pool & retry │   │ • recentRooms.ts (LRU history) │  │
-│  │ • In-memory fallback if no Mongo │   │ • aiSessionStorage.ts (Chat)   │  │
+│  │ • MONGODB_URI required at startup│   │ • aiSessionStorage.ts (Chat)   │  │
 │  └──────────────────────────────────┘   └────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
 1. **Multiplayer Rooms (MongoDB)**:
    - Handled via `server/db.ts` with connection pooling and automated index creation.
-   - Degrades gracefully to in-memory store if `MONGODB_URI` is absent (for lightweight testing or offline development).
+   - `MONGODB_URI` is required: the server awaits this connection before listening and throws if it cannot connect. Room state is cached in memory for real-time fan-out, but there is no in-memory database replacement.
 2. **Solo Whiteboard Storage (`soloStorage.ts`)**:
    - Autosaves offline canvas work directly to browser `localStorage` with a 300ms debounce.
    - Restores user work upon page reload without requiring room creation.
@@ -153,14 +153,15 @@ Whiteboard.io provides end-to-end data durability across cloud and local storage
 ## 5. Security & Authentication Architecture
 
 ### Identity Models
-1. **Registered Account**: Username, email, password hashed with `crypto.pbkdf2Sync` (10,000 iterations, 64-byte salt, sha512).
+1. **Registered Account**: Username, email, password hashed with PBKDF2-SHA512 (100,000 iterations, a unique 16-byte random salt, and a 64-byte derived key).
 2. **Google OAuth 2.0**: Direct federated authentication using Google's OAuth 2.0 UserInfo endpoint. Supports popup messaging and cross-domain redirect fallback via `#auth_token=`.
 3. **Anonymous Guest Session**: Instant ephemeral guest account with animal-themed names and color assignments. Guest sessions expire automatically after 7 days via MongoDB TTL indexes.
 
 ### Security Layers
 - **Rate Limiting**: Custom token-bucket rate limiter for auth endpoints (`/api/auth/register`, `/api/auth/login`, `/api/auth/guest`) and AI endpoints (`/api/ai/generate-diagram`, `/api/ai/revise-diagram`).
 - **Security Headers**: Explicit enforcement of `X-Content-Type-Options: nosniff`, `X-Frame-Options: SAMEORIGIN`, `Referrer-Policy: strict-origin-when-cross-origin`, and `X-XSS-Protection`.
-- **CORS Allowlist**: Dynamic origin resolution honoring `APP_URL`, `CLIENT_URL`, and local dev origins.
+- **CORS Allowlist**: Dynamic origin resolution honoring `APP_URL`, `CLIENT_URL`, `ALLOWED_ORIGINS`, and local dev origins.
+- **OAuth Request Binding**: The Google flow stores a single-use random nonce in the `wb_oauth_nonce` HttpOnly cookie and validates the matching `state` parameter on callback.
 - **Input Sanitization**: Malformed JSON guards, character length truncations (prompt: 1200 chars), and HTML escaping on OAuth callback error responses.
 
 ---
@@ -190,7 +191,7 @@ interface StoredUserDoc {
 ### `tokens` Collection
 ```typescript
 interface SessionTokenDoc {
-  token: string;           // SHA-256 token string (Index: unique)
+  token: string;           // 64-hex-character opaque bearer token (Index: unique)
   userId: string;          // Indexed for user session queries
   createdAt: number;       // TTL index: auto-expires after 30 days
   updatedAt: number;

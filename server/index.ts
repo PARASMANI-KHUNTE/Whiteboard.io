@@ -26,13 +26,36 @@ import {
 } from "./auth";
 import { connectDb, checkDbHealth } from "./db";
 import { resolveSocketIdentity } from "./socketIdentity";
+import { chooseReplacementHost } from "./roomHost";
+import { canDirectClearBoard } from "./boardClear";
+import {
+  isRecord,
+  readBoolean,
+  readFiniteNumber,
+  readId,
+  readPoint,
+  readString,
+  sanitizeElement,
+  sanitizeElementBatch,
+  sanitizeElementIds,
+  MAX_ID_LENGTH,
+  MAX_REASON_LENGTH,
+  MAX_STROKE_SIZE,
+  MAX_POINTS_PER_STROKE,
+} from "./socketPayload";
+import { guardSocketHandler } from "./socketHandler";
+
+/** Live strokes expire after this long without a new point. */
+const LIVE_STROKE_TTL_MS = 30_000;
+/** Maximum simultaneous unfinished strokes per socket. */
+const MAX_CONCURRENT_LIVE_STROKES = 8;
 import {
   createOAuthState,
   verifyOAuthState,
   OAUTH_NONCE_COOKIE,
   OAUTH_STATE_TTL_MS,
 } from "./oauthState";
-import { generateDiagram, reviseDiagram } from "./ai/generate";
+import { AiQueueFullError, generateDiagram, reviseDiagram } from "./ai/generate";
 import { getProviderSummary } from "./ai/providers";
 import {
   coerceDiagramType,
@@ -50,6 +73,16 @@ const envPath = fs.existsSync(path.resolve(__dirname, ".env"))
   ? path.resolve(__dirname, ".env")
   : path.resolve(process.cwd(), ".env");
 dotenv.config({ path: envPath });
+
+// Last-resort logging. Socket handler errors are caught locally by `safeOn`;
+// these listeners make any remaining async/fatal failure diagnosable.
+process.on("unhandledRejection", (reason) => {
+  console.error("[Fatal] Unhandled promise rejection:", reason);
+});
+process.on("uncaughtException", (err) => {
+  console.error("[Fatal] Uncaught exception:", err);
+  process.exit(1);
+});
 
 function escapeHtml(str: string): string {
   return str
@@ -125,6 +158,11 @@ interface RoomData {
 
 const PORT = Number(process.env.PORT) || 3000;
 const VOTE_CLEAR_DURATION_MS = Number(process.env.VOTE_CLEAR_DURATION_MS) || 15000;
+
+function positiveEnvInt(name: string, fallback: number): number {
+  const value = Number(process.env[name]);
+  return Number.isFinite(value) && value > 0 ? Math.floor(value) : fallback;
+}
 const rooms = new Map<string, RoomData>();
 
 async function getOrCreateRoom(roomId: string): Promise<RoomData> {
@@ -168,6 +206,48 @@ function persistRoomAccess(room: RoomData) {
       userPermissions: room.userPermissions,
     }
   );
+}
+
+/** Promote the next participant when a host leaves a room by any path. */
+function migrateRoomHost(io: SocketIOServer, room: RoomData, departingUserId: string): boolean {
+  const nextHost = chooseReplacementHost(room.users, departingUserId, room.creatorId);
+  if (!nextHost) return false;
+
+  nextHost.isHost = true;
+  nextHost.role = 'admin';
+  nextHost.canWrite = true;
+  room.creatorId = nextHost.id;
+  room.creatorName = nextHost.name;
+  room.userPermissions[nextHost.id] = { canWrite: true, role: 'admin' };
+
+  void transferRoomOwnership(room.id, nextHost.id, nextHost.name);
+  persistRoomAccess(room);
+
+  io.to(room.id).emit("room-host-migrated", {
+    newHostId: nextHost.id,
+    newHostName: nextHost.name,
+    message: `${nextHost.name} is now the host of this room.`,
+  });
+  io.to(room.id).emit("user-permission-changed", {
+    userId: nextHost.id,
+    canWrite: true,
+    role: 'admin',
+  });
+
+  const socketIds = nextHost.socketIds?.length
+    ? nextHost.socketIds
+    : nextHost.socketId
+      ? [nextHost.socketId]
+      : [];
+  for (const socketId of socketIds) {
+    io.to(socketId).emit("permission-updated", {
+      canWrite: true,
+      role: 'admin',
+      message: "You have been promoted to Host/Admin of this room.",
+    });
+  }
+
+  return true;
 }
 
 const ALLOWED_ORIGIN_SET = new Set([
@@ -250,9 +330,20 @@ function authRateLimiter(maxRequests = 30, windowMs = 60000, bucket = "default")
 async function startServer() {
   await connectDb();
   const app = express();
-  // Respect a single reverse proxy (Render/Railway/nginx) for client IPs.
-  app.set("trust proxy", 1);
+  // X-Forwarded-For is only trusted when a deployment explicitly opts in.
+  // Otherwise any caller can forge it and bypass per-IP rate limits.
+  const trustProxy = (process.env.TRUST_PROXY || "").trim().toLowerCase();
+  if (trustProxy === "true") {
+    app.set("trust proxy", true);
+  } else if (/^\d+$/.test(trustProxy)) {
+    app.set("trust proxy", Number(trustProxy));
+  }
   const server = http.createServer(app);
+  server.requestTimeout = positiveEnvInt("HTTP_REQUEST_TIMEOUT_MS", 60000);
+  server.headersTimeout = Math.max(
+    server.requestTimeout + 5000,
+    positiveEnvInt("HTTP_HEADERS_TIMEOUT_MS", 65000)
+  );
   const io = new SocketIOServer(server, {
     cors: {
       origin: (requestOrigin, callback) => {
@@ -427,8 +518,9 @@ async function startServer() {
 
       res.json({ success: true, ...result });
     } catch (err: any) {
+      const status = err instanceof AiQueueFullError ? 429 : 500;
       console.error("[AI Generate Error]:", err.message);
-      res.status(500).json({ success: false, error: err.message || "Failed to generate diagram" });
+      res.status(status).json({ success: false, error: err.message || "Failed to generate diagram" });
     }
   });
 
@@ -491,8 +583,9 @@ async function startServer() {
 
       res.json({ success: true, ...result });
     } catch (err: any) {
+      const status = err instanceof AiQueueFullError ? 429 : 500;
       console.error("[AI Revision Error]:", err.message);
-      res.status(500).json({ success: false, error: err.message || "Failed to revise diagram" });
+      res.status(status).json({ success: false, error: err.message || "Failed to revise diagram" });
     }
   });
 
@@ -737,22 +830,19 @@ async function startServer() {
       const token = authHeader?.replace("Bearer ", "")?.trim();
       const user = token ? await getUserByToken(token) : null;
 
+      if (!user) {
+        res.status(401).json({ success: false, error: "You must be signed in to create a room" });
+        return;
+      }
+
       const { name, customCode, isLocked } = req.body;
       let roomId = customCode ? customCode.trim().toUpperCase().replace(/[^A-Z0-9_-]/g, "-") : generateRoomCode();
       if (!roomId || roomId.length < 2) roomId = generateRoomCode();
 
-      // Anonymous creators send their stable guest identity so host rights
-      // survive reloads. Authenticated callers are always resolved server-side.
-      const requestedCreatorId =
-        typeof req.body?.creatorId === "string" ? req.body.creatorId.trim().slice(0, 128) : "";
-      const requestedCreatorName =
-        typeof req.body?.creatorName === "string" ? req.body.creatorName.trim().slice(0, 48) : "";
-      const creatorId = user
-        ? user.id
-        : requestedCreatorId || "guest_" + Math.random().toString(36).substring(2, 8);
-      const creatorName = user
-        ? user.name
-        : requestedCreatorName || "Session Host";
+      // Ownership always comes from the server-issued session. Guest accounts
+      // use the same endpoint after obtaining a server-issued guest token.
+      const creatorId = user.id;
+      const creatorName = user.name;
 
       const roomMeta = {
         id: roomId,
@@ -843,13 +933,17 @@ async function startServer() {
       // be accepted as proof.
       const requesterId = user.id;
 
-      // Verify authorization: only the room creator may delete a room
-      if (creatorId && creatorId !== requesterId) {
+      // Unknown ownership is never treated as permission to delete.
+      if (!creatorId || creatorId !== requesterId) {
         res.status(403).json({ success: false, error: "Only the room creator can delete this room" });
         return;
       }
 
-      const success = await deleteRoom(roomId, requesterId);
+      const success = await deleteRoom(roomId, requesterId, creatorId);
+      if (!success) {
+        res.status(403).json({ success: false, error: "Only the room creator can delete this room" });
+        return;
+      }
 
       // Notify and clean up active socket room
       if (rooms.has(roomId)) {
@@ -861,7 +955,7 @@ async function startServer() {
         rooms.delete(roomId);
       }
 
-      res.json({ success, roomId });
+      res.json({ success: true, roomId });
     } catch (err: any) {
       res.status(500).json({ success: false, error: err.message || "Failed to delete room" });
     }
@@ -871,6 +965,16 @@ async function startServer() {
   io.on("connection", (socket: Socket) => {
     let currentRoomId: string | null = null;
     let currentUser: UserSession | null = null;
+
+    // Per-socket live-stroke accounting. Without a cap, one writer could stream
+    // unlimited points into every participant's in-memory liveStrokes map.
+    const liveStrokes = new Map<string, { count: number; expiresAt: number }>();
+    const clearLiveStrokes = () => liveStrokes.clear();
+    const pruneLiveStrokes = (now: number) => {
+      for (const [id, state] of liveStrokes) {
+        if (state.expiresAt <= now) liveStrokes.delete(id);
+      }
+    };
 
     // Drop all incoming socket events if socket was kicked
     socket.use((_packet, next) => {
@@ -891,8 +995,26 @@ async function startServer() {
       return false;
     };
 
+    /**
+     * Socket.IO dispatches listeners without catching thrown errors. A single
+     * malformed payload would otherwise become an uncaughtException and kill
+     * the whole process, so every handler is wrapped and reports a safe error.
+     */
+    const safeOn = <T extends (...args: any[]) => void | Promise<void>>(
+      event: string,
+      handler: T
+    ) => {
+      socket.on(
+        event,
+        guardSocketHandler(handler, (err) => {
+          console.error(`[Socket] Handler "${event}" failed:`, err);
+          socket.emit("room-error", { message: "Could not process that request." });
+        })
+      );
+    };
+
     // Join room
-    socket.on("join-room", async (rawData: { roomId: string; user: { id: string; name: string; color: string; username?: string }; token?: string }) => {
+    safeOn("join-room", async (rawData: { roomId: string; user: { id: string; name: string; color: string; username?: string }; token?: string }) => {
       const data = rawData || ({} as any);
       const rawRoomId = typeof data.roomId === "string" ? data.roomId : "";
       const roomId = rawRoomId
@@ -958,12 +1080,19 @@ async function startServer() {
         socket.to(roomId).emit("user-left", { userId: currentUser.id });
       }
 
-      // Leave the previously joined room when switching rooms
+      // Leave the previously joined room when switching rooms. Host migration
+      // must run here too; disconnect only fires when the socket closes.
       if (currentRoomId && currentRoomId !== roomId) {
         const previousRoom = rooms.get(currentRoomId);
         if (previousRoom && currentUser) {
+          const wasPreviousRoomHost = Boolean(
+            previousRoom.users[currentUser.id]?.isHost ?? currentUser.isHost
+          );
           delete previousRoom.users[currentUser.id];
           socket.to(currentRoomId).emit("user-left", { userId: currentUser.id });
+          if (wasPreviousRoomHost) {
+            migrateRoomHost(io, previousRoom, currentUser.id);
+          }
         }
         socket.leave(currentRoomId);
       }
@@ -1067,11 +1196,14 @@ async function startServer() {
     });
 
     // Admin: Set User Writing Permissions (Revoke / Grant)
-    socket.on("admin-set-permission", (payload: { targetUserId: string; canWrite: boolean }) => {
+    safeOn("admin-set-permission", (payload: { targetUserId: string; canWrite: boolean }) => {
       if (!currentRoomId || !currentUser || !currentUser.isHost) return;
+      if (!isRecord(payload)) return;
+      const targetUserId = readId(payload.targetUserId);
+      const canWrite = readBoolean(payload.canWrite);
+      if (!targetUserId || canWrite === null) return;
       const room = rooms.get(currentRoomId);
       if (!room) return;
-      const { targetUserId, canWrite } = payload;
       if (targetUserId === currentUser.id) return; // Host cannot revoke self
 
       const role: 'editor' | 'viewer' = canWrite ? 'editor' : 'viewer';
@@ -1105,11 +1237,14 @@ async function startServer() {
     });
 
     // Admin: Kick / Remove User from Room
-    socket.on("admin-kick-user", (payload: { targetUserId: string; reason?: string }) => {
+    safeOn("admin-kick-user", (payload: { targetUserId: string; reason?: string }) => {
       if (!currentRoomId || !currentUser || !currentUser.isHost) return;
+      if (!isRecord(payload)) return;
+      const targetUserId = readId(payload.targetUserId);
+      const reason = readString(payload.reason, MAX_REASON_LENGTH) || undefined;
+      if (!targetUserId) return;
       const room = rooms.get(currentRoomId);
       if (!room) return;
-      const { targetUserId, reason } = payload;
       if (targetUserId === currentUser.id) return; // Cannot kick host
 
       room.kickedUserIds.add(targetUserId);
@@ -1147,16 +1282,19 @@ async function startServer() {
     });
 
     // Admin: Toggle Lock Whiteboard
-    socket.on("admin-toggle-lock", (payload: { isLocked: boolean }) => {
+    safeOn("admin-toggle-lock", (payload: { isLocked: boolean }) => {
       if (!currentRoomId || !currentUser || !currentUser.isHost) return;
+      if (!isRecord(payload)) return;
+      const isLocked = readBoolean(payload.isLocked);
+      if (isLocked === null) return;
       const room = rooms.get(currentRoomId);
       if (!room) return;
-      room.isLocked = payload.isLocked;
+      room.isLocked = isLocked;
 
       // Update live participants and persisted permissions, including users who
       // are currently offline, so a restart/unlock does not leave stale viewers.
-      const nextRole: 'editor' | 'viewer' = payload.isLocked ? 'viewer' : 'editor';
-      const nextCanWrite = !payload.isLocked;
+      const nextRole: 'editor' | 'viewer' = isLocked ? 'viewer' : 'editor';
+      const nextCanWrite = !isLocked;
       Object.keys(room.userPermissions).forEach((userId) => {
         if (userId === room.creatorId) return;
         room.userPermissions[userId] = { canWrite: nextCanWrite, role: nextRole };
@@ -1178,8 +1316,10 @@ async function startServer() {
     });
 
     // Admin: Delete Room
-    socket.on("admin-delete-room", async (payload?: { roomId?: string }) => {
-      const targetRoomId = payload?.roomId || currentRoomId;
+    safeOn("admin-delete-room", async (payload?: { roomId?: string }) => {
+      const targetRoomId = isRecord(payload)
+        ? readString(payload.roomId, MAX_ID_LENGTH) || currentRoomId
+        : currentRoomId;
       if (!targetRoomId || !currentUser) return;
       const room = rooms.get(targetRoomId);
 
@@ -1187,17 +1327,32 @@ async function startServer() {
       // creator check for authenticated accounts that are not in the room.
       const isRoomHost = Boolean(currentRoomId === targetRoomId && currentUser.isHost);
       const meta = await getRoomMeta(targetRoomId);
-      const creatorId = room?.creatorId || meta?.creatorId;
-      const isCreator = Boolean(creatorId && creatorId === currentUser.id);
+      let creatorId = room?.creatorId || meta?.creatorId;
 
-      if (!isRoomHost && !isCreator) {
+      // The first in-memory host may still be waiting for its claim to persist.
+      if (!creatorId && isRoomHost) {
+        creatorId = currentUser.id;
+        if (room) {
+          room.creatorId = creatorId;
+          room.creatorName = currentUser.name;
+          void transferRoomOwnership(targetRoomId, creatorId, currentUser.name);
+        }
+      }
+
+      if (!creatorId || (!isRoomHost && creatorId !== currentUser.id)) {
         socket.emit("permission-denied", {
           message: "Only the room host or creator can delete this room.",
         });
         return;
       }
 
-      await deleteRoom(targetRoomId, currentUser.id);
+      const deleted = await deleteRoom(targetRoomId, currentUser.id, creatorId);
+      if (!deleted) {
+        socket.emit("permission-denied", {
+          message: "Only the room host or creator can delete this room.",
+        });
+        return;
+      }
 
       io.to(targetRoomId).emit("room-deleted", {
         roomId: targetRoomId,
@@ -1208,107 +1363,166 @@ async function startServer() {
     });
 
     // Real-time live stroke streaming (Guarded)
-    socket.on("stroke-live-start", (payload: { strokeId: string; point: { x: number; y: number }; color: string; size: number; isHighlighter?: boolean }) => {
+    safeOn("stroke-live-start", (payload: { strokeId: string; point: { x: number; y: number }; color: string; size: number; isHighlighter?: boolean }) => {
       if (!currentRoomId || !checkCanWrite()) return;
+      if (!isRecord(payload)) return;
+      const strokeId = readId(payload.strokeId);
+      const point = readPoint(payload.point);
+      const color = readString(payload.color, 32);
+      const size = readFiniteNumber(payload.size);
+      // Only default when the field is omitted; reject a present non-boolean
+      // so malformed input cannot silently change how the stroke is rendered.
+      const rawHighlighter = payload.isHighlighter;
+      const isHighlighter = rawHighlighter === undefined ? false : readBoolean(rawHighlighter);
+      if (!strokeId || !point || !color || size === null || size <= 0 || size > MAX_STROKE_SIZE || isHighlighter === null) return;
+
+      const now = Date.now();
+      pruneLiveStrokes(now);
+      if (liveStrokes.size >= MAX_CONCURRENT_LIVE_STROKES || liveStrokes.has(strokeId)) return;
+      liveStrokes.set(strokeId, { count: 1, expiresAt: now + LIVE_STROKE_TTL_MS });
+
       socket.to(currentRoomId).emit("stroke-live-started", {
         userId: currentUser?.id,
-        ...payload,
+        strokeId,
+        point,
+        color,
+        size,
+        isHighlighter,
       });
     });
 
-    socket.on("stroke-live-point", (payload: { strokeId: string; point: { x: number; y: number } }) => {
+    safeOn("stroke-live-point", (payload: { strokeId: string; point: { x: number; y: number } }) => {
       if (!currentRoomId || !checkCanWrite()) return;
-      socket.to(currentRoomId).emit("stroke-live-pointed", payload);
+      if (!isRecord(payload)) return;
+      const strokeId = readId(payload.strokeId);
+      const point = readPoint(payload.point);
+      if (!strokeId || !point) return;
+
+      const now = Date.now();
+      pruneLiveStrokes(now);
+      const state = liveStrokes.get(strokeId);
+      if (!state || state.count >= MAX_POINTS_PER_STROKE) return;
+      state.count += 1;
+      state.expiresAt = now + LIVE_STROKE_TTL_MS;
+
+      socket.to(currentRoomId).emit("stroke-live-pointed", { strokeId, point });
     });
 
     // Final element creation (persisted, Guarded)
-    socket.on("element-create", (element: CanvasElement) => {
+    safeOn("element-create", (element: CanvasElement) => {
       if (!currentRoomId || !checkCanWrite()) return;
+      const clean = sanitizeElement(element);
+      if (!clean) return;
       const room = rooms.get(currentRoomId);
       if (!room) return;
-      room.elements[element.id] = element;
+      room.elements[clean.id] = clean as CanvasElement;
+      liveStrokes.delete(clean.id);
       saveRoomElementsDebounced(currentRoomId, room.elements, 400);
-      socket.to(currentRoomId).emit("element-created", element);
+      socket.to(currentRoomId).emit("element-created", clean);
     });
 
     // Batch element creation (e.g. converting solo canvas to multiplayer room, Guarded)
-    socket.on("elements-batch-create", (elementsList: CanvasElement[]) => {
+    safeOn("elements-batch-create", (elementsList: CanvasElement[]) => {
       if (!currentRoomId || !checkCanWrite()) return;
+      const clean = sanitizeElementBatch(elementsList);
+      if (clean.length === 0) return;
       const room = rooms.get(currentRoomId);
-      if (!room || !Array.isArray(elementsList)) return;
-      elementsList.forEach((el) => {
-        if (el && el.id) {
-          room.elements[el.id] = el;
-        }
+      if (!room) return;
+      clean.forEach((el) => {
+        room.elements[el.id] = el as CanvasElement;
       });
       saveRoomElementsDebounced(currentRoomId, room.elements, 400);
-      socket.to(currentRoomId).emit("elements-batch-created", elementsList);
+      socket.to(currentRoomId).emit("elements-batch-created", clean);
     });
 
     // Element update (e.g. moving sticky note or updating text, Guarded)
-    socket.on("element-update", (element: CanvasElement) => {
+    safeOn("element-update", (element: CanvasElement) => {
       if (!currentRoomId || !checkCanWrite()) return;
+      const clean = sanitizeElement(element);
+      if (!clean) return;
       const room = rooms.get(currentRoomId);
       if (!room) return;
-      if (room.elements[element.id]) {
-        room.elements[element.id] = { ...room.elements[element.id], ...element };
+      if (room.elements[clean.id]) {
+        room.elements[clean.id] = { ...room.elements[clean.id], ...clean } as CanvasElement;
       } else {
-        room.elements[element.id] = element;
+        room.elements[clean.id] = clean as CanvasElement;
       }
       saveRoomElementsDebounced(currentRoomId, room.elements, 800);
-      socket.to(currentRoomId).emit("element-updated", element);
+      socket.to(currentRoomId).emit("element-updated", clean);
     });
 
     // Element delete (Guarded)
-    socket.on("element-delete", (payload: { elementId: string }) => {
+    safeOn("element-delete", (payload: { elementId: string }) => {
       if (!currentRoomId || !checkCanWrite()) return;
+      if (!isRecord(payload)) return;
+      const elementId = readId(payload.elementId);
+      if (!elementId) return;
       const room = rooms.get(currentRoomId);
       if (!room) return;
-      delete room.elements[payload.elementId];
+      delete room.elements[elementId];
       saveRoomElementsDebounced(currentRoomId, room.elements, 400);
-      socket.to(currentRoomId).emit("element-deleted", payload);
+      socket.to(currentRoomId).emit("element-deleted", { elementId });
     });
 
     // Batch elements delete (e.g. eraser dragged across multiple strokes, Guarded)
-    socket.on("elements-batch-delete", (payload: { elementIds: string[] }) => {
+    safeOn("elements-batch-delete", (payload: { elementIds: string[] }) => {
       if (!currentRoomId || !checkCanWrite()) return;
+      const elementIds = sanitizeElementIds(isRecord(payload) ? payload.elementIds : undefined);
+      if (elementIds.length === 0) return;
       const room = rooms.get(currentRoomId);
       if (!room) return;
-      payload.elementIds.forEach((id) => {
+      elementIds.forEach((id) => {
         delete room.elements[id];
       });
       saveRoomElementsDebounced(currentRoomId, room.elements, 400);
-      socket.to(currentRoomId).emit("elements-batch-deleted", payload);
+      socket.to(currentRoomId).emit("elements-batch-deleted", { elementIds });
     });
 
     // Multiplayer cursor movement
-    socket.on("cursor-move", (cursor: { x: number; y: number; tool?: string; isDrawing?: boolean }) => {
+    safeOn("cursor-move", (cursor: { x: number; y: number; tool?: string; isDrawing?: boolean }) => {
       if (!currentRoomId || !currentUser) return;
-      currentUser.cursor = cursor;
+      if (!isRecord(cursor)) return;
+      const point = readPoint(cursor);
+      if (!point) return;
+      const cleanCursor = {
+        ...point,
+        tool: readString(cursor.tool, 32) || undefined,
+        isDrawing: readBoolean(cursor.isDrawing) === true,
+      };
+      currentUser.cursor = cleanCursor;
       socket.to(currentRoomId).emit("cursor-moved", {
         userId: currentUser.id,
-        cursor,
+        cursor: cleanCursor,
       });
     });
 
     // Audio reactivity / Speaking indicator
-    socket.on("audio-level", (data: { level: number; isSpeaking: boolean }) => {
+    safeOn("audio-level", (data: { level: number; isSpeaking: boolean }) => {
       if (!currentRoomId || !currentUser) return;
-      currentUser.audioLevel = data.level;
-      currentUser.isSpeaking = data.isSpeaking;
+      if (!isRecord(data)) return;
+      const level = readFiniteNumber(data.level);
+      const isSpeaking = readBoolean(data.isSpeaking);
+      if (level === null || isSpeaking === null || level < 0 || level > 1) return;
+      currentUser.audioLevel = level;
+      currentUser.isSpeaking = isSpeaking;
       socket.to(currentRoomId).emit("audio-level-updated", {
         userId: currentUser.id,
-        level: data.level,
-        isSpeaking: data.isSpeaking,
+        level,
+        isSpeaking,
       });
     });
 
     // Voice Chat State & Mute/Deafen update
-    socket.on("voice-status-update", (data: { isMuted?: boolean; isDeafened?: boolean; voiceConnected?: boolean }) => {
+    safeOn("voice-status-update", (data: { isMuted?: boolean; isDeafened?: boolean; voiceConnected?: boolean }) => {
       if (!currentRoomId || !currentUser) return;
-      if (typeof data.isMuted === 'boolean') currentUser.isMuted = data.isMuted;
-      if (typeof data.isDeafened === 'boolean') currentUser.isDeafened = data.isDeafened;
-      if (typeof data.voiceConnected === 'boolean') currentUser.voiceConnected = data.voiceConnected;
+      if (!isRecord(data)) return;
+      const isMuted = readBoolean(data.isMuted);
+      const isDeafened = readBoolean(data.isDeafened);
+      const voiceConnected = readBoolean(data.voiceConnected);
+      if (isMuted === null && isDeafened === null && voiceConnected === null) return;
+      if (isMuted !== null) currentUser.isMuted = isMuted;
+      if (isDeafened !== null) currentUser.isDeafened = isDeafened;
+      if (voiceConnected !== null) currentUser.voiceConnected = voiceConnected;
 
       socket.to(currentRoomId).emit("voice-status-updated", {
         userId: currentUser.id,
@@ -1319,11 +1533,14 @@ async function startServer() {
     });
 
     // WebRTC Voice Signaling Mesh
-    socket.on("voice-offer", (payload: { toUserId: string; offer: any }) => {
+    safeOn("voice-offer", (payload: { toUserId: string; offer: any }) => {
       if (!currentRoomId || !currentUser) return;
+      if (!isRecord(payload)) return;
+      const toUserId = readId(payload.toUserId);
+      if (!toUserId || !isRecord(payload.offer)) return;
       const room = rooms.get(currentRoomId);
       if (!room) return;
-      const targetUser = room.users[payload.toUserId];
+      const targetUser = room.users[toUserId];
       if (targetUser && targetUser.socketId) {
         io.to(targetUser.socketId).emit("voice-offer", {
           fromUserId: currentUser.id,
@@ -1332,11 +1549,14 @@ async function startServer() {
       }
     });
 
-    socket.on("voice-answer", (payload: { toUserId: string; answer: any }) => {
+    safeOn("voice-answer", (payload: { toUserId: string; answer: any }) => {
       if (!currentRoomId || !currentUser) return;
+      if (!isRecord(payload)) return;
+      const toUserId = readId(payload.toUserId);
+      if (!toUserId || !isRecord(payload.answer)) return;
       const room = rooms.get(currentRoomId);
       if (!room) return;
-      const targetUser = room.users[payload.toUserId];
+      const targetUser = room.users[toUserId];
       if (targetUser && targetUser.socketId) {
         io.to(targetUser.socketId).emit("voice-answer", {
           fromUserId: currentUser.id,
@@ -1345,11 +1565,14 @@ async function startServer() {
       }
     });
 
-    socket.on("voice-ice-candidate", (payload: { toUserId: string; candidate: any }) => {
+    safeOn("voice-ice-candidate", (payload: { toUserId: string; candidate: any }) => {
       if (!currentRoomId || !currentUser) return;
+      if (!isRecord(payload)) return;
+      const toUserId = readId(payload.toUserId);
+      if (!toUserId || !isRecord(payload.candidate)) return;
       const room = rooms.get(currentRoomId);
       if (!room) return;
-      const targetUser = room.users[payload.toUserId];
+      const targetUser = room.users[toUserId];
       if (targetUser && targetUser.socketId) {
         io.to(targetUser.socketId).emit("voice-ice-candidate", {
           fromUserId: currentUser.id,
@@ -1360,7 +1583,7 @@ async function startServer() {
 
 
     // Vote to Clear Feature
-    socket.on("vote-clear-start", () => {
+    safeOn("vote-clear-start", () => {
       if (!currentRoomId || !currentUser || !checkCanWrite()) return;
       const targetRoomId = currentRoomId;
       const room = rooms.get(targetRoomId);
@@ -1370,6 +1593,7 @@ async function startServer() {
       // If only 1 user, clear immediately
       if (userIds.length <= 1) {
         room.elements = {};
+        clearLiveStrokes();
         void saveRoomElements(targetRoomId, {});
         io.to(targetRoomId).emit("board-cleared", {
           initiatorName: currentUser.name,
@@ -1412,6 +1636,7 @@ async function startServer() {
 
         if (passed) {
           currentRoom.elements = {};
+          clearLiveStrokes();
           void saveRoomElements(targetRoomId, {});
           io.to(targetRoomId).emit("board-cleared", {
             initiatorName: currentRoom.voteToClear.initiatorName,
@@ -1431,12 +1656,15 @@ async function startServer() {
       }, durationMs);
     });
 
-    socket.on("vote-clear-cast", (data: { vote: boolean }) => {
-      if (!currentRoomId || !currentUser) return;
+    safeOn("vote-clear-cast", (data: { vote: boolean }) => {
+      if (!currentRoomId || !currentUser || !checkCanWrite()) return;
+      if (!isRecord(data)) return;
+      const vote = readBoolean(data.vote);
+      if (vote === null) return;
       const room = rooms.get(currentRoomId);
       if (!room || !room.voteToClear || !room.voteToClear.active) return;
 
-      room.voteToClear.votes[currentUser.id] = data.vote;
+      room.voteToClear.votes[currentUser.id] = vote;
 
       const userIds = Object.keys(room.users);
       const yesCount = Object.values(room.voteToClear.votes).filter(Boolean).length;
@@ -1449,6 +1677,7 @@ async function startServer() {
       if (yesCount > totalEligible / 2) {
         if (room.voteTimer) clearTimeout(room.voteTimer);
         room.elements = {};
+        clearLiveStrokes();
         void saveRoomElements(currentRoomId, {});
         io.to(currentRoomId).emit("board-cleared", {
           initiatorName: room.voteToClear.initiatorName,
@@ -1466,7 +1695,7 @@ async function startServer() {
       }
     });
 
-    socket.on("vote-clear-cancel", () => {
+    safeOn("vote-clear-cancel", () => {
       if (!currentRoomId || !currentUser) return;
       const room = rooms.get(currentRoomId);
       if (!room || !room.voteToClear || !room.voteToClear.active) return;
@@ -1484,21 +1713,66 @@ async function startServer() {
       });
     });
 
-    // Direct clear (if user confirms solo or forced)
-    socket.on("clear-board-direct", () => {
-      if (!currentRoomId || !currentUser || !checkCanWrite()) return;
+    // Direct clear: only the host, or the sole participant of a room, may
+    // bypass the vote-to-clear flow. Editors must use the vote instead.
+    safeOn("clear-board-direct", (ack?: (result: { ok: boolean }) => void) => {
+      const respond = (ok: boolean) => {
+        try {
+          ack?.({ ok });
+        } catch (_) {
+          // Client disconnected before the acknowledgment arrived.
+        }
+      };
+
+      if (!currentRoomId || !currentUser) {
+        respond(false);
+        return;
+      }
       const room = rooms.get(currentRoomId);
-      if (!room) return;
+      if (!room) {
+        respond(false);
+        return;
+      }
+
+      if (!canDirectClearBoard(Object.keys(room.users).length, currentUser.isHost === true)) {
+        socket.emit("permission-denied", {
+          message: "Only the room host can clear the board directly. Start a vote to clear instead.",
+        });
+        respond(false);
+        return;
+      }
+      if (!checkCanWrite()) {
+        respond(false);
+        return;
+      }
+
+      // A direct clear supersedes any pending vote: cancel it and its timer
+      // so participants do not keep a stale vote that fires a second clear.
+      if (room.voteToClear?.active) {
+        if (room.voteTimer) clearTimeout(room.voteTimer);
+        room.voteToClear = null;
+        room.voteTimer = null;
+        io.to(currentRoomId).emit("vote-clear-ended", {
+          passed: false,
+          yesCount: 0,
+          totalEligible: Object.keys(room.users).length,
+          reason: "cancelled_by_direct_clear",
+        });
+      }
+
       room.elements = {};
+      clearLiveStrokes();
       void saveRoomElements(currentRoomId, {});
       io.to(currentRoomId).emit("board-cleared", {
         initiatorName: currentUser.name,
         wasVoted: false,
       });
+      respond(true);
     });
 
     // Disconnect
-    socket.on("disconnect", () => {
+    safeOn("disconnect", () => {
+      clearLiveStrokes();
       if (!currentRoomId || !currentUser) return;
       const room = rooms.get(currentRoomId);
       if (!room) return;
@@ -1516,7 +1790,7 @@ async function startServer() {
         }
       }
 
-      const wasHost = !!currentUser.isHost;
+      const wasHost = Boolean(room.users[currentUser.id]?.isHost ?? currentUser.isHost);
       delete room.users[currentUser.id];
       socket.to(currentRoomId).emit("user-left", { userId: currentUser.id });
 
@@ -1528,42 +1802,11 @@ async function startServer() {
       }
 
       // Host Migration: If the host left and other participants remain, promote next active user
-      const remainingUserIds = Object.keys(room.users);
-      if (wasHost && remainingUserIds.length > 0) {
-        const nextHostId = remainingUserIds[0];
-        const nextHost = room.users[nextHostId];
-        if (nextHost) {
-          nextHost.isHost = true;
-          nextHost.role = 'admin';
-          nextHost.canWrite = true;
-          room.creatorId = nextHost.id;
-          room.creatorName = nextHost.name;
-          room.userPermissions[nextHost.id] = { canWrite: true, role: 'admin' };
-
-          void transferRoomOwnership(currentRoomId, nextHost.id, nextHost.name);
-          persistRoomAccess(room);
-
-          io.to(currentRoomId).emit("room-host-migrated", {
-            newHostId: nextHost.id,
-            newHostName: nextHost.name,
-            message: `${nextHost.name} is now the host of this room.`,
-          });
-
-          io.to(currentRoomId).emit("user-permission-changed", {
-            userId: nextHost.id,
-            canWrite: true,
-            role: 'admin',
-          });
-
-          if (nextHost.socketId) {
-            io.to(nextHost.socketId).emit("permission-updated", {
-              canWrite: true,
-              role: 'admin',
-              message: "You have been promoted to Host/Admin of this room.",
-            });
-          }
-        }
+      if (wasHost) {
+        migrateRoomHost(io, room, currentUser.id);
       }
+
+      const remainingUserIds = Object.keys(room.users);
 
       // Clean up empty rooms after 1 hour if no one is in them. Capture the id
       // now: the closure below outlives this socket, so `currentRoomId` may

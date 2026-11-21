@@ -185,6 +185,7 @@ export const StickyNoteItem: React.FC<StickyNoteItemProps> = ({
   return (
     <div
       id={`sticky-note-${note.id}`}
+      data-canvas-item
       style={{
         transform: `translate(${localPos.x}px, ${localPos.y}px)`,
         backgroundColor: note.color || currentColorConfig.bg,

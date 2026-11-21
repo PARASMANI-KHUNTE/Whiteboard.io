@@ -86,6 +86,7 @@ export const WireItem: React.FC<WireItemProps> = ({
   return (
     <g
       id={`wire-group-${wire.id}`}
+      data-canvas-item
       className="select-none"
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}

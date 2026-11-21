@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   X,
   Shield,
@@ -14,6 +14,7 @@ import {
   AlertTriangle,
 } from 'lucide-react';
 import { RemoteUser } from '../types';
+import { useModalA11y } from '../hooks/useModalA11y';
 
 interface AdminPanelModalProps {
   isOpen: boolean;
@@ -57,6 +58,9 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
     }
   }, [isOpen]);
 
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useModalA11y({ isOpen, onClose, dialogRef });
+
   if (!isOpen) return null;
 
   const userList = Object.values(users) as RemoteUser[];
@@ -70,10 +74,12 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
       }}
     >
       <div
+        ref={dialogRef}
         id="admin-panel-modal-dialog"
         role="dialog"
         aria-modal="true"
-        aria-labelledby="admin-panel-title"
+        aria-labelledby="admin-panel-modal-title"
+        tabIndex={-1}
         className="w-full max-w-lg bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden text-slate-900 dark:text-slate-100"
       >
         {/* Header */}
@@ -84,7 +90,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h2 id="admin-panel-title" className="text-sm font-semibold text-slate-900 dark:text-white">Session Admin & Privileges</h2>
+                <h2 id="admin-panel-modal-title" className="text-sm font-semibold text-slate-900 dark:text-white">Session Admin & Privileges</h2>
                 {isHost ? (
                   <span className="px-2 py-0.5 bg-indigo-100 dark:bg-indigo-950/70 text-indigo-700 dark:text-indigo-300 text-[10px] font-semibold rounded-full">
                     👑 Host / Admin
