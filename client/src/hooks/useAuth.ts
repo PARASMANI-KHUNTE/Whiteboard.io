@@ -2,11 +2,17 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { AuthUser, SessionRoom } from '../types';
 import { BACKEND_URL } from '../config';
 import { getGuestIdentity } from '../utils/guestIdentity';
+import {
+  apiFetchJson,
+  AUTH_TOKEN_KEY,
+  AUTH_USER_KEY,
+} from '../utils/apiFetch';
+import { subscribeToSessionExpired } from '../utils/authSession';
 
 export type { AuthUser, SessionRoom };
 
-const TOKEN_KEY = 'whiteboard_auth_token';
-const USER_KEY = 'whiteboard_cached_user';
+const TOKEN_KEY = AUTH_TOKEN_KEY;
+const USER_KEY = AUTH_USER_KEY;
 
 /** Origins that are allowed to deliver OAuth credentials via postMessage. */
 function getTrustedOAuthOrigins(): Set<string> {
@@ -64,6 +70,9 @@ export function useAuth() {
   });
   const [myRooms, setMyRooms] = useState<SessionRoom[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
+  /** Set when a rejected session could not be replaced by a guest session. */
+  const [authError, setAuthError] = useState<string | null>(null);
+  const recoveringRef = useRef(false);
 
   // Every credential write advances this counter so an in-flight /auth/me
   // cannot overwrite a newer OAuth/guest session with stale data.
@@ -85,6 +94,7 @@ export function useAuth() {
     setUser(null);
     setToken(null);
     setMyRooms([]);
+    setAuthError(null);
     localStorage.removeItem(TOKEN_KEY);
     localStorage.removeItem(USER_KEY);
   }, []);
@@ -120,11 +130,42 @@ export function useAuth() {
         return { success: false, error: 'Session changed while creating guest account.' };
       }
       saveAuth(data.user, data.token);
+      setAuthError(null);
       return { success: true };
     } catch (err: any) {
       return { success: false, error: err.message || 'Network error' };
     }
   }, [saveAuth]);
+
+  /**
+   * One recovery path for expired/invalid sessions. Guard against re-entry so
+   * a burst of 401s from REST, AI and socket events provisions only one guest.
+   */
+  const recoverSession = useCallback(async () => {
+    if (recoveringRef.current) return;
+    recoveringRef.current = true;
+    clearAuth();
+    try {
+      const guest = getGuestIdentity();
+      const result = await continueAsGuest(guest.name, guest.color);
+      if (!result.success) {
+        setAuthError(result.error || 'Could not create a new guest session. Please sign in.');
+      }
+    } catch (err: any) {
+      setAuthError(err?.message || 'Could not create a new guest session. Please sign in.');
+    } finally {
+      recoveringRef.current = false;
+    }
+  }, [clearAuth, continueAsGuest]);
+
+  // Any authenticated request can discover expiry; recover centrally.
+  useEffect(() => subscribeToSessionExpired((detail) => {
+    if (!detail.recoverable) {
+      setAuthError(detail.reason);
+      return;
+    }
+    void recoverSession();
+  }), [recoverSession]);
 
   // Fetch current user on mount (with support for OAuth redirect tokens)
   useEffect(() => {
@@ -170,8 +211,7 @@ export function useAuth() {
       if (!currentToken) {
         // Room identity must be issued by the server. Provision a guest session
         // before the socket connects so joins never carry a client-made id.
-        const guest = getGuestIdentity();
-        await continueAsGuest(guest.name, guest.color, generation);
+        await recoverSession();
         setIsLoading(false);
         return;
       }
@@ -183,22 +223,26 @@ export function useAuth() {
         const data = await res.json();
         // OAuth/guest login may have completed while this request was in flight.
         if (authGenerationRef.current !== generation) return;
-        if (data.success && data.user) {
+        if (res.ok && data.success && data.user) {
           setUser(data.user);
           localStorage.setItem(USER_KEY, JSON.stringify(data.user));
         } else {
-          // Token expired or invalid
-          clearAuth();
+          // Expired/invalid token: never leave user/token null with no recovery,
+          // otherwise AuthModal opens and cannot be dismissed.
+          await recoverSession();
         }
       } catch (err) {
         console.warn('Failed to verify token:', err);
+        // A cached token from an offline reload may be stale. Do not present a
+        // signed-in UI that the socket will immediately reject.
+        await recoverSession();
       } finally {
         setIsLoading(false);
       }
     };
 
     checkAuth();
-  }, [clearAuth, continueAsGuest]);
+  }, [recoverSession]);
 
   // The only window message listener for OAuth. Origin alone is not enough:
   // any same-origin/trusted window could inject credentials, so the message
@@ -235,14 +279,14 @@ export function useAuth() {
     if (!currentToken) return;
 
     try {
-      const res = await fetch(`${BACKEND_URL}/api/rooms/my-rooms`, {
-        headers: { Authorization: `Bearer ${currentToken}` },
-      });
-      const data = await res.json();
-      if (data.success && Array.isArray(data.rooms)) {
+      const data = await apiFetchJson<{ success: boolean; rooms: SessionRoom[] }>(
+        '/api/rooms/my-rooms'
+      );
+      if (Array.isArray(data.rooms)) {
         setMyRooms(data.rooms);
       }
     } catch (err) {
+      // A 401 already triggered session recovery via apiFetch.
       console.warn('Failed to fetch rooms:', err);
     }
   }, [token]);
@@ -301,18 +345,10 @@ export function useAuth() {
   const logout = async () => {
     clearAuth();
     // Re-initialize a fresh guest identity so whiteboard continues seamlessly
-    try {
-      const res = await fetch(`${BACKEND_URL}/api/auth/guest`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({}),
-      });
-      const data = await res.json();
-      if (data.success && data.user && data.token) {
-        saveAuth(data.user, data.token);
-      }
-    } catch {
-      // Ignored
+    const guest = getGuestIdentity();
+    const result = await continueAsGuest(guest.name, guest.color);
+    if (!result.success) {
+      setAuthError(result.error || 'Signed out, but guest session setup failed. Please sign in.');
     }
   };
 
@@ -374,19 +410,14 @@ export function useAuth() {
     creatorName?: string;
   }): Promise<{ success: boolean; room?: SessionRoom; error?: string }> => {
     try {
-      const currentToken = token || localStorage.getItem(TOKEN_KEY);
-      const res = await fetch(`${BACKEND_URL}/api/rooms/create`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(currentToken ? { Authorization: `Bearer ${currentToken}` } : {}),
-        },
-        body: JSON.stringify(params),
-      });
-      const data = await res.json();
-      if (!res.ok || !data.success) {
-        return { success: false, error: data.error || 'Failed to create room' };
-      }
+      const data = await apiFetchJson<{ success: boolean; room: SessionRoom; error?: string }>(
+        '/api/rooms/create',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(params),
+        }
+      );
       setMyRooms((prev) => [data.room, ...prev.filter((r) => r.id !== data.room.id)]);
       return { success: true, room: data.room };
     } catch (err: any) {
@@ -395,19 +426,11 @@ export function useAuth() {
   };
 
   const deleteRoom = async (roomId: string): Promise<{ success: boolean; error?: string }> => {
-    const currentToken = token || localStorage.getItem(TOKEN_KEY);
     try {
-      const res = await fetch(`${BACKEND_URL}/api/rooms/${encodeURIComponent(roomId)}`, {
+      await apiFetchJson(`/api/rooms/${encodeURIComponent(roomId)}`, {
         method: 'DELETE',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(currentToken ? { Authorization: `Bearer ${currentToken}` } : {}),
-        },
+        headers: { 'Content-Type': 'application/json' },
       });
-      const data = await res.json();
-      if (!res.ok || !data.success) {
-        return { success: false, error: data.error || 'Failed to delete room' };
-      }
       setMyRooms((prev) => prev.filter((r) => r.id !== roomId));
       return { success: true };
     } catch (err: any) {
@@ -421,6 +444,7 @@ export function useAuth() {
     token,
     myRooms,
     isLoading,
+    authError,
     login,
     register,
     continueAsGuest,

@@ -33,6 +33,7 @@ import { isColorBlack, isColorWhite } from './utils/themeColors';
 import { routeWire } from './utils/wireGeometry';
 import { loadAiSession, saveAiSession, clearAiSession } from './utils/aiSessionStorage';
 import { forgetRecentRoom, rememberRecentRoom } from './utils/recentRooms';
+import { subscribeToSessionExpired } from './utils/authSession';
 import type { AiDiagramPayload, AiSessionState } from './ai/types';
 
 /** A reversible local edit recorded for Ctrl+Z / Ctrl+Shift+Z. */
@@ -111,6 +112,7 @@ export default function App() {
     authUser,
     token,
     isLoading: isAuthLoading,
+    authError,
     myRooms,
     login,
     register,
@@ -167,10 +169,24 @@ export default function App() {
     socket,
   } = useSocket(undefined, authUser, token);
 
+  // Surface session expiry from REST/AI/socket callers. useAuth performs the
+  // actual recovery; this only keeps the user informed.
+  useEffect(() => subscribeToSessionExpired((detail) => {
+    addNotification(detail.reason, detail.recoverable ? 'info' : 'warning');
+  }), [addNotification]);
+
+  useEffect(() => {
+    if (authError) addNotification(authError, 'warning');
+  }, [authError, addNotification]);
+
   // Keep the latest element map available to undo/redo without re-creating
   // callbacks on every room update.
   const elementsRef = useRef<Record<string, CanvasElement>>(elements);
   elementsRef.current = elements;
+
+  // Mirrors the server rule: the host or the sole participant may clear a
+  // board without going through the vote-to-clear flow.
+  const canDirectClear = isSoloMode || isHost || Object.keys(users).length <= 1;
 
   // AI chat is persisted per board (room code, or "solo") so a reload brings
   // back the same conversation and diagram context.
@@ -256,6 +272,22 @@ export default function App() {
       bumpHistory();
     },
     [bumpHistory]
+  );
+
+  /** Record a board clear as one undoable batch instead of discarding history. */
+  const recordBoardClearHistory = useCallback(
+    (previous: CanvasElement[]) => {
+      if (previous.length === 0) return;
+      pushHistory({
+        kind: 'batch',
+        created: [],
+        deleted: previous,
+        before: [],
+        after: [],
+        at: Date.now(),
+      });
+    },
+    [pushHistory]
   );
 
   const handleLogout = useCallback(async () => {
@@ -557,17 +589,31 @@ export default function App() {
   );
 
   const handleAiGenerated = useCallback(
-    (payload: AiDiagramPayload, options: { origin: { x: number; y: number }; replaceBoard: boolean }) => {
+    async (payload: AiDiagramPayload, options: { origin: { x: number; y: number }; replaceBoard: boolean }) => {
       if (!canWrite) {
         addNotification('You do not have permission to edit this board', 'warning');
         return;
       }
 
+      if (options.replaceBoard && !canDirectClear) {
+        addNotification('Only the room host can clear a shared board', 'warning');
+        return;
+      }
+
       if (options.replaceBoard) {
         aiClearGuardUntilRef.current = Date.now() + 2500;
-        emitClearBoardDirect();
-        // The clear is intentional and not undoable; the AI turn itself is.
-        resetHistory();
+        // Capture before the server broadcast clears local state, and wait for
+        // authorization: a participant may have joined while AI was in flight.
+        const previous = Object.values(elementsRef.current) as CanvasElement[];
+        const cleared = await emitClearBoardDirect();
+        if (cleared) {
+          recordBoardClearHistory(previous);
+        } else {
+          addNotification(
+            'Board was not cleared (only the host can clear a shared board); inserted without replacing.',
+            'warning'
+          );
+        }
       }
 
       applyAiElements(payload.sessionId, payload.elements);
@@ -614,8 +660,9 @@ export default function App() {
       addNotification,
       applyAiElements,
       applyAiSession,
+      canDirectClear,
       emitClearBoardDirect,
-      resetHistory,
+      recordBoardClearHistory,
     ]
   );
 
@@ -778,19 +825,29 @@ export default function App() {
       setConfirmModalState({
         isOpen: true,
         title: 'Clear Whiteboard?',
-        message: 'This will erase all strokes, sticky notes, text, shapes, and stickers from your canvas. This action cannot be undone.',
+        message: 'This will erase all strokes, sticky notes, text, shapes, and stickers from your canvas. You can undo this with Ctrl+Z.',
         confirmText: 'Clear Board',
         cancelText: 'Cancel',
         variant: 'danger',
-        onConfirm: () => {
-          emitClearBoardDirect();
-          resetHistory();
-          addNotification('Whiteboard cleared', 'info');
+        onConfirm: async () => {
           setConfirmModalState((prev) => ({ ...prev, isOpen: false }));
+          // Capture before the server broadcast clears local elements, but only
+          // commit history/success if the server actually authorized the clear.
+          const previous = Object.values(elementsRef.current) as CanvasElement[];
+          const cleared = await emitClearBoardDirect();
+          if (cleared) {
+            recordBoardClearHistory(previous);
+            addNotification('Whiteboard cleared', 'info');
+          } else {
+            addNotification(
+              'Board was not cleared. Check your connection and that you are the room host.',
+              'warning'
+            );
+          }
         },
       });
     }
-  }, [canWrite, users, elements, emitVoteClearStart, emitClearBoardDirect, addNotification, resetHistory]);
+  }, [canWrite, users, elements, emitVoteClearStart, emitClearBoardDirect, addNotification, recordBoardClearHistory]);
 
   // Export board as PNG (matches the current viewport pan & zoom)
   const handleExport = useCallback(() => {
@@ -1393,9 +1450,11 @@ export default function App() {
       {/* Authentication Modal */}
       <ErrorBoundary fallbackTitle="Authentication Dialog">
         <AuthModal
-          isOpen={!authUser || showAuthModal}
+          // If session recovery failed, explain via toast and let the user
+          // dismiss instead of trapping them in an unclosable login dialog.
+          isOpen={(!authUser && !authError) || showAuthModal}
           onClose={() => {
-            if (authUser) setShowAuthModal(false);
+            if (authUser || authError) setShowAuthModal(false);
           }}
           currentUser={authUser}
           onLogin={login}
@@ -1497,6 +1556,7 @@ export default function App() {
               }
         }
         authToken={token}
+        canClearBoard={canDirectClear}
       />
 
       {/* Docked follow-up chat for the current session (null session shows an empty state) */}
