@@ -665,6 +665,7 @@ export const ShapeItem: React.FC<ShapeItemProps> = ({
     <div
       ref={elementRef}
       id={`shape-${element.id}`}
+      data-canvas-item
       style={{
         transform: `translate(${localPos.x}px, ${localPos.y}px) rotate(${rotation}deg)`,
         transformOrigin: 'center center',

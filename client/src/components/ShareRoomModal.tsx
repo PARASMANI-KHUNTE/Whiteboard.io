@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { X, Copy, Check, Share2, Users, Shield, Globe } from 'lucide-react';
+import { useModalA11y } from '../hooks/useModalA11y';
 
 interface ShareRoomModalProps {
   isOpen: boolean;
@@ -33,6 +34,9 @@ export const ShareRoomModal: React.FC<ShareRoomModalProps> = ({
       if (linkTimerRef.current) clearTimeout(linkTimerRef.current);
     };
   }, []);
+
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useModalA11y({ isOpen, onClose, dialogRef });
 
   if (!isOpen) return null;
 
@@ -97,7 +101,12 @@ export const ShareRoomModal: React.FC<ShareRoomModalProps> = ({
       }}
     >
       <div
+        ref={dialogRef}
         id="share-room-modal-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="share-room-modal-title"
+        tabIndex={-1}
         className="w-full max-w-md bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden text-slate-900 dark:text-slate-100"
       >
         {/* Header */}
@@ -107,13 +116,15 @@ export const ShareRoomModal: React.FC<ShareRoomModalProps> = ({
               <Share2 className="w-4 h-4" />
             </div>
             <div>
-              <h2 className="text-sm font-semibold text-slate-900 dark:text-white">Share Room Code</h2>
+              <h2 id="share-room-modal-title" className="text-sm font-semibold text-slate-900 dark:text-white">Share Room Code</h2>
               <p className="text-xs text-slate-500 dark:text-slate-400">Invite collaborators to this session</p>
             </div>
           </div>
           <button
+            type="button"
+            aria-label="Close share room dialog"
             onClick={onClose}
-            className="p-1 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+            className="p-1 rounded-lg text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
           >
             <X className="w-4 h-4" />
           </button>
@@ -148,12 +159,12 @@ export const ShareRoomModal: React.FC<ShareRoomModalProps> = ({
 
           {/* Room Code Card */}
           <div>
-            <label htmlFor="share-room-code" className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+            <div id="share-room-code-label" className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
               Room Code
-            </label>
+            </div>
             <div className="flex items-center gap-2">
               <div
-                id="share-room-code"
+                aria-labelledby="share-room-code-label"
                 className="flex-1 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 px-4 py-3 rounded-xl font-mono text-base font-bold text-slate-900 dark:text-white tracking-widest text-center select-all"
               >
                 {activeRoomId}
@@ -168,20 +179,20 @@ export const ShareRoomModal: React.FC<ShareRoomModalProps> = ({
                 <span>{copiedCode ? 'Copied!' : 'Copy Code'}</span>
               </button>
             </div>
-            <p className="text-[11px] text-slate-400 mt-1">
+            <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1">
               Participants can enter this code in the "Join Room" input.
             </p>
           </div>
 
           {/* Full Share Link */}
           <div>
-            <label htmlFor="share-room-link" className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5 flex items-center gap-1.5">
+            <label htmlFor="share-room-url" className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5 flex items-center gap-1.5">
               <Globe className="w-3.5 h-3.5 text-slate-500 dark:text-slate-400" aria-hidden="true" />
               <span>Direct Shareable Link</span>
             </label>
             <div className="flex items-center gap-2">
               <input
-                id="share-room-link"
+                id="share-room-url"
                 type="text"
                 readOnly
                 aria-label="Direct shareable link"
@@ -211,6 +222,7 @@ export const ShareRoomModal: React.FC<ShareRoomModalProps> = ({
           </div>
 
           <button
+            type="button"
             onClick={onClose}
             className="w-full py-2.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-medium text-xs rounded-xl transition-colors cursor-pointer"
           >

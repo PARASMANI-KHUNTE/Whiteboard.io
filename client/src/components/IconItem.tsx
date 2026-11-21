@@ -422,6 +422,7 @@ export const IconItem: React.FC<IconItemProps> = ({
     <div
       ref={elementRef}
       id={`icon-${element.id}`}
+      data-canvas-item
       style={{
         transform: `translate(${localPos.x}px, ${localPos.y}px) rotate(${rotation}deg)`,
         transformOrigin: 'center center',

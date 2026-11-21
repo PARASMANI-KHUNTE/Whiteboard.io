@@ -613,6 +613,9 @@ export async function loadRoomElements(roomId: string): Promise<Record<string, a
 }
 
 const pendingElementSaves = new Map<string, { timer: NodeJS.Timeout; elements: Record<string, any> }>();
+// Rooms being deleted must reject late saves from sockets that have not yet
+// been detached, otherwise deleted rooms can be recreated in room_elements.
+const roomsBeingDeleted = new Set<string>();
 // Serialize writes per room so an older snapshot cannot delete newer elements.
 const roomSaveChains = new Map<string, Promise<void>>();
 // Last successfully persisted snapshot per room. Element objects are replaced
@@ -714,6 +717,17 @@ async function persistRoomElements(cleanRoomId: string, elements: Record<string,
   }
 }
 
+export function markRoomBeingDeleted(roomId: string): void {
+  const cleanRoomId = sanitizeString(roomId);
+  if (!cleanRoomId) return;
+  roomsBeingDeleted.add(cleanRoomId);
+  const existingTimer = pendingElementSaves.get(cleanRoomId);
+  if (existingTimer) {
+    clearTimeout(existingTimer.timer);
+    pendingElementSaves.delete(cleanRoomId);
+  }
+}
+
 export async function saveRoomElements(roomId: string, elements: Record<string, any>): Promise<void> {
   const existingTimer = pendingElementSaves.get(roomId);
   if (existingTimer) {
@@ -721,7 +735,7 @@ export async function saveRoomElements(roomId: string, elements: Record<string, 
     pendingElementSaves.delete(roomId);
   }
   const cleanRoomId = sanitizeString(roomId);
-  if (!cleanRoomId) return;
+  if (!cleanRoomId || roomsBeingDeleted.has(cleanRoomId)) return;
 
   const previous = roomSaveChains.get(cleanRoomId) || Promise.resolve();
   const next = previous.catch(() => {}).then(() => persistRoomElements(cleanRoomId, elements));
@@ -736,6 +750,7 @@ export async function saveRoomElements(roomId: string, elements: Record<string, 
 }
 
 export function saveRoomElementsDebounced(roomId: string, elements: Record<string, any>, delayMs = 1000) {
+  if (roomsBeingDeleted.has(sanitizeString(roomId))) return;
   const existing = pendingElementSaves.get(roomId);
   if (existing) {
     clearTimeout(existing.timer);
@@ -747,52 +762,56 @@ export function saveRoomElementsDebounced(roomId: string, elements: Record<strin
   pendingElementSaves.set(roomId, { timer, elements });
 }
 
-export async function deleteRoom(roomId: string, requestingUserId?: string): Promise<boolean> {
+export async function deleteRoom(
+  roomId: string,
+  requestingUserId: string,
+  knownCreatorId?: string
+): Promise<boolean> {
   const cleanRoomId = sanitizeString(roomId);
-  if (!cleanRoomId) return false;
+  const cleanUserId = sanitizeString(requestingUserId);
+  if (!cleanRoomId || !cleanUserId) return false;
 
   const rooms = getRoomsCollection();
   const meta = await rooms.findOne({ id: cleanRoomId });
+  // Callers pass the in-memory owner because it may have been migrated to a
+  // new host before the async user document update completes.
+  const ownerId = sanitizeString(knownCreatorId || '') || meta?.creatorId || '';
 
-  // Deletion requires ownership when the room has a known creator
-  if (meta?.creatorId) {
-    const cleanUserId = sanitizeString(requestingUserId || "");
-    if (!cleanUserId || meta.creatorId !== cleanUserId) {
-      return false;
+  // An unknown owner is never treated as permission to delete.
+  if (!ownerId || ownerId !== cleanUserId) return false;
+
+  // Reject new element writes immediately, including debounced saves that are
+  // still pending while sockets are being detached by the caller.
+  markRoomBeingDeleted(cleanRoomId);
+
+  try {
+    // Wait for any in-flight write so it cannot re-create rows after deletion
+    const inFlight = roomSaveChains.get(cleanRoomId);
+    if (inFlight) {
+      await inFlight.catch(() => {});
+      roomSaveChains.delete(cleanRoomId);
     }
+    persistedElementsCache.delete(cleanRoomId);
+
+    // Delete from rooms collection
+    await rooms.deleteOne({ id: cleanRoomId });
+
+    // Delete from room_elements collection
+    const individualCol = getIndividualElementsCollection();
+    await individualCol.deleteMany({ roomId: cleanRoomId });
+
+    // Delete from legacy elements collection if exists
+    const elementsCol = getElementsCollection();
+    await elementsCol.deleteOne({ roomId: cleanRoomId });
+
+    // Prune roomId from users' createdRooms array
+    const users = getUsersCollection();
+    await users.updateMany({}, { $pull: { createdRooms: cleanRoomId } });
+
+    return true;
+  } finally {
+    roomsBeingDeleted.delete(cleanRoomId);
   }
-
-  // Cancel any pending debounced save timer
-  const existingTimer = pendingElementSaves.get(cleanRoomId);
-  if (existingTimer) {
-    clearTimeout(existingTimer.timer);
-    pendingElementSaves.delete(cleanRoomId);
-  }
-
-  // Wait for any in-flight write so it cannot re-create rows after deletion
-  const inFlight = roomSaveChains.get(cleanRoomId);
-  if (inFlight) {
-    await inFlight.catch(() => {});
-    roomSaveChains.delete(cleanRoomId);
-  }
-  persistedElementsCache.delete(cleanRoomId);
-
-  // Delete from rooms collection
-  await rooms.deleteOne({ id: cleanRoomId });
-
-  // Delete from room_elements collection
-  const individualCol = getIndividualElementsCollection();
-  await individualCol.deleteMany({ roomId: cleanRoomId });
-
-  // Delete from legacy elements collection if exists
-  const elementsCol = getElementsCollection();
-  await elementsCol.deleteOne({ roomId: cleanRoomId });
-
-  // Prune roomId from users' createdRooms array
-  const users = getUsersCollection();
-  await users.updateMany({}, { $pull: { createdRooms: cleanRoomId } });
-
-  return true;
 }
 
 /** Flush every pending debounced write. Call during graceful shutdown. */

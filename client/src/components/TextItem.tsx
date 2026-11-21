@@ -317,6 +317,7 @@ export const TextItem: React.FC<TextItemProps> = ({
     <div
       ref={elementRef}
       id={`text-element-${element.id}`}
+      data-canvas-item
       style={{
         transform: `translate(${localPos.x}px, ${localPos.y}px)`,
       }}
