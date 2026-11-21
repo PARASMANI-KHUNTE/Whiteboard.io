@@ -406,8 +406,6 @@ export function useAuth() {
     name: string;
     customCode?: string;
     isLocked?: boolean;
-    creatorId?: string;
-    creatorName?: string;
   }): Promise<{ success: boolean; room?: SessionRoom; error?: string }> => {
     try {
       const data = await apiFetchJson<{ success: boolean; room: SessionRoom; error?: string }>(
