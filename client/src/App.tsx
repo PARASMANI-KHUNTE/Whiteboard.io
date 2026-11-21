@@ -33,6 +33,7 @@ import { isColorBlack, isColorWhite } from './utils/themeColors';
 import { routeWire } from './utils/wireGeometry';
 import { loadAiSession, saveAiSession, clearAiSession } from './utils/aiSessionStorage';
 import { forgetRecentRoom, rememberRecentRoom } from './utils/recentRooms';
+import { subscribeToSessionExpired } from './utils/authSession';
 import type { AiDiagramPayload, AiSessionState } from './ai/types';
 
 /** A reversible local edit recorded for Ctrl+Z / Ctrl+Shift+Z. */
@@ -111,6 +112,7 @@ export default function App() {
     authUser,
     token,
     isLoading: isAuthLoading,
+    authError,
     myRooms,
     login,
     register,
@@ -166,6 +168,16 @@ export default function App() {
     addNotification,
     socket,
   } = useSocket(undefined, authUser, token);
+
+  // Surface session expiry from REST/AI/socket callers. useAuth performs the
+  // actual recovery; this only keeps the user informed.
+  useEffect(() => subscribeToSessionExpired((detail) => {
+    addNotification(detail.reason, detail.recoverable ? 'info' : 'warning');
+  }), [addNotification]);
+
+  useEffect(() => {
+    if (authError) addNotification(authError, 'warning');
+  }, [authError, addNotification]);
 
   // Keep the latest element map available to undo/redo without re-creating
   // callbacks on every room update.
@@ -1438,9 +1450,11 @@ export default function App() {
       {/* Authentication Modal */}
       <ErrorBoundary fallbackTitle="Authentication Dialog">
         <AuthModal
-          isOpen={!authUser || showAuthModal}
+          // If session recovery failed, explain via toast and let the user
+          // dismiss instead of trapping them in an unclosable login dialog.
+          isOpen={(!authUser && !authError) || showAuthModal}
           onClose={() => {
-            if (authUser) setShowAuthModal(false);
+            if (authUser || authError) setShowAuthModal(false);
           }}
           currentUser={authUser}
           onLogin={login}
