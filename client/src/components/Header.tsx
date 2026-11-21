@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { RemoteUser } from '../types';
 import { AuthUser } from '../hooks/useAuth';
+import { usePopoverDismiss } from '../hooks/usePopoverDismiss';
 import { AudioVisualizerBar } from './AudioVisualizerBar';
 import { AboutModal } from './AboutModal';
 import {
@@ -19,6 +20,8 @@ import {
   Sparkles,
   Info,
   MessageSquare,
+  MoreHorizontal,
+  UserRound,
 } from 'lucide-react';
 
 interface HeaderProps {
@@ -120,7 +123,16 @@ export const Header: React.FC<HeaderProps> = ({
 }) => {
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [showAboutModal, setShowAboutModal] = useState(false);
+  const [showMobileMenu, setShowMobileMenu] = useState(false);
   const [tempName, setTempName] = useState(currentUser.name);
+  const mobileMenuRef = useRef<HTMLDivElement | null>(null);
+  const closeMobileMenu = useCallback(() => setShowMobileMenu(false), []);
+  usePopoverDismiss(mobileMenuRef, showMobileMenu, closeMobileMenu);
+
+  const runMobileAction = (action: () => void) => {
+    setShowMobileMenu(false);
+    action();
+  };
 
   const activeUserList = Object.values(users) as RemoteUser[];
 
@@ -130,8 +142,8 @@ export const Header: React.FC<HeaderProps> = ({
       className="fixed top-0 left-0 right-0 z-40 h-14 sm:h-16 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-b border-slate-200/80 dark:border-slate-800 shadow-xs px-2 sm:px-6 flex items-center justify-between gap-2 sm:gap-4 select-none transition-colors"
     >
       {/* Brand & Room Info */}
-      <div className="flex items-center gap-2 sm:gap-4 shrink-0">
-        <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 sm:gap-4 min-w-0">
+        <div className="hidden sm:flex items-center gap-2">
           <div className="w-8 h-8 bg-blue-600 rounded-xl flex items-center justify-center text-white font-bold text-base shadow-sm">
             W
           </div>
@@ -145,7 +157,8 @@ export const Header: React.FC<HeaderProps> = ({
           <button
             id="room-selector-btn"
             onClick={onOpenCreateRoomModal}
-            className="text-xs font-semibold px-2.5 py-1 sm:px-3 sm:py-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200/80 dark:hover:bg-slate-700/80 rounded-xl text-slate-700 dark:text-slate-200 flex items-center gap-1.5 transition-colors cursor-pointer border border-slate-200/70 dark:border-slate-700 max-w-[130px] sm:max-w-[190px]"
+            aria-label="Choose or create a room"
+            className="text-xs font-semibold px-2.5 py-1 sm:px-3 sm:py-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200/80 dark:hover:bg-slate-700/80 rounded-xl text-slate-700 dark:text-slate-200 flex items-center gap-1.5 transition-colors cursor-pointer border border-slate-200/70 dark:border-slate-700 min-h-[44px] max-w-[110px] sm:max-w-[190px]"
             title={isSoloMode ? "Personal Canvas (Private). Click to browse sessions or create a room" : "Click to view sessions or create a new room"}
           >
             <span className="truncate">{isSoloMode ? 'Solo Canvas' : (roomName ? roomName : `room/${roomId}`)}</span>
@@ -155,7 +168,7 @@ export const Header: React.FC<HeaderProps> = ({
           {/* Connection status indicator */}
           <div
             title={isSoloMode ? 'Personal canvas (Private)' : (isConnected ? 'Connected to real-time sync' : 'Reconnecting...')}
-            className="flex items-center gap-1 text-xs text-slate-500 dark:text-slate-400 font-medium"
+            className="hidden sm:flex items-center gap-1 text-xs text-slate-500 dark:text-slate-400 font-medium"
           >
             <span
               className={`w-2 h-2 rounded-full ${
@@ -220,13 +233,14 @@ export const Header: React.FC<HeaderProps> = ({
       </div>
 
       {/* Right Action Tools: Admin, Theme, Users, Profile & Share */}
-      <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+      <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
         {/* Host Admin Panel Button */}
         {isHost && (
           <button
             id="admin-panel-toggle-btn"
+            aria-label="Open room host admin settings"
             onClick={onOpenAdminModal}
-            className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-amber-50 dark:bg-amber-950/40 hover:bg-amber-100 dark:hover:bg-amber-900/60 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-800 text-xs font-semibold transition-colors cursor-pointer"
+            className="hidden sm:inline-flex items-center justify-center gap-1 px-2.5 py-1.5 min-h-[44px] rounded-xl bg-amber-50 dark:bg-amber-950/40 hover:bg-amber-100 dark:hover:bg-amber-900/60 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-800 text-xs font-semibold transition-colors cursor-pointer"
             title="Room Host Admin Settings"
           >
             <Shield className="w-3.5 h-3.5" />
@@ -237,9 +251,10 @@ export const Header: React.FC<HeaderProps> = ({
         {/* About Whiteboard.io & Alternatives Comparison */}
         <button
           id="about-app-btn"
+          aria-label="About Whiteboard.io"
           onClick={() => setShowAboutModal(true)}
           title="About Whiteboard.io & Why It's Different"
-          className="p-2 text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
+          className="hidden sm:inline-flex items-center justify-center p-2 min-w-[44px] min-h-[44px] text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
         >
           <Info className="w-4 h-4" />
         </button>
@@ -247,9 +262,10 @@ export const Header: React.FC<HeaderProps> = ({
         {/* Dark / Light Theme Toggle */}
         <button
           id="theme-toggle-btn"
+          aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
           onClick={onToggleTheme}
           title={theme === 'dark' ? 'Switch to Light Theme' : 'Switch to Dark Theme'}
-          className="p-2 text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
+          className="hidden sm:inline-flex items-center justify-center p-2 min-w-[44px] min-h-[44px] text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
         >
           {theme === 'dark' ? (
             <Sun className="w-4 h-4 text-amber-400" />
@@ -293,15 +309,16 @@ export const Header: React.FC<HeaderProps> = ({
         {/* User Identity & Profile Button */}
         <button
           id="user-profile-btn"
+          aria-label="Open account profile"
           onClick={() => {
             setTempName(currentUser.name);
             setShowProfileModal(true);
           }}
           title="Account profile & identity"
-          className="flex items-center gap-1.5 px-2 py-1.5 sm:px-2.5 sm:py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 text-xs font-semibold transition-colors cursor-pointer"
+          className="hidden sm:inline-flex items-center gap-1.5 px-2 py-1.5 sm:px-2.5 sm:py-1.5 min-h-[44px] rounded-xl border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 text-xs font-semibold transition-colors cursor-pointer"
         >
           <div
-            className="w-5 h-5 rounded-full text-white flex items-center justify-center text-[10px] font-bold shadow-xs shrink-0"
+            className="w-6 h-6 rounded-full text-white flex items-center justify-center text-[10px] font-bold shadow-xs shrink-0"
             style={{ backgroundColor: currentUser.color || '#3b82f6' }}
           >
             {(currentUser.name || authUser?.name || 'U').charAt(0).toUpperCase()}
@@ -315,8 +332,9 @@ export const Header: React.FC<HeaderProps> = ({
         {(!authUser || authUser.isGuest) && (
           <button
             id="sign-in-prompt-btn"
+            aria-label="Sign in or register"
             onClick={onOpenAuthModal}
-            className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-medium text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-700 transition-colors cursor-pointer"
+            className="hidden sm:inline-flex items-center justify-center gap-1 px-2.5 py-1.5 min-h-[44px] rounded-xl text-xs font-medium text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-700 transition-colors cursor-pointer"
             title="Sign in or register to save your rooms"
           >
             <LogIn className="w-3.5 h-3.5 text-slate-500 dark:text-slate-400" />
@@ -328,6 +346,7 @@ export const Header: React.FC<HeaderProps> = ({
         {onToggleAiChat && (
           <button
             id="ai-chat-header-btn"
+            aria-label={isAiChatOpen ? 'Minimize AI chat' : 'Open AI chat'}
             onClick={onToggleAiChat}
             aria-pressed={isAiChatOpen}
             title={
@@ -335,7 +354,7 @@ export const Header: React.FC<HeaderProps> = ({
                 ? 'Minimize the AI chat for this session'
                 : 'Open the AI chat for this session'
             }
-            className={`relative inline-flex items-center gap-1.5 p-2 sm:px-2.5 sm:py-2 rounded-xl border text-xs font-semibold transition-colors cursor-pointer ${
+            className={`relative hidden sm:inline-flex items-center justify-center gap-1.5 p-2 sm:px-2.5 sm:py-2 min-h-[44px] rounded-xl border text-xs font-semibold transition-colors cursor-pointer ${
               isAiChatOpen
                 ? 'bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800'
                 : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800'
@@ -353,8 +372,9 @@ export const Header: React.FC<HeaderProps> = ({
         {onOpenAiModal && (
           <button
             id="ai-diagram-header-btn"
+            aria-label="Generate AI diagram"
             onClick={onOpenAiModal}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 sm:px-3.5 sm:py-2 rounded-xl text-xs sm:text-sm font-bold transition-all shadow-md cursor-pointer active:scale-95 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white shadow-indigo-500/20"
+            className="inline-flex items-center justify-center gap-1.5 px-2.5 py-1.5 sm:px-3.5 sm:py-2 min-w-[44px] min-h-[44px] rounded-xl text-xs sm:text-sm font-bold transition-all shadow-md cursor-pointer active:scale-95 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white shadow-indigo-500/20"
             title="Generate Mindmaps, Flowcharts & Sticky Boards with Gemini AI"
           >
             <Sparkles className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-amber-300 animate-pulse shrink-0" />
@@ -367,24 +387,131 @@ export const Header: React.FC<HeaderProps> = ({
         {isSoloMode ? (
           <button
             id="share-go-live-btn"
+            aria-label="Share and go live"
             onClick={onShareAndGoLive}
-            className="flex items-center gap-1.5 px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all shadow-md cursor-pointer active:scale-95 bg-gradient-to-r from-blue-600 via-indigo-600 to-violet-600 hover:from-blue-700 hover:to-violet-700 text-white shadow-blue-500/20"
+            className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 sm:px-4 sm:py-2 min-w-[44px] min-h-[44px] rounded-xl text-xs sm:text-sm font-semibold transition-all shadow-md cursor-pointer active:scale-95 bg-gradient-to-r from-blue-600 via-indigo-600 to-violet-600 hover:from-blue-700 hover:to-violet-700 text-white shadow-blue-500/20"
             title="Convert this solo canvas to a collaborative room and invite friends"
           >
             <Radio className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-emerald-300 animate-pulse shrink-0" />
-            <span className="font-bold">Share & Go Live</span>
+            <span className="hidden sm:inline font-bold">Share & Go Live</span>
           </button>
         ) : (
           <button
             id="share-room-modal-btn"
+            aria-label="Share room code or invite link"
             onClick={onOpenShareModal}
-            className="flex items-center gap-1.5 px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all shadow-xs cursor-pointer active:scale-95 bg-slate-900 dark:bg-blue-600 text-white hover:bg-slate-800 dark:hover:bg-blue-700"
+            className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 sm:px-3.5 sm:py-2 min-w-[44px] min-h-[44px] rounded-xl text-xs sm:text-sm font-semibold transition-all shadow-xs cursor-pointer active:scale-95 bg-slate-900 dark:bg-blue-600 text-white hover:bg-slate-800 dark:hover:bg-blue-700"
             title="Share room code or invite link"
           >
             <Share2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
             <span className="hidden sm:inline">Share</span>
           </button>
         )}
+
+        {/* Overflow menu for narrow screens */}
+        <div ref={mobileMenuRef} className="relative sm:hidden">
+          <button
+            id="mobile-header-menu-btn"
+            type="button"
+            data-popover-trigger
+            aria-label="More header actions"
+            aria-expanded={showMobileMenu}
+            aria-controls="mobile-header-menu"
+            onClick={() => setShowMobileMenu((open) => !open)}
+            className="inline-flex items-center justify-center min-w-[44px] min-h-[44px] p-2 text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
+          >
+            <MoreHorizontal className="w-5 h-5" />
+          </button>
+          {showMobileMenu && (
+            <div
+              id="mobile-header-menu"
+              role="menu"
+              aria-label="More header actions"
+              className="absolute right-0 top-full mt-2 w-56 py-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl text-slate-700 dark:text-slate-200 animate-in zoom-in-95 duration-150 z-50"
+            >
+              {isHost && (
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => runMobileAction(onOpenAdminModal)}
+                  className="w-full min-h-[44px] px-3 py-2 flex items-center gap-2.5 text-left text-sm font-medium hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+                >
+                  <Shield className="w-4 h-4 text-amber-500" />
+                  Admin settings
+                </button>
+              )}
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => runMobileAction(() => setShowAboutModal(true))}
+                className="w-full min-h-[44px] px-3 py-2 flex items-center gap-2.5 text-left text-sm font-medium hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+              >
+                <Info className="w-4 h-4 text-slate-400" />
+                About Whiteboard.io
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => runMobileAction(onToggleTheme)}
+                className="w-full min-h-[44px] px-3 py-2 flex items-center gap-2.5 text-left text-sm font-medium hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+              >
+                {theme === 'dark' ? (
+                  <Sun className="w-4 h-4 text-amber-400" />
+                ) : (
+                  <Moon className="w-4 h-4 text-slate-500" />
+                )}
+                {theme === 'dark' ? 'Light theme' : 'Dark theme'}
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() =>
+                  runMobileAction(() => {
+                    setTempName(currentUser.name);
+                    setShowProfileModal(true);
+                  })
+                }
+                className="w-full min-h-[44px] px-3 py-2 flex items-center gap-2.5 text-left text-sm font-medium hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+              >
+                <UserRound className="w-4 h-4 text-slate-400" />
+                Account profile
+              </button>
+              {(!authUser || authUser.isGuest) && (
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => runMobileAction(onOpenAuthModal)}
+                  className="w-full min-h-[44px] px-3 py-2 flex items-center gap-2.5 text-left text-sm font-medium hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+                >
+                  <LogIn className="w-4 h-4 text-slate-400" />
+                  Sign in or register
+                </button>
+              )}
+              {onToggleAiChat && (
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => runMobileAction(onToggleAiChat)}
+                  className="w-full min-h-[44px] px-3 py-2 flex items-center gap-2.5 text-left text-sm font-medium hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+                >
+                  <MessageSquare className="w-4 h-4 text-indigo-500" />
+                  {isAiChatOpen ? 'Minimize AI chat' : 'Open AI chat'}
+                </button>
+              )}
+              {onOpenAiModal && (
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => runMobileAction(onOpenAiModal)}
+                  className="w-full min-h-[44px] px-3 py-2 flex items-center gap-2.5 text-left text-sm font-medium hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+                >
+                  <Sparkles className="w-4 h-4 text-violet-500" />
+                  Generate AI diagram
+                </button>
+              )}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* User Profile & Account Settings Dialog mounted through React Portal (Centered, No viewport shift) */}

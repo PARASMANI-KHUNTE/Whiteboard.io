@@ -86,6 +86,15 @@ export default function App() {
   const [showAiModal, setShowAiModal] = useState<boolean>(false);
   const [aiSession, setAiSession] = useState<AiSessionState | null>(null);
   const [isAiChatOpen, setIsAiChatOpen] = useState<boolean>(false);
+
+  // Lets shared CSS lift bottom chrome above the mobile AI chat sheet.
+  useEffect(() => {
+    document.documentElement.dataset.aiChatOpen = String(isAiChatOpen);
+    return () => {
+      delete document.documentElement.dataset.aiChatOpen;
+    };
+  }, [isAiChatOpen]);
+
   const [confirmModalState, setConfirmModalState] = useState<{
     isOpen: boolean;
     title: string;
@@ -1510,12 +1519,12 @@ export default function App() {
       />
 
       {/* Reopen the AI chat after it has been minimized */}
-      {aiSession && !isAiChatOpen && (
+      {aiSession && !isAiChatOpen && !(voteToClear && voteToClear.active) && (
         <button
           type="button"
           onClick={() => setIsAiChatOpen(true)}
           title="Open AI diagram chat"
-          className="fixed bottom-5 right-5 z-30 inline-flex items-center gap-2 rounded-full bg-gradient-to-tr from-indigo-600 to-violet-600 px-4 py-3 text-xs font-semibold text-white shadow-xl shadow-indigo-500/30 hover:from-indigo-500 hover:to-violet-500 active:scale-95 transition-all cursor-pointer"
+          className="fixed bottom-[calc(env(safe-area-inset-bottom,0px)+5.5rem)] sm:bottom-5 right-5 z-30 inline-flex items-center gap-2 rounded-full bg-gradient-to-tr from-indigo-600 to-violet-600 px-4 py-3 text-xs font-semibold text-white shadow-xl shadow-indigo-500/30 hover:from-indigo-500 hover:to-violet-500 active:scale-95 transition-all cursor-pointer"
         >
           <Sparkles className="w-4 h-4" />
           AI chat

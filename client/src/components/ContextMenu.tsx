@@ -26,11 +26,17 @@ const MENU_MARGIN = 8;
 
 /**
  * Lightweight, viewport-aware context menu rendered in a portal so it is never
- * clipped by the canvas transform or scroll containers.
+ * clipped by the canvas transform. It sits below dialogs (z-40) and supports
+ * arrow-key navigation.
  */
 export const ContextMenu: React.FC<ContextMenuProps> = ({ x, y, items, onClose, header }) => {
   const menuRef = useRef<HTMLDivElement | null>(null);
   const [position, setPosition] = useState({ left: x, top: y });
+
+  const getMenuItems = () =>
+    Array.from(
+      menuRef.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not([disabled])') ?? []
+    );
 
   // Keep the menu inside the viewport once its real size is known.
   useLayoutEffect(() => {
@@ -46,24 +52,44 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({ x, y, items, onClose, 
   }, [x, y, items.length]);
 
   useEffect(() => {
-    const handlePointerDown = (event: MouseEvent | TouchEvent) => {
+    getMenuItems()[0]?.focus();
+    // Focus only on open; item callbacks close the menu immediately.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    const handlePointerDown = (event: PointerEvent) => {
       if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
         onClose();
       }
     };
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose();
+      if (event.key === 'Escape' || event.key === 'Tab') {
+        onClose();
+        return;
+      }
+      if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+
+      const menuItems = getMenuItems();
+      if (menuItems.length === 0) return;
+      event.preventDefault();
+
+      const currentIndex = menuItems.indexOf(document.activeElement as HTMLButtonElement);
+      let nextIndex: number;
+      if (event.key === 'Home') nextIndex = 0;
+      else if (event.key === 'End') nextIndex = menuItems.length - 1;
+      else if (event.key === 'ArrowDown') nextIndex = (currentIndex + 1) % menuItems.length;
+      else nextIndex = currentIndex <= 0 ? menuItems.length - 1 : currentIndex - 1;
+      menuItems[nextIndex].focus();
     };
     const handleScroll = () => onClose();
 
-    window.addEventListener('mousedown', handlePointerDown, true);
-    window.addEventListener('touchstart', handlePointerDown, true);
+    window.addEventListener('pointerdown', handlePointerDown, true);
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('resize', handleScroll);
     window.addEventListener('scroll', handleScroll, true);
     return () => {
-      window.removeEventListener('mousedown', handlePointerDown, true);
-      window.removeEventListener('touchstart', handlePointerDown, true);
+      window.removeEventListener('pointerdown', handlePointerDown, true);
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('resize', handleScroll);
       window.removeEventListener('scroll', handleScroll, true);
@@ -76,7 +102,7 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({ x, y, items, onClose, 
       role="menu"
       aria-label="Canvas actions"
       style={{ left: position.left, top: position.top }}
-      className="fixed z-[80] min-w-[13rem] max-w-[17rem] py-1.5 rounded-xl bg-white/98 dark:bg-slate-900/98 backdrop-blur-md border border-slate-200/90 dark:border-slate-700/90 shadow-2xl shadow-slate-900/15 animate-pop-in select-none"
+      className="fixed z-40 min-w-[13rem] max-w-[17rem] max-h-[min(70vh,24rem)] overflow-y-auto overscroll-contain py-1.5 rounded-xl bg-white/98 dark:bg-slate-900/98 backdrop-blur-md border border-slate-200/90 dark:border-slate-700/90 shadow-2xl shadow-slate-900/15 animate-pop-in select-none"
       onContextMenu={(event) => event.preventDefault()}
     >
       {header && (
@@ -94,6 +120,7 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({ x, y, items, onClose, 
             <div
               key={`separator-${index}`}
               className="h-px my-1 mx-2 bg-slate-100 dark:bg-slate-800"
+              role="separator"
             />
           );
         }
@@ -109,13 +136,13 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({ x, y, items, onClose, 
               entry.onSelect();
               onClose();
             }}
-            className={`w-full px-3 py-2 flex items-center gap-2.5 text-left text-[13px] font-medium transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
+            className={`w-full min-h-[40px] px-3 py-2 flex items-center gap-2.5 text-left text-[13px] font-medium transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
               entry.danger
                 ? 'text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40'
                 : 'text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800'
             }`}
           >
-            <span className="w-4 h-4 flex items-center justify-center shrink-0">
+            <span className="w-4 h-4 flex items-center justify-center shrink-0" aria-hidden="true">
               {entry.icon}
             </span>
             <span className="flex-1 truncate">{entry.label}</span>

@@ -1,4 +1,5 @@
-import React, { useRef, useState, useEffect } from 'react';
+import React, { useRef, useState, useEffect, useCallback } from 'react';
+import { usePopoverDismiss } from '../hooks/usePopoverDismiss';
 import { WireElement, CanvasElement, WireStyle } from '../types';
 import { routeWire } from '../utils/wireGeometry';
 import { getAdaptiveDisplayColor } from '../utils/themeColors';
@@ -198,6 +199,13 @@ export const WireOverlay: React.FC<WireOverlayProps> = ({
   const [isEditingLabel, setIsEditingLabel] = useState(false);
   const [labelText, setLabelText] = useState(wire.label || '');
   const labelCancelRef = useRef(false);
+  const elementRef = useRef<HTMLDivElement | null>(null);
+
+  const closeMenus = useCallback(() => {
+    setShowColorPicker(false);
+    setShowStyleMenu(false);
+  }, []);
+  usePopoverDismiss(elementRef, showColorPicker || showStyleMenu, closeMenus);
 
   useEffect(() => {
     setLabelText(wire.label || '');
@@ -309,6 +317,7 @@ export const WireOverlay: React.FC<WireOverlayProps> = ({
 
   return (
     <div
+      ref={elementRef}
       className="absolute pointer-events-none"
       style={{
         left: route.midpoint.x,
@@ -413,14 +422,17 @@ export const WireOverlay: React.FC<WireOverlayProps> = ({
             <div className="relative">
               <button
                 type="button"
+                data-popover-trigger
                 id={`wire-color-btn-${wire.id}`}
+                aria-label="Change wire color"
+                aria-expanded={showColorPicker}
                 onClick={(e) => {
                   e.stopPropagation();
                   setShowColorPicker((prev) => !prev);
                   setShowStyleMenu(false);
                 }}
                 title="Change Wire Color"
-                className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer flex items-center"
+                className="p-1.5 min-w-[32px] min-h-[32px] rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer flex items-center justify-center"
               >
                 <div
                   className="w-4 h-4 rounded-full border border-slate-300 dark:border-slate-600 shadow-xs"
@@ -443,6 +455,8 @@ export const WireOverlay: React.FC<WireOverlayProps> = ({
                         key={c}
                         type="button"
                         id={`wire-color-swatch-${c.replace('#', '')}`}
+                        aria-label={`Use ${c} wire color`}
+                        aria-pressed={isCurrent}
                         onMouseDown={(e) => {
                           e.stopPropagation();
                           handleColorChange(c);
@@ -467,13 +481,16 @@ export const WireOverlay: React.FC<WireOverlayProps> = ({
             <div className="relative">
               <button
                 type="button"
+                data-popover-trigger
+                aria-label="Stroke width and style"
+                aria-expanded={showStyleMenu}
                 onClick={(e) => {
                   e.stopPropagation();
                   setShowStyleMenu((prev) => !prev);
                   setShowColorPicker(false);
                 }}
                 title="Stroke Width & Style"
-                className="p-1.5 rounded-lg text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+                className="p-1.5 min-w-[32px] min-h-[32px] flex items-center justify-center rounded-lg text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
               >
                 <Sliders className="w-3.5 h-3.5" />
               </button>

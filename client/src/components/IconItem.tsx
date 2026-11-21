@@ -1,4 +1,5 @@
-import React, { useState, useRef, useEffect, useMemo } from 'react';
+import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
+import { usePopoverDismiss } from '../hooks/usePopoverDismiss';
 import { IconElement } from '../types';
 import {
   Trash2,
@@ -96,6 +97,17 @@ export const IconItem: React.FC<IconItemProps> = ({
   const currentRotRef = useRef(rotation);
   const lastEmitRef = useRef<number>(0);
   const elementRef = useRef<HTMLDivElement | null>(null);
+
+  const closeMenus = useCallback(() => {
+    setShowColorPicker(false);
+    setShowIconPicker(false);
+    setShowStyleMenu(false);
+  }, []);
+  usePopoverDismiss(
+    elementRef,
+    showColorPicker || showIconPicker || showStyleMenu,
+    closeMenus
+  );
 
   const isLocked = Boolean(element.isLocked);
 
@@ -473,9 +485,13 @@ export const IconItem: React.FC<IconItemProps> = ({
           {!isLocked && (
             <div className="relative">
               <button
+                type="button"
+                data-popover-trigger
+                aria-label="Change icon symbol"
+                aria-expanded={showIconPicker}
                 onClick={() => setShowIconPicker(!showIconPicker)}
                 title="Change icon symbol"
-                className="p-1 text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg cursor-pointer"
+                className="p-1.5 min-w-[32px] min-h-[32px] flex items-center justify-center text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg cursor-pointer"
               >
                 <Smile className="w-3.5 h-3.5" />
               </button>
@@ -532,7 +548,7 @@ export const IconItem: React.FC<IconItemProps> = ({
             <button
               onClick={handleQuickRotate}
               title="Rotate 45°"
-              className="p-1 text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg cursor-pointer"
+              className="p-1.5 min-w-[32px] min-h-[32px] flex items-center justify-center text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg cursor-pointer"
             >
               <RotateCw className="w-3.5 h-3.5" />
             </button>
@@ -665,9 +681,13 @@ export const IconItem: React.FC<IconItemProps> = ({
           {!isLocked && (
             <div className="relative">
               <button
+                type="button"
+                data-popover-trigger
+                aria-label="Opacity options"
+                aria-expanded={showStyleMenu}
                 onClick={() => setShowStyleMenu(!showStyleMenu)}
                 title="Opacity options"
-                className="p-1 text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg cursor-pointer"
+                className="p-1.5 min-w-[32px] min-h-[32px] flex items-center justify-center text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg cursor-pointer"
               >
                 <Sliders className="w-3.5 h-3.5" />
               </button>
@@ -707,9 +727,13 @@ export const IconItem: React.FC<IconItemProps> = ({
           {!isLocked && (
             <div className="relative">
               <button
+                type="button"
+                data-popover-trigger
+                aria-label="Change icon color"
+                aria-expanded={showColorPicker}
                 onClick={() => setShowColorPicker(!showColorPicker)}
                 title="Change icon color"
-                className="p-1 text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg cursor-pointer"
+                className="p-1.5 min-w-[32px] min-h-[32px] flex items-center justify-center text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg cursor-pointer"
               >
                 <Palette className="w-3.5 h-3.5" />
               </button>
@@ -722,9 +746,12 @@ export const IconItem: React.FC<IconItemProps> = ({
                   {PALETTE_COLORS.map((c) => (
                     <button
                       key={c}
+                      type="button"
+                      aria-label={`Use ${c} color`}
+                      aria-pressed={element.color === c}
                       onClick={() => handleColorChange(c)}
                       style={{ backgroundColor: c }}
-                      className={`w-5 h-5 rounded-full border border-slate-300 dark:border-slate-700 hover:scale-110 transition-transform cursor-pointer ${
+                      className={`w-7 h-7 rounded-full border border-slate-300 dark:border-slate-700 hover:scale-110 transition-transform cursor-pointer ${
                         element.color === c ? 'ring-2 ring-blue-500' : ''
                       }`}
                     />
@@ -739,7 +766,7 @@ export const IconItem: React.FC<IconItemProps> = ({
             <button
               onClick={handleDuplicate}
               title="Duplicate icon"
-              className="p-1 text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg cursor-pointer transition-colors"
+              className="p-1.5 min-w-[32px] min-h-[32px] flex items-center justify-center text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg cursor-pointer transition-colors"
             >
               <Copy className="w-3.5 h-3.5" />
             </button>
