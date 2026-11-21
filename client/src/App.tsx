@@ -39,7 +39,7 @@ import type { AiDiagramPayload, AiSessionState } from './ai/types';
 
 /** A reversible local edit recorded for Ctrl+Z / Ctrl+Shift+Z. */
 type HistoryOperation =
-  | { kind: 'create'; elements: CanvasElement[]; at: number }
+  | { kind: 'create'; elements: CanvasElement[]; cascadeDeleted?: CanvasElement[]; at: number }
   | { kind: 'delete'; elements: CanvasElement[]; at: number }
   | { kind: 'update'; before: CanvasElement[]; after: CanvasElement[]; at: number }
   | {
@@ -47,10 +47,28 @@ type HistoryOperation =
       kind: 'batch';
       created: CanvasElement[];
       deleted: CanvasElement[];
+      /** Wires attached to `created` that undo had to remove as well. */
+      cascadeDeleted?: CanvasElement[];
       before: CanvasElement[];
       after: CanvasElement[];
       at: number;
     };
+
+/** Wires attached to a created element that a cascading undo must remove. */
+function collectCascadeWires(
+  elements: Record<string, CanvasElement>,
+  created: CanvasElement[],
+  excluded: CanvasElement[] = []
+): WireElement[] {
+  const createdIds = new Set(created.map((element) => element.id));
+  const excludedIds = new Set(excluded.map((element) => element.id));
+  return Object.values(elements).filter(
+    (element): element is WireElement =>
+      element.type === 'wire' &&
+      !excludedIds.has(element.id) &&
+      (createdIds.has(element.fromId) || createdIds.has(element.toId))
+  );
+}
 
 /**
  * Compare two canvas elements ignoring `updatedAt`, which changes on every
@@ -750,29 +768,22 @@ export default function App() {
     if (!operation) return;
 
     if (operation.kind === 'create') {
-      // Cascade to connectors attached to created objects.
-      const ids = new Set(operation.elements.map((element) => element.id));
-      (Object.values(elementsRef.current) as CanvasElement[]).forEach((element) => {
-        if (element.type === 'wire' && (ids.has(element.fromId) || ids.has(element.toId))) {
-          ids.add(element.id);
-        }
-      });
-      emitElementsBatchDelete(Array.from(ids));
+      // Cascade to connectors attached to created objects. Remember them so
+      // redo can restore exactly what this undo removed.
+      const cascadeDeleted = collectCascadeWires(elementsRef.current, operation.elements, operation.elements);
+      operation.cascadeDeleted = cascadeDeleted;
+      emitElementsBatchDelete([...operation.elements.map((element) => element.id), ...cascadeDeleted.map((element) => element.id)]);
     } else if (operation.kind === 'delete') {
       emitElementsBatchCreate(operation.elements);
     } else if (operation.kind === 'batch') {
       // Drop the turn's creations (plus any connectors now dangling off them),
       // restore anything it removed, then roll updates back.
-      const ids = new Set(operation.created.map((element) => element.id));
-      (Object.values(elementsRef.current) as CanvasElement[]).forEach((element) => {
-        if (
-          element.type === 'wire' &&
-          !ids.has(element.id) &&
-          (ids.has(element.fromId) || ids.has(element.toId))
-        ) {
-          ids.add(element.id);
-        }
-      });
+      const cascadeDeleted = collectCascadeWires(elementsRef.current, operation.created, [
+        ...operation.created,
+        ...operation.deleted,
+      ]);
+      operation.cascadeDeleted = cascadeDeleted;
+      const ids = new Set([...operation.created.map((element) => element.id), ...cascadeDeleted.map((element) => element.id)]);
       if (ids.size > 0) emitElementsBatchDelete(Array.from(ids));
       if (operation.deleted.length > 0) emitElementsBatchCreate(operation.deleted);
       operation.before.forEach((element) => emitElementUpdate(element));
@@ -791,10 +802,12 @@ export default function App() {
 
     if (operation.kind === 'create') {
       emitElementsBatchCreate(operation.elements);
+      if (operation.cascadeDeleted?.length) emitElementsBatchCreate(operation.cascadeDeleted);
     } else if (operation.kind === 'delete') {
       emitElementsBatchDelete(operation.elements.map((element) => element.id));
     } else if (operation.kind === 'batch') {
       if (operation.created.length > 0) emitElementsBatchCreate(operation.created);
+      if (operation.cascadeDeleted?.length) emitElementsBatchCreate(operation.cascadeDeleted);
       if (operation.deleted.length > 0) {
         emitElementsBatchDelete(operation.deleted.map((element) => element.id));
       }
