@@ -12,6 +12,7 @@ import {
   sanitizeElementIds,
   MAX_BATCH_ELEMENTS,
   MAX_POINTS_PER_STROKE,
+  MAX_ID_LENGTH,
 } from './socketPayload';
 
 const stroke = {
@@ -84,11 +85,14 @@ test('readBoolean is strict', () => {
   assert.equal(readBoolean(null), null);
 });
 
-test('readId rejects prototype-pollution keys', () => {
+test('readId rejects prototype-pollution keys and overlong IDs', () => {
   assert.equal(readId('user-1'), 'user-1');
   for (const key of ['__proto__', 'constructor', 'prototype']) {
     assert.equal(readId(key), null);
   }
+  assert.equal(readId('x'.repeat(MAX_ID_LENGTH)), `x`.repeat(MAX_ID_LENGTH));
+  assert.equal(readId('x'.repeat(MAX_ID_LENGTH + 1)), null);
+  assert.deepEqual(sanitizeElementIds(['a'.repeat(MAX_ID_LENGTH + 1)]), []);
 });
 
 test('readPoint requires finite, bounded x and y', () => {

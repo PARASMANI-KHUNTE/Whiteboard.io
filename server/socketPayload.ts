@@ -7,6 +7,7 @@ export const MAX_BATCH_ELEMENTS = 2000;
 export const MAX_POINTS_PER_STROKE = 5000;
 export const MAX_COORD = 1_000_000;
 export const MAX_DIMENSION = 100_000;
+export const MAX_STROKE_SIZE = 100;
 
 export interface SanitizedElement {
   id: string;
@@ -71,8 +72,12 @@ export function readBoolean(value: unknown): boolean | null {
 
 /** IDs are used as plain-object keys, so reject prototype-pollution keys. */
 export function readId(value: unknown, maxLength = MAX_ID_LENGTH): string | null {
-  const id = readString(value, maxLength);
-  return id && !DANGEROUS_KEYS.has(id) ? id : null;
+  if (typeof value !== "string") return null;
+  const id = value.trim();
+  // Truncating would merge two distinct IDs into one key, allowing one client
+  // to overwrite another's element. Reject instead.
+  if (!id || id.length > maxLength || DANGEROUS_KEYS.has(id)) return null;
+  return id;
 }
 
 export function readPoint(value: unknown): Point | null {

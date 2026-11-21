@@ -38,6 +38,7 @@ import {
   sanitizeElementIds,
   MAX_ID_LENGTH,
   MAX_REASON_LENGTH,
+  MAX_STROKE_SIZE,
 } from "./socketPayload";
 import { guardSocketHandler } from "./socketHandler";
 import {
@@ -1268,7 +1269,7 @@ async function startServer() {
       const point = readPoint(payload.point);
       const color = readString(payload.color, 32);
       const size = readFiniteNumber(payload.size);
-      if (!strokeId || !point || !color || size === null) return;
+      if (!strokeId || !point || !color || size === null || size <= 0 || size > MAX_STROKE_SIZE) return;
       socket.to(currentRoomId).emit("stroke-live-started", {
         userId: currentUser?.id,
         strokeId,
@@ -1381,7 +1382,7 @@ async function startServer() {
       if (!isRecord(data)) return;
       const level = readFiniteNumber(data.level);
       const isSpeaking = readBoolean(data.isSpeaking);
-      if (level === null || isSpeaking === null) return;
+      if (level === null || isSpeaking === null || level < 0 || level > 1) return;
       currentUser.audioLevel = level;
       currentUser.isSpeaking = isSpeaking;
       socket.to(currentRoomId).emit("audio-level-updated", {
