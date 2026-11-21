@@ -32,7 +32,7 @@ import {
   OAUTH_NONCE_COOKIE,
   OAUTH_STATE_TTL_MS,
 } from "./oauthState";
-import { generateDiagram, reviseDiagram } from "./ai/generate";
+import { AiQueueFullError, generateDiagram, reviseDiagram } from "./ai/generate";
 import { getProviderSummary } from "./ai/providers";
 import {
   coerceDiagramType,
@@ -125,6 +125,11 @@ interface RoomData {
 
 const PORT = Number(process.env.PORT) || 3000;
 const VOTE_CLEAR_DURATION_MS = Number(process.env.VOTE_CLEAR_DURATION_MS) || 15000;
+
+function positiveEnvInt(name: string, fallback: number): number {
+  const value = Number(process.env[name]);
+  return Number.isFinite(value) && value > 0 ? Math.floor(value) : fallback;
+}
 const rooms = new Map<string, RoomData>();
 
 async function getOrCreateRoom(roomId: string): Promise<RoomData> {
@@ -250,9 +255,20 @@ function authRateLimiter(maxRequests = 30, windowMs = 60000, bucket = "default")
 async function startServer() {
   await connectDb();
   const app = express();
-  // Respect a single reverse proxy (Render/Railway/nginx) for client IPs.
-  app.set("trust proxy", 1);
+  // X-Forwarded-For is only trusted when a deployment explicitly opts in.
+  // Otherwise any caller can forge it and bypass per-IP rate limits.
+  const trustProxy = (process.env.TRUST_PROXY || "").trim().toLowerCase();
+  if (trustProxy === "true") {
+    app.set("trust proxy", true);
+  } else if (/^\d+$/.test(trustProxy)) {
+    app.set("trust proxy", Number(trustProxy));
+  }
   const server = http.createServer(app);
+  server.requestTimeout = positiveEnvInt("HTTP_REQUEST_TIMEOUT_MS", 60000);
+  server.headersTimeout = Math.max(
+    server.requestTimeout + 5000,
+    positiveEnvInt("HTTP_HEADERS_TIMEOUT_MS", 65000)
+  );
   const io = new SocketIOServer(server, {
     cors: {
       origin: (requestOrigin, callback) => {
@@ -427,8 +443,9 @@ async function startServer() {
 
       res.json({ success: true, ...result });
     } catch (err: any) {
+      const status = err instanceof AiQueueFullError ? 429 : 500;
       console.error("[AI Generate Error]:", err.message);
-      res.status(500).json({ success: false, error: err.message || "Failed to generate diagram" });
+      res.status(status).json({ success: false, error: err.message || "Failed to generate diagram" });
     }
   });
 
@@ -491,8 +508,9 @@ async function startServer() {
 
       res.json({ success: true, ...result });
     } catch (err: any) {
+      const status = err instanceof AiQueueFullError ? 429 : 500;
       console.error("[AI Revision Error]:", err.message);
-      res.status(500).json({ success: false, error: err.message || "Failed to revise diagram" });
+      res.status(status).json({ success: false, error: err.message || "Failed to revise diagram" });
     }
   });
 

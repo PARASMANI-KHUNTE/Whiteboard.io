@@ -9,6 +9,8 @@ import type {
   DiagramType,
 } from "./types";
 import { sanitizeSessionId } from "./types";
+import { QueueFullError, ThrottledQueue } from "./requestQueue";
+import { TimedCache } from "./responseCache";
 import {
   AI_SCHEMA_VERSION,
   buildInitialUserMessage,
@@ -30,6 +32,8 @@ import {
   type AiProviderSummary,
 } from "./providers";
 
+export { QueueFullError as AiQueueFullError } from "./requestQueue";
+
 // ---------------------------------------------------------------------------
 // Response cache — stores the semantic graph, never geometry or element ids.
 // ---------------------------------------------------------------------------
@@ -40,16 +44,17 @@ interface CachedGraph {
   graph: DiagramGraph;
   /** Which backend actually produced this graph (the chain may have failed over). */
   provider: AiProviderInfo;
-  timestamp: number;
 }
 
-const graphCache = new Map<string, CachedGraph>();
+function positiveEnvInt(name: string, fallback: number): number {
+  const value = Number(process.env[name]);
+  return Number.isFinite(value) && value > 0 ? Math.floor(value) : fallback;
+}
+
+const graphCache = new TimedCache<CachedGraph>(positiveEnvInt("AI_CACHE_MAX_ENTRIES", 256), CACHE_TTL_MS);
 
 const cleanupTimer = setInterval(() => {
-  const now = Date.now();
-  for (const [key, entry] of graphCache.entries()) {
-    if (now - entry.timestamp > CACHE_TTL_MS) graphCache.delete(key);
-  }
+  graphCache.prune();
 }, 10 * 60 * 1000);
 cleanupTimer.unref?.();
 
@@ -76,8 +81,10 @@ function cacheKey(
 // while a local Ollama server only needs a small breather between calls.
 // ---------------------------------------------------------------------------
 
-let lastOutboundTime = 0;
-let queuePromise: Promise<void> = Promise.resolve();
+const outboundQueue = new ThrottledQueue(
+  3000,
+  positiveEnvInt("AI_QUEUE_MAX_DEPTH", 24)
+);
 
 function outboundIntervalMs(provider: AiProviderInfo): number {
   if (provider.name === "ollama") {
@@ -88,22 +95,7 @@ function outboundIntervalMs(provider: AiProviderInfo): number {
 }
 
 function scheduleThrottledTask<T>(intervalMs: number, task: () => Promise<T>): Promise<T> {
-  const run = async (): Promise<T> => {
-    const elapsed = Date.now() - lastOutboundTime;
-    const waitTime = Math.max(0, intervalMs - elapsed);
-    if (waitTime > 0) {
-      await new Promise((resolve) => setTimeout(resolve, waitTime));
-    }
-    lastOutboundTime = Date.now();
-    return task();
-  };
-
-  const nextPromise = queuePromise.then(run, run);
-  queuePromise = nextPromise.then(
-    () => {},
-    () => {}
-  );
-  return nextPromise;
+  return outboundQueue.schedule(intervalMs, task);
 }
 
 // ---------------------------------------------------------------------------
@@ -332,7 +324,7 @@ export async function generateDiagram(params: GenerateDiagramParams): Promise<Di
   const key = cacheKey(provider, prompt, type, detail, direction);
 
   const cached = graphCache.get(key);
-  if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
+  if (cached) {
     return assemblePayload({
       sessionId,
       type,
@@ -370,7 +362,7 @@ export async function generateDiagram(params: GenerateDiagramParams): Promise<Di
     }
 
     if (best.issues.length === 0) {
-      graphCache.set(key, { graph: best.graph, provider: chosen, timestamp: Date.now() });
+      graphCache.set(key, { graph: best.graph, provider: chosen });
     }
 
     const notice =
@@ -390,6 +382,7 @@ export async function generateDiagram(params: GenerateDiagramParams): Promise<Di
       ...(notice ? { notice } : {}),
     });
   } catch (error: unknown) {
+    if (error instanceof QueueFullError) throw error;
     console.warn(
       `[AI Graceful Fallback]: ${(error as Error).message}. Using the local diagram engine.`
     );
@@ -435,15 +428,6 @@ export async function reviseDiagram(params: ReviseDiagramParams): Promise<Diagra
     canvasCenter = { x: 0, y: 0 },
   } = params;
 
-  const chain = resolveProviderChain();
-  const provider = chain[0] ?? null;
-
-  if (!provider || chain.length === 0) {
-    throw new Error(
-      "No AI model is configured on the server, so follow-up edits are unavailable."
-    );
-  }
-
   const sessionId = sanitizeSessionId(params.sessionId);
   const current = normalizeGraph(graph, {
     type,
@@ -453,77 +437,101 @@ export async function reviseDiagram(params: ReviseDiagramParams): Promise<Diagra
     fallbackSummary: graph.summary,
   });
 
-  const baseMessage = buildRevisionUserMessage({
-    instruction,
-    graph: current.graph,
-    history,
+  const chain = resolveProviderChain();
+  const provider = chain[0] ?? null;
+
+  // A failed follow-up must never erase the user's existing diagram.
+  const keepCurrentDiagram = (reason: string): DiagramPayload => assemblePayload({
+    sessionId,
     type,
     detail,
     direction,
+    graph: current.graph,
+    author: params.author ?? defaultDiagramAuthor(null),
+    canvasCenter,
+    engine: { provider: "fallback", model: "procedural", label: "Local fallback engine" },
+    isFallback: true,
+    changes: ["Your diagram was left unchanged."],
+    notice: reason,
   });
 
-  const options: NormalizeOptions = {
-    type,
-    detail,
-    mode: "followup",
-    fallbackTitle: current.graph.title,
-    fallbackSummary: current.graph.summary,
-  };
-
-  const attempt = await callModelChain(chain, baseMessage, 0.3);
-  const chosen = attempt.provider;
-  let best = normalizeGraph(attempt.raw, options);
-
-  let bestRaw: unknown = attempt.raw;
-  if (best.issues.length > 0) {
-    const retryMessage = buildRetryUserMessage(baseMessage, best.issues);
-    try {
-      const secondRaw = await callModelOnce(chosen, retryMessage, 0.25, 2);
-      const second = normalizeGraph(secondRaw, options);
-      if (pickBetter(best, second) === second) bestRaw = secondRaw;
-      best = pickBetter(best, second);
-    } catch (retryError: unknown) {
-      console.warn(
-        `[AI Quality Gate]: Revision retry failed: ${(retryError as Error).message}. Keeping the first result.`
-      );
-    }
+  if (!provider || chain.length === 0) {
+    return keepCurrentDiagram(
+      "No AI model is configured on the server, so follow-up edits are unavailable. Your diagram was left unchanged."
+    );
   }
 
-  // Never let a failed revision erase a diagram the user already has.
-  if (best.graph.nodes.length === 0) {
+  try {
+    const baseMessage = buildRevisionUserMessage({
+      instruction,
+      graph: current.graph,
+      history,
+      type,
+      detail,
+      direction,
+    });
+
+    const options: NormalizeOptions = {
+      type,
+      detail,
+      mode: "followup",
+      fallbackTitle: current.graph.title,
+      fallbackSummary: current.graph.summary,
+    };
+
+    const attempt = await callModelChain(chain, baseMessage, 0.3);
+    const chosen = attempt.provider;
+    let best = normalizeGraph(attempt.raw, options);
+
+    let bestRaw: unknown = attempt.raw;
+    if (best.issues.length > 0) {
+      const retryMessage = buildRetryUserMessage(baseMessage, best.issues);
+      try {
+        const secondRaw = await callModelOnce(chosen, retryMessage, 0.25, 2);
+        const second = normalizeGraph(secondRaw, options);
+        if (pickBetter(best, second) === second) bestRaw = secondRaw;
+        best = pickBetter(best, second);
+      } catch (retryError: unknown) {
+        console.warn(
+          `[AI Quality Gate]: Revision retry failed: ${(retryError as Error).message}. Keeping the first result.`
+        );
+      }
+    }
+
+    if (best.graph.nodes.length === 0) {
+      return keepCurrentDiagram(
+        "The AI response was empty. Your diagram was left as it was — try rephrasing the instruction."
+      );
+    }
+
+    const rawChanges = extractStringArray(
+      typeof bestRaw === "object" && bestRaw !== null
+        ? (bestRaw as { changes?: unknown }).changes
+        : undefined
+    );
+    const changes =
+      rawChanges.length > 0 ? rawChanges : describeChanges(current.graph, best.graph);
+    const notice = failoverNotice(attempt.failed, chosen);
+
     return assemblePayload({
       sessionId,
       type,
       detail,
       direction,
-      graph: current.graph,
+      graph: best.graph,
       author: params.author ?? defaultDiagramAuthor(chosen),
       canvasCenter,
+      changes,
       engine: summarizeProvider(chosen),
-      changes: ["The AI returned no usable nodes, so the diagram was left unchanged."],
-      notice: "The AI response was empty. Your diagram was left as it was — try rephrasing the instruction.",
+      ...(notice ? { notice } : {}),
     });
+  } catch (error: unknown) {
+    if (error instanceof QueueFullError) throw error;
+    console.warn(
+      `[AI Revision Graceful Fallback]: ${(error as Error).message}. Keeping the current diagram.`
+    );
+    return keepCurrentDiagram(
+      "The AI provider could not complete this follow-up edit. Your diagram was left unchanged — please try again."
+    );
   }
-
-  const rawChanges = extractStringArray(
-    typeof bestRaw === "object" && bestRaw !== null
-      ? (bestRaw as { changes?: unknown }).changes
-      : undefined
-  );
-  const changes =
-    rawChanges.length > 0 ? rawChanges : describeChanges(current.graph, best.graph);
-  const notice = failoverNotice(attempt.failed, chosen);
-
-  return assemblePayload({
-    sessionId,
-    type,
-    detail,
-    direction,
-    graph: best.graph,
-    author: params.author ?? defaultDiagramAuthor(chosen),
-    canvasCenter,
-    changes,
-    engine: summarizeProvider(chosen),
-    ...(notice ? { notice } : {}),
-  });
 }
