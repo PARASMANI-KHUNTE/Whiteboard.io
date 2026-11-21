@@ -27,7 +27,7 @@ In this mode, the Node.js Express server automatically builds and serves the Rea
    - **Name**: `whiteboard-app`
    - **Environment / Runtime**: `Node`
    - **Branch**: `main`
-   - **Root Directory**: *(leave blank)*
+   - **Root Directory**: *(leave blank — the build and start commands below expect the repository root)*
    - **Build Command**:
      ```bash
      npm run build
@@ -37,10 +37,9 @@ In this mode, the Node.js Express server automatically builds and serves the Rea
      ```bash
      npm start
      ```
-     *(Runs `node server/dist/server.js`)*.
+     *(Runs `node server/dist/server.js`; Render injects `PORT`, so do not set it manually)*.
 5. In **Environment Variables**, add:
-   - `PORT`: `3000` *(Render provides this automatically, but setting 3000 ensures consistency)*
-   - `APP_URL`: `https://whiteboard-io-1.onrender.com`
+   - `APP_URL`: `https://whiteboard-io-1.onrender.com` *(the public URL of this service; set it to your own deployed frontend/monolith URL)*
    - `MONGODB_URI`: `mongodb+srv://<user>:<password>@cluster0.mongodb.net/whiteboard?retryWrites=true&w=majority`
    - `AI_PROVIDER`: `gemini` *(or `ollama` for a self-hosted local model)*
    - `GEMINI_API_KEY`: `your-google-gemini-api-key` *(From [Google AI Studio](https://aistudio.google.com/app/apikey))*
@@ -53,18 +52,20 @@ In this mode, the Node.js Express server automatically builds and serves the Rea
 
 ### Step 1: Deploy Backend (Render Web Service)
 1. In Render, create a **Web Service** (e.g., `whiteboard-backend`).
-2. **Build Command**: `cd server && npm install && npm run build`
-3. **Start Command**: `node server/dist/server.js`
-4. **Environment Variables**:
+2. **Root Directory**: leave blank. The commands below start at the repository root and change into `server` themselves.
+3. **Build Command**: `cd server && npm install && npm run build`
+4. **Start Command**: `node server/dist/server.js`. Render injects `PORT`; do not override it.
+5. **Environment Variables**:
    ```env
-   PORT=3000
-   APP_URL=https://whiteboard-frontend.onrender.com (or your Vercel URL)
+   APP_URL=https://whiteboard-frontend.onrender.com
+   SERVER_URL=https://whiteboard-backend.onrender.com
    MONGODB_URI=your_mongodb_connection_string
    AI_PROVIDER=gemini
    GEMINI_API_KEY=your-google-gemini-api-key
    GOOGLE_CLIENT_ID=your-google-client-id
    GOOGLE_CLIENT_SECRET=your-google-client-secret
    ```
+   Replace `APP_URL` with your deployed frontend URL (for example, a Vercel URL) without any inline notes; include that exact origin in `CLIENT_URL` or `ALLOWED_ORIGINS` if it differs from `APP_URL`.
 
 ### Step 2: Deploy Frontend (Render Static Site or Vercel)
 1. Create a **Static Site** on Render (or import project into Vercel).
@@ -103,6 +104,12 @@ To enable **Continue with Google**, configure credentials in the [Google Cloud C
 
 > [!IMPORTANT]
 > Google redirect URIs must match **character-for-character** (including `https://`, domain, and `/auth/google/callback`). If you see `Error 400: redirect_uri_mismatch`, check the URL in the error details and add it to your Authorized redirect URIs.
+
+### OAuth state cookie and cross-site hosting
+
+`/api/auth/google/url` creates a short-lived (10 minute) random nonce, stores it in the base64url `state` parameter, and sets an `HttpOnly; SameSite=Lax` cookie named `wb_oauth_nonce` (with `Secure` on HTTPS). `/auth/google/callback` clears the cookie and rejects any callback whose state is missing, expired, or does not match that cookie with an `HTTP 400` page and a `GOOGLE_OAUTH_ERROR` postMessage to the opener. The callback also only accepts the redirect URI that the server originally issued.
+
+The client calls `/api/auth/google/url` with `credentials: 'include'`, so the frontend origin must be in the server's CORS allowlist (`APP_URL`, `CLIENT_URL`, or `ALLOWED_ORIGINS`). For split deployments, host frontend and backend on the same site (for example, sibling subdomains) where possible. If they are on unrelated sites, browsers that block cross-site cookies can prevent the nonce from being stored or returned; in that case Google sign-in will fail with the `400` invalid-request page until third-party cookies are allowed for the backend or the apps are hosted under the same site.
 
 ---
 
@@ -152,8 +159,11 @@ VITE_TURN_PASSWORD=your_turn_password
 
 | Variable | Description | Required | Default |
 | :--- | :--- | :--- | :--- |
-| `PORT` | HTTP server listening port | No | `3000` |
-| `APP_URL` | Frontend URL allowed for CORS and OAuth return | Yes | `http://localhost:5173` |
+| `PORT` | HTTP server listening port; leave unset on Render/Railway so the platform can inject it | No | `3000` |
+| `APP_URL` | Primary frontend origin used for CORS and as the OAuth `postMessage` return origin | Yes | `http://localhost:5173` |
+| `CLIENT_URL` | Additional frontend origin(s) allowed for CORS and OAuth; comma-separated | No | None |
+| `ALLOWED_ORIGINS` | Additional comma-separated origins allowed for CORS and OAuth `postMessage` | No | Local dev origins |
+| `SERVER_URL` | Public backend origin used to build the Google OAuth callback URL behind proxies | No | Request protocol/host |
 | `MONGODB_URI` | MongoDB connection URI | Yes | `mongodb://127.0.0.1:27017/whiteboard` |
 | `AI_PROVIDER` | Which AI engine to use: `gemini`, `ollama`, or `fallback`. Unset auto-picks Gemini when `GEMINI_API_KEY` exists, otherwise Ollama when configured | No | auto |
 | `GEMINI_API_KEY` | Google Gemini API key for AI diagram generation | No (optional; uses Ollama or procedural fallback if unset) | `""` |
