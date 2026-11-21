@@ -15,6 +15,7 @@ import { useAuth } from './hooks/useAuth';
 import { useSocket } from './hooks/useSocket';
 import { useVoiceChat } from './hooks/useVoiceChat';
 import { useTheme } from './hooks/useTheme';
+import { useModalA11y } from './hooks/useModalA11y';
 import { Header } from './components/Header';
 import { Toolbar } from './components/Toolbar';
 import { Canvas } from './components/Canvas';
@@ -101,6 +102,7 @@ export default function App() {
     onConfirm: () => {},
   });
 
+  const kickedDialogRef = useRef<HTMLDivElement>(null);
   const selectAllHandlerRef = useRef<(() => void) | null>(null);
   const navigateToElementsRef = useRef<((elements: CanvasElement[]) => void) | null>(null);
   const getWorldCenterRef = useRef<(() => { x: number; y: number }) | null>(null);
@@ -408,6 +410,7 @@ export default function App() {
     frequencyData,
     isSimulated,
     error: voiceError,
+    clearError: clearVoiceError,
     isIframeRestricted,
     activeSpeakers,
     startVoiceChat,
@@ -1253,6 +1256,15 @@ export default function App() {
     );
   }
 
+  useModalA11y({
+    isOpen: isKicked,
+    onClose: () => {
+      resetKickedState();
+      switchRoom(null);
+    },
+    dialogRef: kickedDialogRef,
+  });
+
   return (
     <div
       id="collaborative-whiteboard-app"
@@ -1297,6 +1309,7 @@ export default function App() {
         frequencyData={frequencyData}
         isSimulated={isSimulated}
         error={voiceError}
+        onClearError={clearVoiceError}
         isIframeRestricted={isIframeRestricted}
         activeSpeakers={activeSpeakers}
         onJoinVoice={handleJoinVoiceWithSoloCheck}
@@ -1525,11 +1538,18 @@ export default function App() {
       {/* Kicked from Room Dialog */}
       {isKicked && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200">
-          <div className="bg-white rounded-2xl p-6 w-full max-w-md border border-slate-200 shadow-2xl text-center">
+          <div
+            ref={kickedDialogRef}
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="kicked-dialog-title"
+            tabIndex={-1}
+            className="bg-white rounded-2xl p-6 w-full max-w-md border border-slate-200 shadow-2xl text-center"
+          >
             <div className="w-12 h-12 bg-rose-100 text-rose-600 rounded-full flex items-center justify-center mx-auto mb-3">
               <UserX className="w-6 h-6" />
             </div>
-            <h3 className="text-lg font-bold text-slate-900 mb-1">Removed from Room</h3>
+            <h3 id="kicked-dialog-title" className="text-lg font-bold text-slate-900 mb-1">Removed from Room</h3>
             <p className="text-sm text-slate-600 mb-6">
               {kickedReason || 'An admin has removed you from this collaborative session.'}
             </p>

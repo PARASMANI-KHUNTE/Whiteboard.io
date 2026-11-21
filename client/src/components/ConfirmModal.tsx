@@ -1,6 +1,7 @@
-import React, { useEffect } from 'react';
+import React, { useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { AlertTriangle, Trash2, Info, X } from 'lucide-react';
+import { useModalA11y } from '../hooks/useModalA11y';
 
 export interface ConfirmModalProps {
   isOpen: boolean;
@@ -23,30 +24,14 @@ export const ConfirmModal: React.FC<ConfirmModalProps> = ({
   onConfirm,
   onCancel,
 }) => {
-  useEffect(() => {
-    if (!isOpen) return;
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.repeat) return;
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        onCancel();
-      } else if (e.key === 'Enter') {
-        const target = e.target as HTMLElement | null;
-        const tag = target?.tagName;
-        // Let focused interactive controls handle Enter themselves to avoid
-        // confirming when the user activated Cancel.
-        if (tag === 'BUTTON' || tag === 'A' || tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') {
-          return;
-        }
-        e.preventDefault();
-        onConfirm();
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, onCancel, onConfirm]);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useModalA11y({
+    isOpen,
+    onClose: onCancel,
+    dialogRef,
+    // Destructive confirmations start on Cancel; Enter must activate a button.
+    initialFocusSelector: variant === 'danger' ? '[data-modal-initial]' : undefined,
+  });
 
   if (!isOpen) return null;
 
@@ -85,7 +70,12 @@ export const ConfirmModal: React.FC<ConfirmModalProps> = ({
       }}
     >
       <div
+        ref={dialogRef}
         id="custom-confirm-modal"
+        role={variant === 'danger' ? 'alertdialog' : 'dialog'}
+        aria-modal="true"
+        aria-labelledby="custom-confirm-modal-title"
+        tabIndex={-1}
         className="w-full max-w-sm bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xl rounded-2xl p-5 sm:p-6 animate-in zoom-in-95 duration-150 flex flex-col gap-4 text-slate-800 dark:text-slate-100"
       >
         <div className="flex items-start gap-3.5">
@@ -95,7 +85,7 @@ export const ConfirmModal: React.FC<ConfirmModalProps> = ({
 
           <div className="flex-1 min-w-0">
             <div className="flex items-center justify-between gap-2 mb-1">
-              <h3 className="text-base font-bold text-slate-900 dark:text-white leading-tight">
+              <h3 id="custom-confirm-modal-title" className="text-base font-bold text-slate-900 dark:text-white leading-tight">
                 {title}
               </h3>
               <button
@@ -116,6 +106,7 @@ export const ConfirmModal: React.FC<ConfirmModalProps> = ({
         <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-slate-100 dark:border-slate-800">
           <button
             id="custom-confirm-modal-cancel-btn"
+            data-modal-initial={variant === 'danger' ? 'true' : undefined}
             onClick={onCancel}
             className="px-3.5 py-2 text-xs sm:text-sm font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-colors cursor-pointer border border-slate-200 dark:border-slate-700"
           >

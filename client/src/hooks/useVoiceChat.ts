@@ -807,6 +807,7 @@ export function useVoiceChat({
     frequencyData,
     isSimulated,
     error,
+    clearError: () => setError(null),
     isIframeRestricted,
     activeSpeakers,
     startVoiceChat,
