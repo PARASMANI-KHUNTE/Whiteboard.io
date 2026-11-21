@@ -862,7 +862,7 @@ def build_report():
                "Whiteboard.io is built entirely upon cross-platform web standards and modern runtime environments:")
     
     add_bullet_p(doc, 
-                 "Node.js runtime environment (v18.0.0 or higher, verified on v22+), npm package manager, MongoDB Community or Enterprise Server (v6.0 or higher, verified on v7.6+), and Google Gemini API credentials.",
+                 "Node.js runtime environment (v20.19.0 or higher, 22 LTS recommended — required by the MongoDB 7 driver), npm package manager, MongoDB Community or Enterprise Server (v6.0 or higher, verified on v7.6+ and MONGODB_URI required), and Google Gemini API credentials.",
                  bold_prefix="Server Prerequisites: ")
     
     add_bullet_p(doc, 
@@ -887,7 +887,7 @@ def build_report():
         ["Animations", "Motion", "^12.23.24", "Fluid physics-based spring animations for modals, notifications, and menus."],
         ["Icons", "Lucide React", "^0.546.0", "Crisp vector icons for canvas tools, admin panels, and status indicators."],
         ["Real-Time Client", "Socket.io Client", "^4.8.3", "WebSocket client handling room events, drawing streams, and voice signaling."],
-        ["Backend Runtime", "Node.js", "v20+ / ES Modules", "Asynchronous, event-driven JavaScript runtime executing the backend server."],
+        ["Backend Runtime", "Node.js", ">=20.19 / ES Modules", "Asynchronous, event-driven JavaScript runtime executing the backend server."],
         ["Backend Framework", "Express", "^4.21.2", "Lightweight HTTP server hosting REST APIs, CORS, and security middleware."],
         ["Real-Time Server", "Socket.io", "^4.8.3", "WebSocket server gateway managing rooms, event routing, and binary packets."],
         ["Database Driver", "MongoDB Driver", "^7.6.0", "Official native MongoDB Node.js driver providing high-speed direct queries."],
@@ -1252,11 +1252,11 @@ def build_report():
                "A rigorous inspection of the Whiteboard.io repository was conducted across `server/package.json`, `client/package.json`, configuration files, and source directories. Based on this direct codebase analysis:")
     
     add_body_p(doc, 
-               "\"No formal automated test suite was identified in the analyzed repository.\"",
+               "\"The server includes an automated test suite using Node.js's built-in test runner (`npm test --prefix server`).\"",
                bold_prefix="Codebase Finding: ")
     
     add_body_p(doc, 
-               "The existing `package.json` scripts focus exclusively on development execution (`npm run dev`, `tsx`, `nodemon`) and production builds (`esbuild`, `vite build`). Unit testing frameworks (such as Jest, Vitest, or Mocha) and end-to-end browser automation suites (such as Cypress or Playwright) are not currently installed or configured.")
+               "The server tests use `node:test` and `node:assert` with no additional test framework dependency, covering socket payload validation, clear-vote cancellation, session token expiry, and OAuth state validation. Development scripts (`npm run dev`, `tsx`, `nodemon`) and production builds (`esbuild`, `vite build`) remain available. Browser end-to-end automation (for example, Playwright or Cypress) is not configured.")
     
     add_styled_heading(doc, "6.2 Comprehensive Recommended Test-Case Matrix", 2)
     add_body_p(doc, 

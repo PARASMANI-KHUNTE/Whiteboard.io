@@ -12,6 +12,10 @@ server/.env*
 !client/.env.example
 !.env.example
 
+# Python bytecode
+__pycache__/
+*.py[cod]
+
 # Local server database / runtime cache
 server/data/
 **/server/data/
