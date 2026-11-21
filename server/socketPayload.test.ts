@@ -147,6 +147,14 @@ test('sanitizeElement rejects prototype-pollution ids and malformed nested field
   assert.equal((capped.text as string).length, 10_000);
 });
 
+test('sanitizeElement preserves explicit empty strings so fields can be cleared', () => {
+  const cleared = sanitizeElement({ ...sticky, text: '', color: '', userName: '' });
+  assert.ok(cleared);
+  assert.equal(cleared.text, '');
+  assert.equal(cleared.color, '');
+  assert.equal(cleared.userName, '');
+});
+
 test('sanitizeElementBatch filters invalid items and caps the batch', () => {
   const huge = Array.from({ length: MAX_BATCH_ELEMENTS + 10 }, (_, i) => ({ ...sticky, id: `e${i}` }));
   assert.equal(sanitizeElementBatch(huge).length, MAX_BATCH_ELEMENTS);

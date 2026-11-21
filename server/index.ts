@@ -39,8 +39,14 @@ import {
   MAX_ID_LENGTH,
   MAX_REASON_LENGTH,
   MAX_STROKE_SIZE,
+  MAX_POINTS_PER_STROKE,
 } from "./socketPayload";
 import { guardSocketHandler } from "./socketHandler";
+
+/** Live strokes expire after this long without a new point. */
+const LIVE_STROKE_TTL_MS = 30_000;
+/** Maximum simultaneous unfinished strokes per socket. */
+const MAX_CONCURRENT_LIVE_STROKES = 8;
 import {
   createOAuthState,
   verifyOAuthState,
@@ -897,6 +903,16 @@ async function startServer() {
     let currentRoomId: string | null = null;
     let currentUser: UserSession | null = null;
 
+    // Per-socket live-stroke accounting. Without a cap, one writer could stream
+    // unlimited points into every participant's in-memory liveStrokes map.
+    const liveStrokes = new Map<string, { count: number; expiresAt: number }>();
+    const clearLiveStrokes = () => liveStrokes.clear();
+    const pruneLiveStrokes = (now: number) => {
+      for (const [id, state] of liveStrokes) {
+        if (state.expiresAt <= now) liveStrokes.delete(id);
+      }
+    };
+
     // Drop all incoming socket events if socket was kicked
     socket.use((_packet, next) => {
       if (socket.data.kicked) {
@@ -1269,14 +1285,24 @@ async function startServer() {
       const point = readPoint(payload.point);
       const color = readString(payload.color, 32);
       const size = readFiniteNumber(payload.size);
-      if (!strokeId || !point || !color || size === null || size <= 0 || size > MAX_STROKE_SIZE) return;
+      // Only default when the field is omitted; reject a present non-boolean
+      // so malformed input cannot silently change how the stroke is rendered.
+      const rawHighlighter = payload.isHighlighter;
+      const isHighlighter = rawHighlighter === undefined ? false : readBoolean(rawHighlighter);
+      if (!strokeId || !point || !color || size === null || size <= 0 || size > MAX_STROKE_SIZE || isHighlighter === null) return;
+
+      const now = Date.now();
+      pruneLiveStrokes(now);
+      if (liveStrokes.size >= MAX_CONCURRENT_LIVE_STROKES || liveStrokes.has(strokeId)) return;
+      liveStrokes.set(strokeId, { count: 1, expiresAt: now + LIVE_STROKE_TTL_MS });
+
       socket.to(currentRoomId).emit("stroke-live-started", {
         userId: currentUser?.id,
         strokeId,
         point,
         color,
         size,
-        isHighlighter: readBoolean(payload.isHighlighter) === true,
+        isHighlighter,
       });
     });
 
@@ -1286,6 +1312,14 @@ async function startServer() {
       const strokeId = readId(payload.strokeId);
       const point = readPoint(payload.point);
       if (!strokeId || !point) return;
+
+      const now = Date.now();
+      pruneLiveStrokes(now);
+      const state = liveStrokes.get(strokeId);
+      if (!state || state.count >= MAX_POINTS_PER_STROKE) return;
+      state.count += 1;
+      state.expiresAt = now + LIVE_STROKE_TTL_MS;
+
       socket.to(currentRoomId).emit("stroke-live-pointed", { strokeId, point });
     });
 
@@ -1297,6 +1331,7 @@ async function startServer() {
       const room = rooms.get(currentRoomId);
       if (!room) return;
       room.elements[clean.id] = clean as CanvasElement;
+      liveStrokes.delete(clean.id);
       saveRoomElementsDebounced(currentRoomId, room.elements, 400);
       socket.to(currentRoomId).emit("element-created", clean);
     });
@@ -1473,6 +1508,7 @@ async function startServer() {
       // If only 1 user, clear immediately
       if (userIds.length <= 1) {
         room.elements = {};
+        clearLiveStrokes();
         void saveRoomElements(targetRoomId, {});
         io.to(targetRoomId).emit("board-cleared", {
           initiatorName: currentUser.name,
@@ -1515,6 +1551,7 @@ async function startServer() {
 
         if (passed) {
           currentRoom.elements = {};
+          clearLiveStrokes();
           void saveRoomElements(targetRoomId, {});
           io.to(targetRoomId).emit("board-cleared", {
             initiatorName: currentRoom.voteToClear.initiatorName,
@@ -1555,6 +1592,7 @@ async function startServer() {
       if (yesCount > totalEligible / 2) {
         if (room.voteTimer) clearTimeout(room.voteTimer);
         room.elements = {};
+        clearLiveStrokes();
         void saveRoomElements(currentRoomId, {});
         io.to(currentRoomId).emit("board-cleared", {
           initiatorName: room.voteToClear.initiatorName,
@@ -1596,6 +1634,7 @@ async function startServer() {
       const room = rooms.get(currentRoomId);
       if (!room) return;
       room.elements = {};
+      clearLiveStrokes();
       void saveRoomElements(currentRoomId, {});
       io.to(currentRoomId).emit("board-cleared", {
         initiatorName: currentUser.name,
@@ -1605,6 +1644,7 @@ async function startServer() {
 
     // Disconnect
     safeOn("disconnect", () => {
+      clearLiveStrokes();
       if (!currentRoomId || !currentUser) return;
       const room = rooms.get(currentRoomId);
       if (!room) return;

@@ -123,7 +123,9 @@ function applySchema(
           continue;
         }
         const parsed = raw.slice(0, spec.max ?? MAX_TEXT_LENGTH);
-        if (!parsed && !spec.required) continue;
+        // An explicit empty string is how the UI clears text/label/color
+        // fields. element-update merges this object, so dropping the key would
+        // leave the old value in storage and never reach remote clients.
         clean[key] = parsed;
         break;
       }
