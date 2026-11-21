@@ -665,6 +665,8 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
         addNotification(`Vote passed (${result.yesCount}/${result.totalEligible})! Board was cleared.`, 'success');
       } else if (result.reason === 'cancelled_by_initiator') {
         addNotification('Vote to clear was cancelled by initiator.', 'info');
+      } else if (result.reason === 'cancelled_by_direct_clear') {
+        addNotification('Vote to clear was cancelled because the board was cleared directly.', 'info');
       } else {
         addNotification(`Vote failed to clear board (${result.yesCount}/${result.totalEligible} votes).`, 'info');
       }
@@ -801,14 +803,33 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
     }
   }, [roomId]);
 
-  const emitClearBoardDirect = useCallback(() => {
-    pendingElementUpdatesRef.current.clear();
-    setElements({});
-    setLiveStrokes({});
-    setBoardClearCount((count) => count + 1);
-    if (socketRef.current?.connected && roomId) {
-      socketRef.current.emit('clear-board-direct');
+  /**
+   * Resolves true only when the server confirmed the clear. In multiplayer the
+   * server's `board-cleared` broadcast clears local state; we must not clear
+   * optimistically or a rejected request would desync the client from the room.
+   */
+  const emitClearBoardDirect = useCallback((): Promise<boolean> => {
+    if (!roomId) {
+      // Solo canvas: there is no server to acknowledge.
+      pendingElementUpdatesRef.current.clear();
+      setElements({});
+      setLiveStrokes({});
+      setBoardClearCount((count) => count + 1);
+      return Promise.resolve(true);
     }
+    if (!socketRef.current?.connected) {
+      // A multiplayer room with no connection cannot be cleared safely: a
+      // local-only clear would be overwritten by the server state on reconnect.
+      return Promise.resolve(false);
+    }
+
+    return new Promise<boolean>((resolve) => {
+      socketRef.current
+        ?.timeout(5000)
+        .emit('clear-board-direct', (err: Error | null, response?: { ok: boolean }) => {
+          resolve(!err && response?.ok === true);
+        });
+    });
   }, [roomId]);
 
   const updateUserName = useCallback((name: string) => {
