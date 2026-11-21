@@ -172,6 +172,10 @@ export default function App() {
   const elementsRef = useRef<Record<string, CanvasElement>>(elements);
   elementsRef.current = elements;
 
+  // Mirrors the server rule: the host or the sole participant may clear a
+  // board without going through the vote-to-clear flow.
+  const canDirectClear = isSoloMode || isHost || Object.keys(users).length <= 1;
+
   // AI chat is persisted per board (room code, or "solo") so a reload brings
   // back the same conversation and diagram context.
   const aiBoardKey = roomId || 'solo';
@@ -257,6 +261,23 @@ export default function App() {
     },
     [bumpHistory]
   );
+
+  /** Record a board clear as one undoable batch instead of discarding history. */
+  const recordBoardClearHistory = useCallback(() => {
+    const previous = Object.values(elementsRef.current) as CanvasElement[];
+    if (previous.length === 0) {
+      resetHistory();
+      return;
+    }
+    pushHistory({
+      kind: 'batch',
+      created: [],
+      deleted: previous,
+      before: [],
+      after: [],
+      at: Date.now(),
+    });
+  }, [pushHistory, resetHistory]);
 
   const handleLogout = useCallback(async () => {
     await logout();
@@ -563,11 +584,15 @@ export default function App() {
         return;
       }
 
+      if (options.replaceBoard && !canDirectClear) {
+        addNotification('Only the room host can clear a shared board', 'warning');
+        return;
+      }
+
       if (options.replaceBoard) {
         aiClearGuardUntilRef.current = Date.now() + 2500;
+        recordBoardClearHistory();
         emitClearBoardDirect();
-        // The clear is intentional and not undoable; the AI turn itself is.
-        resetHistory();
       }
 
       applyAiElements(payload.sessionId, payload.elements);
@@ -614,8 +639,9 @@ export default function App() {
       addNotification,
       applyAiElements,
       applyAiSession,
+      canDirectClear,
       emitClearBoardDirect,
-      resetHistory,
+      recordBoardClearHistory,
     ]
   );
 
@@ -778,19 +804,19 @@ export default function App() {
       setConfirmModalState({
         isOpen: true,
         title: 'Clear Whiteboard?',
-        message: 'This will erase all strokes, sticky notes, text, shapes, and stickers from your canvas. This action cannot be undone.',
+        message: 'This will erase all strokes, sticky notes, text, shapes, and stickers from your canvas. You can undo this with Ctrl+Z.',
         confirmText: 'Clear Board',
         cancelText: 'Cancel',
         variant: 'danger',
         onConfirm: () => {
+          recordBoardClearHistory();
           emitClearBoardDirect();
-          resetHistory();
           addNotification('Whiteboard cleared', 'info');
           setConfirmModalState((prev) => ({ ...prev, isOpen: false }));
         },
       });
     }
-  }, [canWrite, users, elements, emitVoteClearStart, emitClearBoardDirect, addNotification, resetHistory]);
+  }, [canWrite, users, elements, emitVoteClearStart, emitClearBoardDirect, addNotification, recordBoardClearHistory]);
 
   // Export board as PNG (matches the current viewport pan & zoom)
   const handleExport = useCallback(() => {
@@ -1497,6 +1523,7 @@ export default function App() {
               }
         }
         authToken={token}
+        canClearBoard={canDirectClear}
       />
 
       {/* Docked follow-up chat for the current session (null session shows an empty state) */}

@@ -26,6 +26,7 @@ import {
 } from "./auth";
 import { connectDb, checkDbHealth } from "./db";
 import { resolveSocketIdentity } from "./socketIdentity";
+import { canDirectClearBoard } from "./boardClear";
 import {
   createOAuthState,
   verifyOAuthState,
@@ -1484,11 +1485,21 @@ async function startServer() {
       });
     });
 
-    // Direct clear (if user confirms solo or forced)
+    // Direct clear: only the host, or the sole participant of a room, may
+    // bypass the vote-to-clear flow. Editors must use the vote instead.
     socket.on("clear-board-direct", () => {
-      if (!currentRoomId || !currentUser || !checkCanWrite()) return;
+      if (!currentRoomId || !currentUser) return;
       const room = rooms.get(currentRoomId);
       if (!room) return;
+
+      if (!canDirectClearBoard(Object.keys(room.users).length, currentUser.isHost === true)) {
+        socket.emit("permission-denied", {
+          message: "Only the room host can clear the board directly. Start a vote to clear instead.",
+        });
+        return;
+      }
+      if (!checkCanWrite()) return;
+
       room.elements = {};
       void saveRoomElements(currentRoomId, {});
       io.to(currentRoomId).emit("board-cleared", {
