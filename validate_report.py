@@ -33,7 +33,8 @@ def validate():
     assert "WebRTC" in full_text
     assert "Socket.io" in full_text
     assert "PBKDF2" in full_text
-    assert "No formal automated test suite was identified in the analyzed repository." in full_text
+    assert "The server includes an automated test suite using Node.js's built-in test runner" in full_text
+    assert "No formal automated test suite was identified in the analyzed repository." not in full_text
     
     # Check Abstract word count
     abstract_match = re.search(r"ABSTRACT\s+―+\s+(.*?)\s+Keywords:", full_text, re.DOTALL)

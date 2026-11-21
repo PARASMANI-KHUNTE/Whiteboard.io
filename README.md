@@ -95,7 +95,7 @@ Most existing whiteboards force compromises: either you pay heavy per-seat month
   * Kick/eject disruptive participants with custom reasons.
   * Automatic host election/migration when the original room owner leaves.
 * **🔐 Complete Authentication Suite**:
-  * Secure Email & Password accounts with PBKDF2 hashing and unique 64-byte salts.
+  * Secure Email & Password accounts using PBKDF2-SHA512 (100,000 iterations, a unique 16-byte salt, and a 64-byte derived key).
   * **Google OAuth 2.0** with popup handling and direct URL hash redirect fallback (`#auth_token=`).
   * One-click Anonymous Guest identities with persistent session tokens.
 * **💾 Multi-Tier Storage**:
@@ -114,8 +114,8 @@ Most existing whiteboards force compromises: either you pay heavy per-seat month
 | **Artificial Intelligence**| Google Gemini 3.8 / 3.6 Flash, Local Ollama (llama3.2), Structured JSON Schema |
 | **Real-Time Signaling** | Socket.io Client, WebRTC `RTCPeerConnection` (Mesh) |
 | **Backend** | Node.js (ESM), Express 4, Socket.io Server |
-| **Database** | MongoDB 7 / MongoDB Atlas Native Node Driver (with in-memory fallback) |
-| **Security** | PBKDF2 Cryptographic Hashing, Rate Limiting, CORS Allowlist |
+| **Database** | MongoDB 7 / MongoDB Atlas Native Node Driver (required) |
+| **Security** | PBKDF2-SHA512 Password Hashing (100,000 iterations), 32-byte Random Bearer Tokens, Rate Limiting, CORS Allowlist |
 | **Hosting & CI/CD** | Render, Railway, Docker, Vercel |
 
 ---
@@ -134,9 +134,9 @@ For exhaustive technical guides, explore the dedicated documentation modules:
 ## ⚡ Quick Start (Local Development)
 
 ### Prerequisites
-* **Node.js**: v18.0.0 or higher
-* **npm**: v9.0.0 or higher
-* **MongoDB**: A running local MongoDB instance (`mongodb://127.0.0.1:27017`) or a free [MongoDB Atlas](https://www.mongodb.com/atlas) connection string (optional; runs in in-memory mode if unset).
+* **Node.js**: v20.19.0 or higher (22 LTS recommended — the MongoDB 7 driver requires >=20.19)
+* **npm**: v10.0.0 or higher
+* **MongoDB (required)**: A running local MongoDB instance (`mongodb://127.0.0.1:27017`) or a [MongoDB Atlas](https://www.mongodb.com/atlas) connection string. The server connects at startup and will not listen without a reachable MongoDB; there is no in-memory database fallback.
 
 ### 1. Clone & Install Dependencies
 ```bash
@@ -317,4 +317,4 @@ Deploying on **Render**, **Railway**, or a single VPS:
 
 ## 📄 License
 
-This project is licensed under the MIT License — see the repository for details.
+This project is licensed under the [MIT License](LICENSE).

@@ -86,7 +86,7 @@ Registers a new user account with hashed password storage.
       "color": "#3b82f6",
       "isGuest": false
     },
-    "token": "tok_9a8b7c6d5e4f3a2b1c"
+    "token": "9a8b7c6d5e4f3a2b1c9a8b7c6d5e4f3a2b1c9a8b7c6d5e4f3a2b1c9a8b7c6d"
   }
   ```
 
@@ -105,7 +105,7 @@ Authenticates an existing user with email or username.
   {
     "success": true,
     "user": { ... },
-    "token": "tok_9a8b7c6d5e4f3a2b1c"
+    "token": "9a8b7c6d5e4f3a2b1c9a8b7c6d5e4f3a2b1c9a8b7c6d5e4f3a2b1c9a8b7c6d"
   }
   ```
 
@@ -129,7 +129,7 @@ Creates or continues an anonymous guest identity.
       "color": "#10b981",
       "isGuest": true
     },
-    "token": "tok_guest_token"
+    "token": "c1d2e3f405162738495a6b7c8d9e0f1c2d3e4f5061728394a5b6c7d8e9f0a1b2"
   }
   ```
 
@@ -154,6 +154,7 @@ Validates an active session token and returns the current user profile.
 #### `GET /api/auth/google/url`
 Generates Google OAuth 2.0 authorization URL.
 * **Query Parameters**: `?origin=https://your-frontend.com`
+* **Side effect**: Sets the `HttpOnly`, `SameSite=Lax` cookie `wb_oauth_nonce` (also `Secure` on HTTPS) with a 10-minute lifetime. The cookie nonce is embedded in the base64url-encoded `state` value together with the redirect URI and trusted return origin. The client must call this endpoint with `credentials: 'include'`, and the frontend origin must be in the server's CORS allowlist.
 * **Response (`200 OK`)**:
   ```json
   {
@@ -165,6 +166,8 @@ Generates Google OAuth 2.0 authorization URL.
 
 #### `GET /auth/google/callback`
 Receives the authorization code from Google, exchanges it for an access token, fetches the user's profile, creates or links the MongoDB user account, and returns an HTML script that transmits the token to the parent window or redirects with `#auth_token=`.
+
+The callback always clears `wb_oauth_nonce` and verifies that the returned `state` is well formed, unexpired, and contains the same nonce. A missing, replayed, or mismatched state returns `400 Bad Request` HTML and posts `{ type: 'GOOGLE_OAUTH_ERROR', error: 'Invalid or expired sign-in request' }` to the opener when available; otherwise the page redirects to `/` after a short delay. The token exchange also refuses a redirect URI that differs from the one the server originally issued.
 
 ---
 
@@ -275,7 +278,7 @@ Generates structured canvas elements from natural language prompts using Gemini 
 * **Request Body**:
   ```json
   {
-    "prompt": "User Authentication & OAuth 2.0 Flow with JWT tokens",
+    "prompt": "User Authentication & OAuth 2.0 Flow with opaque bearer tokens",
     "type": "flowchart",
     "detail": "balanced",
     "direction": "horizontal",
@@ -302,7 +305,7 @@ Generates structured canvas elements from natural language prompts using Gemini 
     "detail": "balanced",
     "direction": "horizontal",
     "graph": {
-      "summary": "OAuth 2.0 authorization code grant flow with JWT verification",
+      "summary": "OAuth 2.0 authorization code grant flow with server-issued bearer tokens",
       "nodes": [
         {
           "id": "node_1",
@@ -435,7 +438,8 @@ Clients establish a connection to `/socket.io/` using WebSocket with HTTP long-p
 
 | Event Name | Payload | Description |
 | :--- | :--- | :--- |
-| `room-init` | `{ roomId, roomName, elements, users, voteToClear, yourRole, canWrite, isHost, isLocked }` | Initial synchronization payload sent upon joining. |
+| `room-init` | `{ roomId, roomName, elements, users, creatorId, creatorName, voteToClear, yourRole, canWrite, isHost, isLocked }` | Initial synchronization payload sent upon joining. `creatorId`/`creatorName` identify the room owner. |
+| `room-error` | `{ message }` | Rejects `join-room` when the room code is invalid or the submitted identity/session is no longer valid. |
 | `user-joined` | `RemoteUser` | Emitted when a new user joins the room. |
 | `user-left` | `{ userId }` | Emitted when a user disconnects or leaves. |
 | `stroke-live-started` | `{ userId, strokeId, point, color, size, isHighlighter }` | Real-time stroke starting by another participant. |
@@ -448,6 +452,9 @@ Clients establish a connection to `/socket.io/` using WebSocket with HTTP long-p
 | `cursor-moved` | `{ userId, cursor: { x, y, tool, isDrawing } }` | Updates remote multiplayer cursor position. |
 | `audio-level-updated` | `{ userId, level, isSpeaking }` | Triggers the green speaking ring around user cursors. |
 | `voice-status-updated` | `{ userId, isMuted, isDeafened, voiceConnected }` | Updates participant mic/deafen badges. |
+| `voice-offer` | `{ fromUserId, offer }` | Delivers a WebRTC SDP offer; `fromUserId` is the authenticated sender set by the server. |
+| `voice-answer` | `{ fromUserId, answer }` | Delivers a WebRTC SDP answer; `fromUserId` is the authenticated sender set by the server. |
+| `voice-ice-candidate` | `{ fromUserId, candidate }` | Delivers a WebRTC ICE candidate; `fromUserId` is the authenticated sender set by the server. |
 | `permission-updated` | `{ canWrite, role, message }` | Sent specifically to a user when their permissions change. |
 | `user-permission-changed` | `{ userId, canWrite, role }` | Broadcast to room so participant lists reflect current roles. |
 | `room-lock-changed` | `{ isLocked, users }` | Notifies users that the board was locked/unlocked. |

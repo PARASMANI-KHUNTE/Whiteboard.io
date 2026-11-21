@@ -3,13 +3,16 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=20.19.0"
+  },
   "main": "index.ts",
   "scripts": {
     "dev": "nodemon",
     "server": "nodemon",
     "start": "node dist/server.js",
     "start:dev": "tsx index.ts",
-    "test": "tsx --test socketIdentity.test.ts oauthState.test.ts tokenExpiry.test.ts",
+    "test": "tsx --test socketIdentity.test.ts oauthState.test.ts tokenExpiry.test.ts boardClear.test.ts socketPayload.test.ts socketHandler.test.ts",
     "build": "esbuild index.ts --bundle --platform=node --format=esm --packages=external --sourcemap --outfile=dist/server.js",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
