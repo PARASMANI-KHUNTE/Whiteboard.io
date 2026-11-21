@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { AuthUser, SessionRoom } from '../types';
 import { BACKEND_URL } from '../config';
-import { getGuestIdentityId } from '../utils/guestIdentity';
+import { getGuestIdentity } from '../utils/guestIdentity';
 
 export type { AuthUser, SessionRoom };
 
@@ -73,6 +73,26 @@ export function useAuth() {
     localStorage.removeItem(USER_KEY);
   }, []);
 
+  // Continue as Guest action. Declared before the auth check below so the
+  // initial load can provision a server-issued guest session.
+  const continueAsGuest = useCallback(async (name?: string, color?: string): Promise<{ success: boolean; error?: string }> => {
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/auth/guest`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, color }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        return { success: false, error: data.error || 'Guest setup failed' };
+      }
+      saveAuth(data.user, data.token);
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message || 'Network error' };
+    }
+  }, [saveAuth]);
+
   // Fetch current user on mount (with support for OAuth redirect tokens)
   useEffect(() => {
     const checkAuth = async () => {
@@ -114,6 +134,10 @@ export function useAuth() {
 
       const currentToken = incomingToken || localStorage.getItem(TOKEN_KEY);
       if (!currentToken) {
+        // Room identity must be issued by the server. Provision a guest session
+        // before the socket connects so joins never carry a client-made id.
+        const guest = getGuestIdentity();
+        await continueAsGuest(guest.name, guest.color);
         setIsLoading(false);
         return;
       }
@@ -138,7 +162,7 @@ export function useAuth() {
     };
 
     checkAuth();
-  }, [clearAuth]);
+  }, [clearAuth, continueAsGuest]);
 
   // Global window message listener for OAuth popups
   useEffect(() => {
@@ -226,25 +250,6 @@ export function useAuth() {
       return { success: true };
     } catch (err: any) {
       return { success: false, error: err.message || 'Network error during registration' };
-    }
-  };
-
-  // Continue as Guest action
-  const continueAsGuest = async (name?: string, color?: string): Promise<{ success: boolean; error?: string }> => {
-    try {
-      const res = await fetch(`${BACKEND_URL}/api/auth/guest`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, color }),
-      });
-      const data = await res.json();
-      if (!res.ok || !data.success) {
-        return { success: false, error: data.error || 'Guest setup failed' };
-      }
-      saveAuth(data.user, data.token);
-      return { success: true };
-    } catch (err: any) {
-      return { success: false, error: err.message || 'Network error' };
     }
   };
 
@@ -367,8 +372,6 @@ export function useAuth() {
           'Content-Type': 'application/json',
           ...(currentToken ? { Authorization: `Bearer ${currentToken}` } : {}),
         },
-        // Anonymous hosts prove ownership with their stable guest identity.
-        body: JSON.stringify({ creatorId: getGuestIdentityId() }),
       });
       const data = await res.json();
       if (!res.ok || !data.success) {

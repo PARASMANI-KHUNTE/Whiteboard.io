@@ -132,8 +132,6 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
   const connectErrorNotifiedRef = useRef<boolean>(false);
   const currentUserRef = useRef<RemoteUser>(currentUser);
   currentUserRef.current = currentUser;
-  const authTokenRef = useRef<string | null | undefined>(authToken);
-  authTokenRef.current = authToken;
   const isHostRef = useRef<boolean>(isHost);
   isHostRef.current = isHost;
   const soloHydratedRef = useRef<boolean>(false);
@@ -165,11 +163,11 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
     currentUserRef.current = nextUser;
     setCurrentUser(nextUser);
 
-    if (socketRef.current?.connected && roomId) {
+    if (authToken && socketRef.current?.connected && roomId) {
       socketRef.current.emit('join-room', {
         roomId,
         user: nextUser,
-        token: authToken || undefined,
+        token: authToken,
       });
     }
   }, [authUser, authToken, roomId]);
@@ -288,9 +286,11 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
     }
   }, [roomId]);
 
-  // Connect socket
+  // Connect socket. A server-issued session token is required: joining without
+  // one would force the server to trust a client-supplied (and therefore
+  // spoofable) guest id.
   useEffect(() => {
-    if (!roomId) {
+    if (!roomId || !authToken) {
       setIsConnected(false);
       setIsHost(true);
       setCanWrite(true);
@@ -337,7 +337,7 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
       socket.emit('join-room', {
         roomId,
         user: currentUserRef.current,
-        token: authTokenRef.current || undefined,
+        token: authToken,
       });
     });
 
@@ -694,7 +694,7 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
       socket.disconnect();
       socketRef.current = null;
     };
-  }, [roomId, addNotification, flushElementUpdates]);
+  }, [roomId, authToken, addNotification, flushElementUpdates]);
 
   // Emitters
   const emitStrokeLiveStart = useCallback((strokeId: string, point: Point, color: string, size: number, isHighlighter?: boolean) => {
@@ -818,27 +818,27 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
     const updatedUser = { ...currentUserRef.current, name: trimmed };
     setCurrentUser(updatedUser);
     // Re-join with updated identity
-    if (socketRef.current?.connected && roomId) {
+    if (authToken && socketRef.current?.connected && roomId) {
       socketRef.current.emit('join-room', {
         roomId,
         user: updatedUser,
-        token: authTokenRef.current || undefined,
+        token: authToken,
       });
     }
-  }, [roomId]);
+  }, [roomId, authToken]);
 
   const updateUserColor = useCallback((color: string) => {
     saveGuestIdentityColor(color);
     const updatedUser = { ...currentUserRef.current, color };
     setCurrentUser(updatedUser);
-    if (socketRef.current?.connected && roomId) {
+    if (authToken && socketRef.current?.connected && roomId) {
       socketRef.current.emit('join-room', {
         roomId,
         user: updatedUser,
-        token: authTokenRef.current || undefined,
+        token: authToken,
       });
     }
-  }, [roomId]);
+  }, [roomId, authToken]);
 
   const switchRoom = useCallback((newRoomId: string | null) => {
     isSoloMigrationRef.current = false;
