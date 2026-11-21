@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import { isTokenExpired, TOKEN_TTL_MS } from './tokenExpiry';
 import {
   getUsersCollection,
   getTokensCollection,
@@ -92,8 +93,6 @@ export async function verifyPassword(password: string, salt: string, hash: strin
 export function generateToken(): string {
   return crypto.randomBytes(32).toString('hex');
 }
-
-const TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
 function buildTokenDoc(token: string, userId: string) {
   const now = Date.now();
@@ -343,9 +342,9 @@ export async function getUserByToken(token: string): Promise<SanitizedUser | nul
   const tokenDoc = await tokens.findOne({ token: cleanToken });
   if (!tokenDoc) return null;
 
-  // Enforce session expiry even if the TTL index has not run yet.
-  const issuedAt = Number(tokenDoc.createdAt) || 0;
-  if (!issuedAt || Date.now() - issuedAt > TOKEN_TTL_MS) {
+  // Enforce sliding expiry even if the TTL index has not run yet. Using the
+  // original issue time here would log out active users at the old deadline.
+  if (isTokenExpired(tokenDoc)) {
     await tokens.deleteOne({ token: cleanToken });
     return null;
   }
