@@ -3,6 +3,7 @@ import express from "express";
 import http from "http";
 import path from "path";
 import fs from "fs";
+import crypto from "crypto";
 import { Server as SocketIOServer, Socket } from "socket.io";
 import {
   registerUser,
@@ -25,6 +26,12 @@ import {
 } from "./auth";
 import { connectDb, checkDbHealth } from "./db";
 import { resolveSocketIdentity } from "./socketIdentity";
+import {
+  createOAuthState,
+  verifyOAuthState,
+  OAUTH_NONCE_COOKIE,
+  OAUTH_STATE_TTL_MS,
+} from "./oauthState";
 import { generateDiagram, reviseDiagram } from "./ai/generate";
 import { getProviderSummary } from "./ai/providers";
 import {
@@ -193,6 +200,13 @@ function resolveTrustedOrigin(rawOrigin?: string): string {
     }
   } catch {}
   return (process.env.APP_URL || "http://localhost:5173").replace(/\/$/, "");
+}
+
+function getGoogleRedirectUri(req: express.Request): string {
+  const protocol = req.get("x-forwarded-proto") || req.protocol || "http";
+  const host = req.get("host") || `localhost:${PORT}`;
+  const serverOrigin = (process.env.SERVER_URL || `${protocol}://${host}`).replace(/\/$/, "");
+  return (process.env.GOOGLE_CALLBACK_URL || `${serverOrigin}/auth/google/callback`).trim();
 }
 
 // In-memory rate limiter to protect against credential stuffing / brute-force.
@@ -489,10 +503,7 @@ async function startServer() {
     const trustedOrigin = resolveTrustedOrigin(reqOrigin);
 
     // The callback endpoint /auth/google/callback is hosted on this backend server
-    const protocol = req.get("x-forwarded-proto") || req.protocol || "http";
-    const host = req.get("host") || `localhost:${PORT}`;
-    const serverOrigin = (process.env.SERVER_URL || `${protocol}://${host}`).replace(/\/$/, "");
-    const redirectUri = (process.env.GOOGLE_CALLBACK_URL || `${serverOrigin}/auth/google/callback`).trim();
+    const redirectUri = getGoogleRedirectUri(req);
     const clientId = process.env.GOOGLE_CLIENT_ID?.trim();
 
     if (!clientId) {
@@ -504,7 +515,17 @@ async function startServer() {
       return;
     }
 
-    const state = Buffer.from(JSON.stringify({ redirectUri, origin: trustedOrigin })).toString("base64url");
+    // Bind the flow to this browser with a random nonce kept in an HttpOnly
+    // cookie. The callback rejects any state whose nonce does not match.
+    const nonce = crypto.randomBytes(24).toString("base64url");
+    const state = createOAuthState({ redirectUri, origin: trustedOrigin, nonce, issuedAt: Date.now() });
+    res.cookie(OAUTH_NONCE_COOKIE, nonce, {
+      httpOnly: true,
+      sameSite: "lax",
+      secure: req.secure || req.get("x-forwarded-proto") === "https",
+      maxAge: OAUTH_STATE_TTL_MS,
+      path: "/",
+    });
 
     const params = new URLSearchParams({
       client_id: clientId,
@@ -528,15 +549,36 @@ async function startServer() {
   app.get(["/auth/google/callback", "/auth/google/callback/"], async (req, res) => {
     const { code, error, state } = req.query;
 
-    let targetOrigin = resolveTrustedOrigin();
-    if (state && typeof state === 'string') {
-      try {
-        const decoded = JSON.parse(Buffer.from(state, 'base64url').toString('utf-8'));
-        if (decoded.origin) {
-          targetOrigin = resolveTrustedOrigin(decoded.origin);
-        }
-      } catch {}
+    // The nonce is single-use and must match the cookie set when this browser
+    // started the flow. Without this check an attacker could replay their own
+    // OAuth result in a victim's browser (login CSRF).
+    const validState = verifyOAuthState(state, req.headers.cookie);
+    res.clearCookie(OAUTH_NONCE_COOKIE, { path: "/" });
+
+    if (!validState) {
+      const safeTargetOriginJs = safeJsonForScript(resolveTrustedOrigin());
+      res.status(400).send(`
+        <!DOCTYPE html>
+        <html>
+          <head><title>Authentication Failed</title></head>
+          <body style="font-family:sans-serif;padding:30px;text-align:center;background:#fff1f2;color:#9f1239;">
+            <h3>Sign-In Request Invalid</h3>
+            <p>This sign-in request has expired or could not be verified. Please try again.</p>
+            <script>
+              if (window.opener) {
+                window.opener.postMessage({ type: 'GOOGLE_OAUTH_ERROR', error: 'Invalid or expired sign-in request' }, ${safeTargetOriginJs});
+                setTimeout(() => window.close(), 1500);
+              } else {
+                setTimeout(() => { window.location.href = '/'; }, 2000);
+              }
+            </script>
+          </body>
+        </html>
+      `);
+      return;
     }
+
+    const targetOrigin = resolveTrustedOrigin(validState.origin);
 
     if (error || !code) {
       const rawErrMsg = (error as string) || "Authorization was cancelled or code was not returned";
@@ -565,15 +607,12 @@ async function startServer() {
     }
 
     try {
-      // Decode state to retrieve the exact redirectUri used during the authorization request
-      let redirectUri = `${targetOrigin}/auth/google/callback`;
-      if (state && typeof state === 'string') {
-        try {
-          const decoded = JSON.parse(Buffer.from(state, 'base64url').toString('utf-8'));
-          if (decoded.redirectUri) {
-            redirectUri = decoded.redirectUri;
-          }
-        } catch {}
+      // Use only the redirect uri this server issued; never trust a callback
+      // payload to choose where the authorization code is exchanged.
+      const expectedRedirectUri = getGoogleRedirectUri(req);
+      const redirectUri = validState.redirectUri === expectedRedirectUri ? validState.redirectUri : "";
+      if (!redirectUri) {
+        throw new Error("Invalid OAuth callback configuration");
       }
 
       const clientId = process.env.GOOGLE_CLIENT_ID?.trim();
