@@ -263,21 +263,20 @@ export default function App() {
   );
 
   /** Record a board clear as one undoable batch instead of discarding history. */
-  const recordBoardClearHistory = useCallback(() => {
-    const previous = Object.values(elementsRef.current) as CanvasElement[];
-    if (previous.length === 0) {
-      resetHistory();
-      return;
-    }
-    pushHistory({
-      kind: 'batch',
-      created: [],
-      deleted: previous,
-      before: [],
-      after: [],
-      at: Date.now(),
-    });
-  }, [pushHistory, resetHistory]);
+  const recordBoardClearHistory = useCallback(
+    (previous: CanvasElement[]) => {
+      if (previous.length === 0) return;
+      pushHistory({
+        kind: 'batch',
+        created: [],
+        deleted: previous,
+        before: [],
+        after: [],
+        at: Date.now(),
+      });
+    },
+    [pushHistory]
+  );
 
   const handleLogout = useCallback(async () => {
     await logout();
@@ -578,7 +577,7 @@ export default function App() {
   );
 
   const handleAiGenerated = useCallback(
-    (payload: AiDiagramPayload, options: { origin: { x: number; y: number }; replaceBoard: boolean }) => {
+    async (payload: AiDiagramPayload, options: { origin: { x: number; y: number }; replaceBoard: boolean }) => {
       if (!canWrite) {
         addNotification('You do not have permission to edit this board', 'warning');
         return;
@@ -591,8 +590,18 @@ export default function App() {
 
       if (options.replaceBoard) {
         aiClearGuardUntilRef.current = Date.now() + 2500;
-        recordBoardClearHistory();
-        emitClearBoardDirect();
+        // Capture before the server broadcast clears local state, and wait for
+        // authorization: a participant may have joined while AI was in flight.
+        const previous = Object.values(elementsRef.current) as CanvasElement[];
+        const cleared = await emitClearBoardDirect();
+        if (cleared) {
+          recordBoardClearHistory(previous);
+        } else {
+          addNotification(
+            'Board was not cleared (only the host can clear a shared board); inserted without replacing.',
+            'warning'
+          );
+        }
       }
 
       applyAiElements(payload.sessionId, payload.elements);
@@ -809,8 +818,8 @@ export default function App() {
         cancelText: 'Cancel',
         variant: 'danger',
         onConfirm: () => {
-          recordBoardClearHistory();
-          emitClearBoardDirect();
+          recordBoardClearHistory(Object.values(elementsRef.current) as CanvasElement[]);
+          void emitClearBoardDirect();
           addNotification('Whiteboard cleared', 'info');
           setConfirmModalState((prev) => ({ ...prev, isOpen: false }));
         },

@@ -801,14 +801,28 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
     }
   }, [roomId]);
 
-  const emitClearBoardDirect = useCallback(() => {
-    pendingElementUpdatesRef.current.clear();
-    setElements({});
-    setLiveStrokes({});
-    setBoardClearCount((count) => count + 1);
-    if (socketRef.current?.connected && roomId) {
-      socketRef.current.emit('clear-board-direct');
+  /**
+   * Resolves true only when the server confirmed the clear. In multiplayer the
+   * server's `board-cleared` broadcast clears local state; we must not clear
+   * optimistically or a rejected request would desync the client from the room.
+   */
+  const emitClearBoardDirect = useCallback((): Promise<boolean> => {
+    if (!socketRef.current?.connected || !roomId) {
+      // Solo canvas: there is no server to acknowledge.
+      pendingElementUpdatesRef.current.clear();
+      setElements({});
+      setLiveStrokes({});
+      setBoardClearCount((count) => count + 1);
+      return Promise.resolve(true);
     }
+
+    return new Promise<boolean>((resolve) => {
+      socketRef.current
+        ?.timeout(5000)
+        .emit('clear-board-direct', (err: Error | null, response?: { ok: boolean }) => {
+          resolve(!err && response?.ok === true);
+        });
+    });
   }, [roomId]);
 
   const updateUserName = useCallback((name: string) => {

@@ -1487,26 +1487,48 @@ async function startServer() {
 
     // Direct clear: only the host, or the sole participant of a room, may
     // bypass the vote-to-clear flow. Editors must use the vote instead.
-    socket.on("clear-board-direct", () => {
-      if (!currentRoomId || !currentUser) return;
-      const room = rooms.get(currentRoomId);
-      if (!room) return;
+    socket.on(
+      "clear-board-direct",
+      (ack?: (result: { ok: boolean }) => void) => {
+        const respond = (ok: boolean) => {
+          try {
+            ack?.({ ok });
+          } catch (_) {
+            // Client disconnected before the acknowledgment arrived.
+          }
+        };
 
-      if (!canDirectClearBoard(Object.keys(room.users).length, currentUser.isHost === true)) {
-        socket.emit("permission-denied", {
-          message: "Only the room host can clear the board directly. Start a vote to clear instead.",
+        if (!currentRoomId || !currentUser) {
+          respond(false);
+          return;
+        }
+        const room = rooms.get(currentRoomId);
+        if (!room) {
+          respond(false);
+          return;
+        }
+
+        if (!canDirectClearBoard(Object.keys(room.users).length, currentUser.isHost === true)) {
+          socket.emit("permission-denied", {
+            message: "Only the room host can clear the board directly. Start a vote to clear instead.",
+          });
+          respond(false);
+          return;
+        }
+        if (!checkCanWrite()) {
+          respond(false);
+          return;
+        }
+
+        room.elements = {};
+        void saveRoomElements(currentRoomId, {});
+        io.to(currentRoomId).emit("board-cleared", {
+          initiatorName: currentUser.name,
+          wasVoted: false,
         });
-        return;
+        respond(true);
       }
-      if (!checkCanWrite()) return;
-
-      room.elements = {};
-      void saveRoomElements(currentRoomId, {});
-      io.to(currentRoomId).emit("board-cleared", {
-        initiatorName: currentUser.name,
-        wasVoted: false,
-      });
-    });
+    );
 
     // Disconnect
     socket.on("disconnect", () => {
