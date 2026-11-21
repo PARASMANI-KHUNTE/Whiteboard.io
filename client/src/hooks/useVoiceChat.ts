@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
 import { Socket } from 'socket.io-client';
 import { RemoteUser } from '../types';
 
@@ -90,6 +90,23 @@ export function useVoiceChat({
   const remoteAudioElementsRef = useRef<Record<string, HTMLAudioElement>>({});
   // ICE candidate queue to prevent "remote description was null" race condition
   const pendingCandidatesRef = useRef<Record<string, RTCIceCandidateInit[]>>({});
+
+  // Voice belongs to one room/socket. Track the active pair so a room switch
+  // tears it down and an in-flight getUserMedia cannot resurrect it later.
+  const voiceRoomRef = useRef<string | null>(roomId);
+  const voiceSocketRef = useRef<Socket | null>(socket);
+  const voiceEpochRef = useRef(0);
+
+  // Notify peers on the socket we are leaving before switching/reconnecting.
+  const announceVoiceLeft = useCallback((target: Socket | null) => {
+    try {
+      if (target?.connected) {
+        target.emit('voice-status-update', { voiceConnected: false, isMuted: true });
+      }
+    } catch (_) {
+      // Socket already torn down; nothing to announce.
+    }
+  }, []);
 
   // Helper to ensure an active AudioContext
   const getOrCreateAudioContext = useCallback(() => {
@@ -187,6 +204,27 @@ export function useVoiceChat({
     setIsSpeaking(false);
     setActiveSpeakers([]);
   }, []);
+
+  // A room change (or socket reconnect) invalidates every voice resource: the
+  // mic, peers and "connected" UI state must never leak into the new room.
+  // Layout effect so the notice reaches the old socket before useSocket's
+  // passive cleanup disconnects it.
+  useLayoutEffect(() => {
+    const previousRoom = voiceRoomRef.current;
+    const previousSocket = voiceSocketRef.current;
+    const changed = previousRoom !== roomId || previousSocket !== socket;
+
+    voiceRoomRef.current = roomId;
+    voiceSocketRef.current = socket;
+
+    if (!changed) return;
+
+    voiceEpochRef.current += 1;
+    announceVoiceLeft(previousSocket);
+    cleanupAll();
+    setError(null);
+    setIsIframeRestricted(false);
+  }, [roomId, socket, cleanupAll, announceVoiceLeft]);
 
   // Flush queued ICE candidates after remote description is set
   const flushPendingCandidates = useCallback(async (targetUserId: string, pc: RTCPeerConnection) => {
@@ -336,10 +374,16 @@ export function useVoiceChat({
 
   // Start real microphone voice chat
   const startVoiceChat = useCallback(async () => {
-    if (!roomId) {
+    // Read the room from a ref: the solo→multiplayer flow schedules this call
+    // right after convertToMultiplayerRoom(), so the closure's roomId is stale.
+    const activeRoom = voiceRoomRef.current;
+    if (!activeRoom) {
       if (onNotification) onNotification('Please join or create a multiplayer room to use voice chat.', 'warning');
       return false;
     }
+
+    const startEpoch = voiceEpochRef.current;
+    const startRoom = activeRoom;
 
     cleanupAll();
     setError(null);
@@ -361,6 +405,13 @@ export function useVoiceChat({
           autoGainControl: true,
         },
       });
+
+      // The room/socket may have changed while the permission prompt was open.
+      // Never attach a stream from the old room to the new one.
+      if (voiceEpochRef.current !== startEpoch || voiceRoomRef.current !== startRoom) {
+        stream.getTracks().forEach((track) => track.stop());
+        return false;
+      }
 
       localStreamRef.current = stream;
 
@@ -792,9 +843,10 @@ export function useVoiceChat({
   // Clean up when unmounting
   useEffect(() => {
     return () => {
+      announceVoiceLeft(voiceSocketRef.current);
       cleanupAll();
     };
-  }, [cleanupAll]);
+  }, [cleanupAll, announceVoiceLeft]);
 
   return {
     isVoiceConnected,
