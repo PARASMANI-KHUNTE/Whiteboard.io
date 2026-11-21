@@ -280,7 +280,10 @@ export function useAuth() {
     message?: string;
   }> => {
     try {
-      const urlRes = await fetch(`${BACKEND_URL}/api/auth/google/url?origin=${encodeURIComponent(window.location.origin)}`);
+      const urlRes = await fetch(`${BACKEND_URL}/api/auth/google/url?origin=${encodeURIComponent(window.location.origin)}`, {
+        // The server sets an HttpOnly nonce cookie that the callback verifies.
+        credentials: 'include',
+      });
       const urlData = await urlRes.json();
 
       if (urlData.configured && urlData.url) {
