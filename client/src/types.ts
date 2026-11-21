@@ -18,6 +18,7 @@ export interface DrawingStroke {
   color: string;
   size: number;
   isHighlighter?: boolean;
+  isLocked?: boolean;
   userId: string;
   createdAt: number;
 }
@@ -34,6 +35,7 @@ export interface StickyNote {
   userId: string;
   userName: string;
   updatedAt: number;
+  isLocked?: boolean;
   /** Explicit stacking order within the element's own layer. */
   zIndex?: number;
 }
@@ -51,6 +53,7 @@ export interface TextElement {
   fontStyle?: 'normal' | 'italic';
   textDecoration?: 'none' | 'underline';
   textAlign?: 'left' | 'center' | 'right';
+  isLocked?: boolean;
   userId: string;
   userName: string;
   updatedAt: number;
@@ -116,6 +119,7 @@ export interface WireElement {
   arrowStart?: boolean;
   arrowEnd?: boolean;
   label?: string;
+  isLocked?: boolean;
   userId: string;
   userName?: string;
   updatedAt: number;

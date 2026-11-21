@@ -35,8 +35,15 @@ import {
   ChevronUp,
   ChevronDown,
   ChevronsDown,
+  Lock,
+  Unlock,
 } from 'lucide-react';
 import { getAdaptiveDisplayColor, isColorBlack, isColorWhite } from '../utils/themeColors';
+import {
+  isElementLocked,
+  setElementLocked,
+  translateElement,
+} from '../utils/elementMutations';
 import { getElementBounds, getElementAnchors, routeDraftWire } from '../utils/wireGeometry';
 import { SpatialIndex, IndexedElement } from '../utils/spatialIndex';
 import { writeClipboard, readClipboard, cloneElementsForPaste, hasClipboardContent } from '../utils/clipboard';
@@ -74,6 +81,8 @@ interface CanvasProps {
   onElementsBatchCreate?: (elements: CanvasElement[]) => void;
   onUndo?: () => void;
   onRedo?: () => void;
+  /** Ends the current coalescing window so the next edit is a separate undo step. */
+  onHistoryBarrier?: () => void;
   onNotify?: (message: string, type?: 'info' | 'success' | 'warning') => void;
   onCursorMove: (cursor: { x: number; y: number; tool?: ToolType; isDrawing?: boolean }) => void;
   onStrokeLiveStart: (strokeId: string, point: Point, color: string, size: number, isHighlighter?: boolean) => void;
@@ -129,6 +138,7 @@ export const Canvas: React.FC<CanvasProps> = ({
   onElementsBatchCreate,
   onUndo,
   onRedo,
+  onHistoryBarrier,
   onNotify,
   onCursorMove,
   onStrokeLiveStart,
@@ -209,6 +219,13 @@ export const Canvas: React.FC<CanvasProps> = ({
   const elementsRef = useRef<Record<string, CanvasElement>>(elements);
   elementsRef.current = elements;
 
+  // Snapshot taken when a multi-selection drag starts. Absolute deltas are
+  // applied to this snapshot so throttled moves never compound on each other.
+  const selectionDragRef = useRef<{
+    base: Map<string, CanvasElement>;
+    lastDelta: Point;
+  } | null>(null);
+
   // Throttled cursor emission
   const lastCursorEmitRef = useRef<number>(0);
 
@@ -286,13 +303,20 @@ export const Canvas: React.FC<CanvasProps> = ({
   // Selection management helpers
   const handleSelectElement = useCallback((id: string, isMulti = false) => {
     setSelectedElementIds((prev) => {
-      const next = new Set(isMulti ? prev : []);
-      if (isMulti && next.has(id)) {
-        next.delete(id);
-      } else {
-        next.add(id);
+      if (isMulti) {
+        const next = new Set(prev);
+        if (next.has(id)) {
+          next.delete(id);
+        } else {
+          next.add(id);
+        }
+        return next;
       }
-      return next;
+
+      // Keep an existing multi-selection intact. This is what lets a user grab
+      // any selected object and drag the whole group; clicking empty canvas or
+      // an unselected object still collapses the selection.
+      return prev.has(id) ? prev : new Set([id]);
     });
   }, []);
 
@@ -345,11 +369,78 @@ export const Canvas: React.FC<CanvasProps> = ({
     }
   }, [selectedElementIds, cloneElementWithOffset, onElementCreate]);
 
+  // ---------------------------------------------------------------------------
+  // Multi-selection move and lock
+  // ---------------------------------------------------------------------------
+
+  const beginSelectionDrag = useCallback(() => {
+    if (!canWrite) return;
+    const base = new Map<string, CanvasElement>();
+    selectedElementIds.forEach((id) => {
+      const element = elementsRef.current[id];
+      // Wires follow their endpoints and locked elements never move.
+      if (element && element.type !== 'wire' && !isElementLocked(element)) {
+        base.set(id, element);
+      }
+    });
+    selectionDragRef.current = { base, lastDelta: { x: 0, y: 0 } };
+  }, [canWrite, selectedElementIds]);
+
+  const moveSelectionByDelta = useCallback(
+    (deltaX: number, deltaY: number) => {
+      const drag = selectionDragRef.current;
+      if (!drag || (deltaX === drag.lastDelta.x && deltaY === drag.lastDelta.y)) return;
+
+      const now = Date.now();
+      drag.base.forEach((element) => {
+        onElementUpdate(translateElement(element, deltaX, deltaY, now));
+      });
+      drag.lastDelta = { x: deltaX, y: deltaY };
+    },
+    [onElementUpdate]
+  );
+
+  const endSelectionDrag = useCallback(() => {
+    selectionDragRef.current = null;
+  }, []);
+
+  const handleSetSelectionLock = useCallback(
+    (locked: boolean) => {
+      if (!canWrite || selectedElementIds.size === 0) return;
+
+      // A lock change is a discrete action: give it its own undo step instead
+      // of merging it into a drag that just finished.
+      onHistoryBarrier?.();
+      const now = Date.now();
+      let changed = 0;
+      selectedElementIds.forEach((id) => {
+        const element = elementsRef.current[id];
+        if (!element || isElementLocked(element) === locked) return;
+        onElementUpdate(setElementLocked(element, locked, now));
+        changed += 1;
+      });
+
+      if (changed > 0) {
+        onNotify?.(
+          `${locked ? 'Locked' : 'Unlocked'} ${changed} object${changed === 1 ? '' : 's'}`,
+          'success'
+        );
+      }
+    },
+    [canWrite, selectedElementIds, onElementUpdate, onHistoryBarrier, onNotify]
+  );
+
   const handleDeleteSelected = useCallback(() => {
     if (selectedElementIds.size === 0) return;
-    const idsToDeleteSet = new Set(selectedElementIds);
+    const idsToDeleteSet = new Set<string>();
+    selectedElementIds.forEach((id) => {
+      const element = elementsRef.current[id];
+      if (element && !isElementLocked(element)) idsToDeleteSet.add(id);
+    });
+    if (idsToDeleteSet.size === 0) return;
+
     Object.values(elementsRef.current).forEach((el) => {
-      if (el.type === 'wire') {
+      if (el.type === 'wire' && !isElementLocked(el)) {
         const w = el as WireElement;
         if (idsToDeleteSet.has(w.fromId) || idsToDeleteSet.has(w.toId)) {
           idsToDeleteSet.add(w.id);
@@ -434,21 +525,8 @@ export const Canvas: React.FC<CanvasProps> = ({
       if (!canWrite || selectedElementIds.size === 0) return;
       selectedElementIds.forEach((id) => {
         const el = elementsRef.current[id];
-        if (!el) return;
-        if (el.type === 'stroke') {
-          onElementUpdate({
-            ...el,
-            points: el.points.map((point) => ({ x: point.x + dx, y: point.y + dy })),
-            createdAt: el.createdAt,
-          });
-        } else if (el.type !== 'wire') {
-          onElementUpdate({
-            ...el,
-            x: el.x + dx,
-            y: el.y + dy,
-            updatedAt: Date.now(),
-          } as CanvasElement);
-        }
+        if (!el || isElementLocked(el)) return;
+        onElementUpdate(translateElement(el, dx, dy));
       });
     },
     [canWrite, selectedElementIds, onElementUpdate]
@@ -462,7 +540,7 @@ export const Canvas: React.FC<CanvasProps> = ({
       let order = 0;
 
       for (const element of Object.values(elementsRef.current) as CanvasElement[]) {
-        if (element.type === 'wire' || element.type === 'stroke') continue;
+        if (element.type === 'wire' || element.type === 'stroke' || isElementLocked(element)) continue;
         const list = byType.get(element.type) ?? [];
         list.push({ element, order: order++ });
         byType.set(element.type, list);
@@ -515,9 +593,16 @@ export const Canvas: React.FC<CanvasProps> = ({
     let stackable = false;
     selectedElementIds.forEach((id) => {
       const el = elementsRef.current[id];
-      if (el && el.type !== 'wire' && el.type !== 'stroke') stackable = true;
+      if (el && el.type !== 'wire' && el.type !== 'stroke' && !isElementLocked(el)) stackable = true;
     });
     return stackable;
+  }, [selectedElementIds, elements]);
+
+  const allSelectedLocked = useMemo(() => {
+    const selected = Array.from(selectedElementIds)
+      .map((id) => elements[id])
+      .filter((element): element is CanvasElement => Boolean(element));
+    return selected.length > 0 && selected.every(isElementLocked);
   }, [selectedElementIds, elements]);
 
   const cancelLongPress = useCallback(() => {
@@ -595,6 +680,18 @@ export const Canvas: React.FC<CanvasProps> = ({
       },
       {
         type: 'item',
+        id: allSelectedLocked ? 'unlock-selection' : 'lock-selection',
+        label: allSelectedLocked ? 'Unlock selection' : 'Lock selection',
+        icon: allSelectedLocked ? (
+          <Unlock className="w-3.5 h-3.5" />
+        ) : (
+          <Lock className="w-3.5 h-3.5" />
+        ),
+        disabled: !hasSelection || !canWrite,
+        onSelect: () => handleSetSelectionLock(!allSelectedLocked),
+      },
+      {
+        type: 'item',
         id: 'delete',
         label: 'Delete',
         shortcut: 'Del',
@@ -650,11 +747,13 @@ export const Canvas: React.FC<CanvasProps> = ({
     contextMenu,
     selectedElementIds,
     selectedHasStackable,
+    allSelectedLocked,
     canWrite,
     handleCopySelected,
     handleCutSelected,
     handlePaste,
     handleDuplicateSelected,
+    handleSetSelectionLock,
     handleDeleteSelected,
     handleZOrder,
   ]);
@@ -667,7 +766,7 @@ export const Canvas: React.FC<CanvasProps> = ({
       if (selectedElementIds.size > 0 && canWrite) {
         selectedElementIds.forEach((id) => {
           const el = elementsRef.current[id];
-          if (el) {
+          if (el && !isElementLocked(el)) {
             onElementUpdate({
               ...el,
               color: currentColor,
@@ -687,7 +786,7 @@ export const Canvas: React.FC<CanvasProps> = ({
       if (selectedElementIds.size > 0 && canWrite) {
         selectedElementIds.forEach((id) => {
           const el = elementsRef.current[id];
-          if (el && el.type === 'wire') {
+          if (el && el.type === 'wire' && !isElementLocked(el)) {
             onElementUpdate({
               ...el,
               strokeWidth: currentSize,
@@ -703,9 +802,12 @@ export const Canvas: React.FC<CanvasProps> = ({
   // Cascade-delete any connected wires when an element is deleted
   const handleElementDelete = useCallback(
     (id: string) => {
+      const target = elementsRef.current[id];
+      if (!target || isElementLocked(target)) return;
+
       const idsToDelete = [id];
       Object.values(elementsRef.current).forEach((el) => {
-        if (el.type === 'wire') {
+        if (el.type === 'wire' && !isElementLocked(el)) {
           const w = el as WireElement;
           if (w.fromId === id || w.toId === id) {
             idsToDelete.push(w.id);
@@ -1258,8 +1360,8 @@ export const Canvas: React.FC<CanvasProps> = ({
       for (const item of candidates) {
         const el = item.element;
         // Wires do not have their own geometry; they are cascade-deleted below
-        // when one of their endpoints is erased.
-        if (el.type === 'wire') continue;
+        // when one of their endpoints is erased. Locked objects are untouched.
+        if (el.type === 'wire' || isElementLocked(el)) continue;
 
         const rawPoints = (el as any).points;
         if (el.type === 'stroke' || (Array.isArray(rawPoints) && rawPoints.length > 0)) {
@@ -1303,7 +1405,7 @@ export const Canvas: React.FC<CanvasProps> = ({
       // Cascade-delete wires whose endpoints are being erased
       if (elementsToDelete.size > 0) {
         for (const el of Object.values(elementsRef.current) as CanvasElement[]) {
-          if (el.type !== 'wire') continue;
+          if (el.type !== 'wire' || isElementLocked(el)) continue;
           if (elementsToDelete.has(el.fromId) || elementsToDelete.has(el.toId)) {
             elementsToDelete.add(el.id);
           }
@@ -2106,6 +2208,9 @@ export const Canvas: React.FC<CanvasProps> = ({
             onUpdate={onElementUpdate}
             onDelete={handleElementDelete}
             onDuplicate={handleDuplicateElement}
+            onMoveSelectionStart={beginSelectionDrag}
+            onMoveSelection={moveSelectionByDelta}
+            onMoveSelectionEnd={endSelectionDrag}
           />
         ))}
 
@@ -2124,6 +2229,9 @@ export const Canvas: React.FC<CanvasProps> = ({
             onUpdate={onElementUpdate}
             onDelete={handleElementDelete}
             onDuplicate={handleDuplicateElement}
+            onMoveSelectionStart={beginSelectionDrag}
+            onMoveSelection={moveSelectionByDelta}
+            onMoveSelectionEnd={endSelectionDrag}
           />
         ))}
 
@@ -2142,6 +2250,9 @@ export const Canvas: React.FC<CanvasProps> = ({
             onUpdate={onElementUpdate}
             onDelete={handleElementDelete}
             onDuplicate={handleDuplicateElement}
+            onMoveSelectionStart={beginSelectionDrag}
+            onMoveSelection={moveSelectionByDelta}
+            onMoveSelectionEnd={endSelectionDrag}
           />
         ))}
 
@@ -2159,6 +2270,9 @@ export const Canvas: React.FC<CanvasProps> = ({
             onUpdate={onElementUpdate}
             onDelete={handleElementDelete}
             onDuplicate={handleDuplicateElement}
+            onMoveSelectionStart={beginSelectionDrag}
+            onMoveSelection={moveSelectionByDelta}
+            onMoveSelectionEnd={endSelectionDrag}
           />
         ))}
 
@@ -2297,6 +2411,22 @@ export const Canvas: React.FC<CanvasProps> = ({
             >
               <Copy className="w-3.5 h-3.5 text-emerald-500" />
               <span className="hidden sm:inline">Duplicate</span>
+            </button>
+          )}
+
+          {/* Lock / Unlock */}
+          {canWrite && (
+            <button
+              onClick={() => handleSetSelectionLock(!allSelectedLocked)}
+              title={allSelectedLocked ? 'Unlock selected objects' : 'Lock selected objects'}
+              className="px-2 sm:px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-1.5 transition-colors cursor-pointer shrink-0"
+            >
+              {allSelectedLocked ? (
+                <Unlock className="w-3.5 h-3.5 text-amber-500" />
+              ) : (
+                <Lock className="w-3.5 h-3.5 text-amber-500" />
+              )}
+              <span className="hidden sm:inline">{allSelectedLocked ? 'Unlock' : 'Lock'}</span>
             </button>
           )}
 

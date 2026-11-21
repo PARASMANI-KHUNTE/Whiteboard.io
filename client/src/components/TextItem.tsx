@@ -29,6 +29,9 @@ interface TextItemProps {
   onUpdate: (updated: TextElement) => void;
   onDelete: (id: string) => void;
   onDuplicate?: (element: TextElement, offset?: { dx: number; dy: number }) => TextElement | void;
+  onMoveSelectionStart?: () => void;
+  onMoveSelection?: (deltaX: number, deltaY: number) => void;
+  onMoveSelectionEnd?: () => void;
 }
 
 const FONT_FAMILIES = [
@@ -69,6 +72,9 @@ export const TextItem: React.FC<TextItemProps> = ({
   onUpdate,
   onDelete,
   onDuplicate,
+  onMoveSelectionStart,
+  onMoveSelection,
+  onMoveSelectionEnd,
 }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [localText, setLocalText] = useState(element.text);
@@ -102,11 +108,12 @@ export const TextItem: React.FC<TextItemProps> = ({
     startY: element.y,
   });
 
-  const showControls = canWrite && (isEditing || (isSelected && !isMultiSelection));
+  const isLocked = Boolean(element.isLocked);
+  const showControls = canWrite && !isLocked && (isEditing || (isSelected && !isMultiSelection));
 
   // Auto-focus empty text item when freshly created
   useEffect(() => {
-    if (canWrite && element.text === '' && textareaRef.current) {
+    if (canWrite && !isLocked && element.text === '' && textareaRef.current) {
       setTimeout(() => {
         textareaRef.current?.focus();
       }, 50);
@@ -166,9 +173,13 @@ export const TextItem: React.FC<TextItemProps> = ({
   }, [showControls]);
 
   const handleMouseDownHeader = (e: React.MouseEvent) => {
-    if (!canWrite) return;
+    if (!canWrite || isLocked) return;
     e.stopPropagation();
     onSelect?.();
+
+    const moveWholeSelection = isSelected && isMultiSelection && !e.altKey && Boolean(onMoveSelection);
+    if (moveWholeSelection) onMoveSelectionStart?.();
+    let lastDelta = { x: 0, y: 0 };
 
     // Alt-drag duplicates in place and moves the copy.
     let dragElement = element;
@@ -197,12 +208,17 @@ export const TextItem: React.FC<TextItemProps> = ({
       const now = Date.now();
       if (now - lastEmitRef.current > 40) {
         lastEmitRef.current = now;
-        onUpdate({
-          ...dragElement,
-          x: newX,
-          y: newY,
-          updatedAt: now,
-        });
+        if (moveWholeSelection) {
+          lastDelta = { x: deltaX, y: deltaY };
+          onMoveSelection?.(deltaX, deltaY);
+        } else {
+          onUpdate({
+            ...dragElement,
+            x: newX,
+            y: newY,
+            updatedAt: now,
+          });
+        }
       }
     };
 
@@ -210,6 +226,11 @@ export const TextItem: React.FC<TextItemProps> = ({
       setIsDragging(false);
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
+      if (moveWholeSelection) {
+        onMoveSelection?.(lastDelta.x, lastDelta.y);
+        onMoveSelectionEnd?.();
+        return;
+      }
       onUpdate({
         ...dragElement,
         x: currentPosRef.current.x,
@@ -223,7 +244,7 @@ export const TextItem: React.FC<TextItemProps> = ({
   };
 
   const handleTextChange = (newText: string) => {
-    if (!canWrite) return;
+    if (!canWrite || isLocked) return;
     setLocalText(newText);
 
     if (debounceTimerRef.current) {
@@ -244,7 +265,7 @@ export const TextItem: React.FC<TextItemProps> = ({
       clearTimeout(debounceTimerRef.current);
       debounceTimerRef.current = null;
     }
-    if (localText !== element.text) {
+    if (!isLocked && localText !== element.text) {
       onUpdate({
         ...element,
         text: localText,
@@ -255,6 +276,7 @@ export const TextItem: React.FC<TextItemProps> = ({
 
   // Property updaters
   const updateStyleProp = (updates: Partial<TextElement>) => {
+    if (isLocked) return;
     onUpdate({
       ...element,
       ...updates,
@@ -639,19 +661,19 @@ export const TextItem: React.FC<TextItemProps> = ({
 
       {/* Text Area Content */}
       <div
-        className="p-1.5 cursor-text"
+        className={`p-1.5 ${isLocked ? 'cursor-default' : 'cursor-text'}`}
         onClick={() => {
           onSelect?.();
-          textareaRef.current?.focus();
+          if (!isLocked) textareaRef.current?.focus();
         }}
       >
         <textarea
           ref={textareaRef}
           value={localText}
-          readOnly={!canWrite}
+          readOnly={!canWrite || isLocked}
           onChange={(e) => handleTextChange(e.target.value)}
           onFocus={() => {
-            if (canWrite) {
+            if (canWrite && !isLocked) {
               setIsEditing(true);
               onSelect?.();
             }
@@ -666,7 +688,7 @@ export const TextItem: React.FC<TextItemProps> = ({
             onSelect?.();
           }}
           onKeyDown={handleKeyDown}
-          placeholder={canWrite ? "Type text here..." : "Read-only text"}
+          placeholder={canWrite && !isLocked ? "Type text here..." : "Locked — unlock to edit"}
           rows={1}
           style={{
             fontSize: `${currentFontSize}px`,
@@ -678,7 +700,7 @@ export const TextItem: React.FC<TextItemProps> = ({
             color: effectiveTextColor,
           }}
           className={`w-full bg-transparent resize-none outline-none leading-normal select-text cursor-text transition-all ${
-            !canWrite ? 'cursor-default' : 'placeholder:text-slate-400 dark:placeholder:text-slate-600'
+            !canWrite || isLocked ? 'cursor-default' : 'placeholder:text-slate-400 dark:placeholder:text-slate-600'
           }`}
         />
       </div>

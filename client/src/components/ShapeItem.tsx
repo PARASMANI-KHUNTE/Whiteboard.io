@@ -26,6 +26,9 @@ interface ShapeItemProps {
   onUpdate: (updated: ShapeElement) => void;
   onDelete: (id: string) => void;
   onDuplicate?: (element: ShapeElement, offset?: { dx: number; dy: number }) => ShapeElement | void;
+  onMoveSelectionStart?: () => void;
+  onMoveSelection?: (deltaX: number, deltaY: number) => void;
+  onMoveSelectionEnd?: () => void;
 }
 
 const PALETTE_COLORS = [
@@ -64,6 +67,9 @@ export const ShapeItem: React.FC<ShapeItemProps> = ({
   onUpdate,
   onDelete,
   onDuplicate,
+  onMoveSelectionStart,
+  onMoveSelection,
+  onMoveSelectionEnd,
 }) => {
   const [localPos, setLocalPos] = useState<{ x: number; y: number }>({ x: element.x, y: element.y });
   const [localSize, setLocalSize] = useState<{ width: number; height: number }>({
@@ -173,6 +179,10 @@ export const ShapeItem: React.FC<ShapeItemProps> = ({
     e.stopPropagation();
     onSelect?.();
 
+    const moveWholeSelection = isSelected && isMultiSelection && !e.altKey && Boolean(onMoveSelection);
+    if (moveWholeSelection) onMoveSelectionStart?.();
+    let lastDelta = { x: 0, y: 0 };
+
     // Alt-drag: create a copy at the same spot and drag that instead, leaving
     // the original element where it was.
     let dragElement = element;
@@ -199,12 +209,17 @@ export const ShapeItem: React.FC<ShapeItemProps> = ({
       const now = Date.now();
       if (now - lastEmitRef.current > 40) {
         lastEmitRef.current = now;
-        onUpdate({
-          ...dragElement,
-          x: newX,
-          y: newY,
-          updatedAt: now,
-        });
+        if (moveWholeSelection) {
+          lastDelta = { x: deltaX, y: deltaY };
+          onMoveSelection?.(deltaX, deltaY);
+        } else {
+          onUpdate({
+            ...dragElement,
+            x: newX,
+            y: newY,
+            updatedAt: now,
+          });
+        }
       }
     };
 
@@ -212,6 +227,11 @@ export const ShapeItem: React.FC<ShapeItemProps> = ({
       setIsDragging(false);
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
+      if (moveWholeSelection) {
+        onMoveSelection?.(lastDelta.x, lastDelta.y);
+        onMoveSelectionEnd?.();
+        return;
+      }
       onUpdate({
         ...dragElement,
         x: currentPosRef.current.x,

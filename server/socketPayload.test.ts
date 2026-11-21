@@ -108,6 +108,11 @@ test('sanitizeElement rebuilds valid elements from an allowlist', () => {
   assert.deepEqual(sanitizeElement(sticky), sticky);
   assert.deepEqual(sanitizeElement(wire), wire);
 
+  for (const element of [stroke, sticky, wire]) {
+    assert.equal(sanitizeElement({ ...element, isLocked: true })?.isLocked, true);
+    assert.equal(sanitizeElement({ ...element, isLocked: false })?.isLocked, false);
+  }
+
   const withJunk = { ...sticky, __proto__: { polluted: true }, extra: 'ignored' };
   const clean = sanitizeElement(withJunk);
   assert.ok(clean);

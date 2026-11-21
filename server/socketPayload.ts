@@ -194,6 +194,7 @@ const ELEMENT_SCHEMAS: Record<string, Record<string, FieldSpec>> = {
     color: { kind: "string", max: MAX_COLOR_LENGTH, required: true },
     size: { kind: "number", required: true, min: 0, max: MAX_DIMENSION },
     isHighlighter: { kind: "boolean" },
+    isLocked: { kind: "boolean" },
     createdAt: { kind: "number", required: true, min: 0, max: MAX_TIME },
   },
   sticky: {
@@ -203,6 +204,7 @@ const ELEMENT_SCHEMAS: Record<string, Record<string, FieldSpec>> = {
     height: { kind: "number", required: true, min: 0, max: MAX_DIMENSION },
     text: { kind: "string", max: MAX_TEXT_LENGTH, required: true },
     color: { kind: "string", max: MAX_COLOR_LENGTH, required: true },
+    isLocked: { kind: "boolean" },
   },
   text: {
     ...UPDATED,
@@ -215,6 +217,7 @@ const ELEMENT_SCHEMAS: Record<string, Record<string, FieldSpec>> = {
     fontStyle: { kind: "enum", values: FONT_STYLES },
     textDecoration: { kind: "enum", values: TEXT_DECORATIONS },
     textAlign: { kind: "enum", values: TEXT_ALIGNS },
+    isLocked: { kind: "boolean" },
   },
   shape: {
     ...UPDATED,
@@ -260,6 +263,7 @@ const ELEMENT_SCHEMAS: Record<string, Record<string, FieldSpec>> = {
     arrowStart: { kind: "boolean" },
     arrowEnd: { kind: "boolean" },
     label: { kind: "string", max: MAX_TEXT_LENGTH },
+    isLocked: { kind: "boolean" },
   },
 };
 

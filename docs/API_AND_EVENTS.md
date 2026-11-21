@@ -414,7 +414,7 @@ Clients establish a connection to `/socket.io/` using WebSocket with HTTP long-p
 | `stroke-live-point` | `{ strokeId, point }` | Streams an incremental coordinate point. |
 | `element-create` | `CanvasElement` | Finalizes a single completed element (stroke, shape, sticky, text, icon, wire). |
 | `elements-batch-create` | `CanvasElement[]` | Atomically adds and broadcasts an array of elements (used by AI Diagram Generator). |
-| `element-update` | `CanvasElement` | Updates coordinates, dimensions, content, or styling of an element. |
+| `element-update` | `CanvasElement` | Updates coordinates, dimensions, content, styling, or `isLocked` of an element. |
 | `element-delete` | `{ elementId }` | Deletes a single canvas element. |
 | `elements-batch-delete` | `{ elementIds: string[] }` | Deletes multiple elements simultaneously. |
 | `cursor-move` | `{ x, y, tool, isDrawing }` | Broadcasts current mouse pointer coordinates and active tool. |
