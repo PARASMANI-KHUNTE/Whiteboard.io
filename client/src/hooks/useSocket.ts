@@ -128,7 +128,11 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
   const [boardClearCount, setBoardClearCount] = useState(0);
 
   const socketRef = useRef<Socket | null>(null);
-  const isSoloMigrationRef = useRef<boolean>(false);
+  // Bumping this forces the socket effect below to create a fresh connection,
+  // e.g. when rejoining the same room after a kick disconnected the old one.
+  const [connectionEpoch, setConnectionEpoch] = useState(0);
+  /** Pending solo→multiplayer board migration, scoped to its target room. */
+  const soloMigrationRef = useRef<{ roomId: string } | null>(null);
   const connectErrorNotifiedRef = useRef<boolean>(false);
   const currentUserRef = useRef<RemoteUser>(currentUser);
   currentUserRef.current = currentUser;
@@ -343,6 +347,9 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
 
     socket.on('connect_error', (err) => {
       console.warn('Realtime connection issue (reconnecting):', err.message);
+      // A failed handshake must not leave a solo board queued for a later,
+      // unrelated room.
+      soloMigrationRef.current = null;
       if (!connectErrorNotifiedRef.current) {
         connectErrorNotifiedRef.current = true;
         addNotification('Realtime connection lost — reconnecting...', 'warning');
@@ -369,11 +376,13 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
         isHost: boolean;
       }) => {
         const serverElements = data.elements || {};
-        if (isSoloMigrationRef.current) {
+        const migration = soloMigrationRef.current;
+        // Consume the flag on any authoritative init; only migrate when this
+        // is the room the solo board was being converted into.
+        soloMigrationRef.current = null;
+        if (migration?.roomId === data.roomId) {
           const localElements = elementsRef.current || {};
-          const merged = { ...serverElements, ...localElements };
-          setElements(merged);
-          isSoloMigrationRef.current = false;
+          setElements({ ...serverElements, ...localElements });
           const localItems = Object.values(localElements);
           if (localItems.length > 0) {
             socket.emit('elements-batch-create', localItems);
@@ -503,6 +512,7 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
     });
 
     socket.on('room-error', (data: { message?: string }) => {
+      soloMigrationRef.current = null;
       addNotification(data?.message || 'Could not join the requested room.', 'warning');
     });
 
@@ -694,7 +704,7 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
       socket.disconnect();
       socketRef.current = null;
     };
-  }, [roomId, authToken, addNotification, flushElementUpdates]);
+  }, [roomId, authToken, connectionEpoch, addNotification, flushElementUpdates]);
 
   // Emitters
   const emitStrokeLiveStart = useCallback((strokeId: string, point: Point, color: string, size: number, isHighlighter?: boolean) => {
@@ -841,7 +851,7 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
   }, [roomId, authToken]);
 
   const switchRoom = useCallback((newRoomId: string | null) => {
-    isSoloMigrationRef.current = false;
+    soloMigrationRef.current = null;
     if (!newRoomId) {
       if (roomId) {
         // Leaving a multiplayer room: reset every piece of stale room state so
@@ -865,7 +875,17 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
       return;
     }
     const cleaned = newRoomId.trim().toUpperCase().replace(/[^A-Z0-9_-]/g, '-');
-    if (!cleaned || cleaned === roomId) return;
+    if (!cleaned) return;
+    if (cleaned === roomId) {
+      // A kick/room-delete disconnects the socket without changing roomId.
+      // Rejoining the same room must therefore recreate the connection.
+      if (isKicked || !socketRef.current?.connected) {
+        setIsKicked(false);
+        setKickedReason(null);
+        setConnectionEpoch((epoch) => epoch + 1);
+      }
+      return;
+    }
     // Leaving solo: persist the latest canvas before it is replaced by the
     // (possibly empty) room state.
     if (!roomId) {
@@ -885,13 +905,13 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
     setVoteToClear(null);
     setRoomId(cleaned);
     setRoomIdInUrl(cleaned);
-  }, [roomId]);
+  }, [roomId, isKicked]);
 
   const convertToMultiplayerRoom = useCallback((customCode?: string): string => {
-    isSoloMigrationRef.current = true;
     // Flush the personal board before it becomes a room snapshot.
     void saveSoloBoard(currentUserRef.current.id, elementsRef.current);
     const code = customCode ? customCode.trim().toUpperCase().replace(/[^A-Z0-9_-]/g, '-') : generateRandomRoomCode();
+    soloMigrationRef.current = { roomId: code };
     setRoomId(code);
     setRoomIdInUrl(code);
     return code;
