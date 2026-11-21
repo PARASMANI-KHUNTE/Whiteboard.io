@@ -8,6 +8,7 @@ import {
   saveGuestIdentityName,
 } from '../utils/guestIdentity';
 import { loadSoloBoard, saveSoloBoard } from '../utils/soloStorage';
+import { notifySessionExpired } from '../utils/authSession';
 
 function getInitialUser() {
   if (typeof window === 'undefined') {
@@ -503,7 +504,13 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
     });
 
     socket.on('room-error', (data: { message?: string }) => {
-      addNotification(data?.message || 'Could not join the requested room.', 'warning');
+      const message = data?.message || 'Could not join the requested room.';
+      addNotification(message, 'warning');
+      // The server rejects joins whose session token is invalid/expired. Route
+      // that through the shared recovery path instead of only toasting it.
+      if (/session|token|authenticat/i.test(message)) {
+        notifySessionExpired('Your session expired while joining the room. Reconnecting as a guest.');
+      }
     });
 
     // Coalesce streamed live-stroke points into one React state update per
