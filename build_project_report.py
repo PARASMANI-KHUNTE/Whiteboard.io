@@ -862,7 +862,7 @@ def build_report():
                "Whiteboard.io is built entirely upon cross-platform web standards and modern runtime environments:")
     
     add_bullet_p(doc, 
-                 "Node.js runtime environment (v18.0.0 or higher, verified on v22+), npm package manager, MongoDB Community or Enterprise Server (v6.0 or higher, verified on v7.6+), and Google Gemini API credentials.",
+                 "Node.js runtime environment (v20.19.0 or higher, 22 LTS recommended — required by the MongoDB 7 driver), npm package manager, MongoDB Community or Enterprise Server (v6.0 or higher, verified on v7.6+ and MONGODB_URI required), and Google Gemini API credentials.",
                  bold_prefix="Server Prerequisites: ")
     
     add_bullet_p(doc, 
@@ -887,7 +887,7 @@ def build_report():
         ["Animations", "Motion", "^12.23.24", "Fluid physics-based spring animations for modals, notifications, and menus."],
         ["Icons", "Lucide React", "^0.546.0", "Crisp vector icons for canvas tools, admin panels, and status indicators."],
         ["Real-Time Client", "Socket.io Client", "^4.8.3", "WebSocket client handling room events, drawing streams, and voice signaling."],
-        ["Backend Runtime", "Node.js", "v20+ / ES Modules", "Asynchronous, event-driven JavaScript runtime executing the backend server."],
+        ["Backend Runtime", "Node.js", ">=20.19 / ES Modules", "Asynchronous, event-driven JavaScript runtime executing the backend server."],
         ["Backend Framework", "Express", "^4.21.2", "Lightweight HTTP server hosting REST APIs, CORS, and security middleware."],
         ["Real-Time Server", "Socket.io", "^4.8.3", "WebSocket server gateway managing rooms, event routing, and binary packets."],
         ["Database Driver", "MongoDB Driver", "^7.6.0", "Official native MongoDB Node.js driver providing high-speed direct queries."],
