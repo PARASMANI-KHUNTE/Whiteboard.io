@@ -197,7 +197,11 @@ export const AiChatPanel: React.FC<AiChatPanelProps> = ({
 
   return (
     <div className="fixed z-40 inset-x-0 bottom-0 sm:inset-x-auto sm:right-4 sm:top-20 sm:bottom-4 sm:w-[408px]">
-      <div className="flex flex-col h-[64vh] max-h-[64vh] sm:h-full sm:max-h-none bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-t-2xl sm:rounded-2xl shadow-2xl overflow-hidden">
+      <div
+        role="dialog"
+        aria-label="AI diagram chat"
+        className="flex flex-col h-[64vh] max-h-[64vh] sm:h-full sm:max-h-none bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-t-2xl sm:rounded-2xl shadow-2xl overflow-hidden"
+      >
         {/* Mobile drag handle */}
         <div className="sm:hidden flex justify-center pt-2 pb-1">
           <div className="w-10 h-1 rounded-full bg-slate-300 dark:bg-slate-700" />
@@ -238,6 +242,7 @@ export const AiChatPanel: React.FC<AiChatPanelProps> = ({
             <div className="flex items-center gap-1 shrink-0">
               <button
                 type="button"
+                aria-label="Generate a new diagram"
                 onClick={onNewDiagram}
                 title="Generate a new diagram"
                 className="p-1.5 rounded-lg text-slate-500 dark:text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-300 hover:bg-white/70 dark:hover:bg-slate-800 transition-colors cursor-pointer"
@@ -246,6 +251,7 @@ export const AiChatPanel: React.FC<AiChatPanelProps> = ({
               </button>
               <button
                 type="button"
+                aria-label="Minimize AI chat"
                 onClick={onClose}
                 title="Minimize AI chat"
                 className="p-1.5 rounded-lg text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-100 hover:bg-white/70 dark:hover:bg-slate-800 transition-colors cursor-pointer"
@@ -257,7 +263,13 @@ export const AiChatPanel: React.FC<AiChatPanelProps> = ({
         </div>
 
         {/* Messages */}
-        <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-3 bg-slate-50/40 dark:bg-slate-950/30">
+        <div
+          ref={scrollRef}
+          role="log"
+          aria-live="polite"
+          aria-label="AI conversation"
+          className="flex-1 overflow-y-auto px-4 py-4 space-y-3 bg-slate-50/40 dark:bg-slate-950/30"
+        >
           {!session && (
             <div className="flex min-h-[240px] h-full flex-col items-center justify-center text-center px-4">
               <div className="p-3 rounded-2xl bg-gradient-to-tr from-indigo-600 to-violet-500 text-white shadow-lg shadow-indigo-500/20">
@@ -361,7 +373,7 @@ export const AiChatPanel: React.FC<AiChatPanelProps> = ({
           )}
 
           {error && (
-            <div className="rounded-xl border border-rose-200 dark:border-rose-900/60 bg-rose-50 dark:bg-rose-950/30 px-3 py-2 text-[11px] text-rose-700 dark:text-rose-300 flex items-start gap-1.5">
+            <div role="alert" className="rounded-xl border border-rose-200 dark:border-rose-900/60 bg-rose-50 dark:bg-rose-950/30 px-3 py-2 text-[11px] text-rose-700 dark:text-rose-300 flex items-start gap-1.5">
               <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
               <span>{error}</span>
             </div>
@@ -391,6 +403,7 @@ export const AiChatPanel: React.FC<AiChatPanelProps> = ({
               <textarea
                 ref={inputRef}
                 rows={2}
+                aria-label="Follow-up instruction for the AI"
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={(e) => {
@@ -406,6 +419,7 @@ export const AiChatPanel: React.FC<AiChatPanelProps> = ({
               <button
                 type="submit"
                 disabled={!input.trim() || isBusy}
+                aria-label="Send instruction"
                 title="Send instruction (Enter)"
                 className="p-2.5 rounded-xl text-white bg-gradient-to-tr from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 disabled:opacity-40 disabled:cursor-not-allowed shadow-md shadow-indigo-500/20 active:scale-95 transition-all cursor-pointer"
               >

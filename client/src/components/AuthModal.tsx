@@ -182,8 +182,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           </div>
           {currentUser && (
             <button
+              type="button"
+              aria-label="Close account dialog"
               onClick={onClose}
-              className="p-1 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+              className="p-1 rounded-lg text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
             >
               <X className="w-4 h-4" />
             </button>
@@ -223,12 +225,14 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
             <div className="pt-2 flex items-center gap-3">
               <button
+                type="button"
                 onClick={onClose}
                 className="flex-1 px-4 py-2.5 text-xs font-medium text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-xl transition-colors cursor-pointer"
               >
                 Close
               </button>
               <button
+                type="button"
                 onClick={() => {
                   onLogout();
                   onClose();
@@ -247,6 +251,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             <div className="flex p-1 bg-slate-100 dark:bg-slate-800 rounded-xl mb-5">
               <button
                 type="button"
+                aria-pressed={tab === 'login'}
                 onClick={() => {
                   setTab('login');
                   setError(null);
@@ -262,6 +267,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               </button>
               <button
                 type="button"
+                aria-pressed={tab === 'register'}
                 onClick={() => {
                   setTab('register');
                   setError(null);
@@ -277,6 +283,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               </button>
               <button
                 type="button"
+                aria-pressed={tab === 'guest'}
                 onClick={() => {
                   setTab('guest');
                   setError(null);
@@ -293,7 +300,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             </div>
 
             {error && (
-              <div className="mb-4 p-3 bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-900/50 text-rose-700 dark:text-rose-300 text-xs rounded-xl">
+              <div role="alert" className="mb-4 p-3 bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-900/50 text-rose-700 dark:text-rose-300 text-xs rounded-xl">
                 {error}
               </div>
             )}
@@ -327,10 +334,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             {tab === 'login' && (
               <form onSubmit={handleLoginSubmit} className="space-y-4">
                 <div>
-                  <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">Username or Email</label>
+                  <label htmlFor="auth-login-identifier" className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">Username or Email</label>
                   <div className="relative">
-                    <UserIcon className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                    <UserIcon className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" aria-hidden="true" />
                     <input
+                      id="auth-login-identifier"
                       type="text"
                       value={identifier}
                       onChange={(e) => setIdentifier(e.target.value)}
@@ -342,10 +350,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 </div>
 
                 <div>
-                  <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">Password</label>
+                  <label htmlFor="auth-login-password" className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">Password</label>
                   <div className="relative">
-                    <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                    <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" aria-hidden="true" />
                     <input
+                      id="auth-login-password"
                       type={showPassword ? 'text' : 'password'}
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
@@ -355,8 +364,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                     />
                     <button
                       type="button"
+                      aria-label={showPassword ? 'Hide password' : 'Show password'}
+                      aria-pressed={showPassword}
                       onClick={() => setShowPassword(!showPassword)}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300"
                     >
                       {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                     </button>
@@ -377,8 +388,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             {tab === 'register' && (
               <form onSubmit={handleRegisterSubmit} className="space-y-3.5">
                 <div>
-                  <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">Username</label>
+                  <label htmlFor="auth-register-username" className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">Username</label>
                   <input
+                    id="auth-register-username"
                     type="text"
                     value={username}
                     onChange={(e) => setUsername(e.target.value)}
@@ -389,10 +401,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 </div>
 
                 <div>
-                  <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">Email Address</label>
+                  <label htmlFor="auth-register-email" className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">Email Address</label>
                   <div className="relative">
-                    <Mail className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                    <Mail className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" aria-hidden="true" />
                     <input
+                      id="auth-register-email"
                       type="email"
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
@@ -404,8 +417,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 </div>
 
                 <div>
-                  <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">Display Name (Optional)</label>
+                  <label htmlFor="auth-register-name" className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">Display Name (Optional)</label>
                   <input
+                    id="auth-register-name"
                     type="text"
                     value={name}
                     onChange={(e) => setName(e.target.value)}
@@ -415,10 +429,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 </div>
 
                 <div>
-                  <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">Password</label>
+                  <label htmlFor="auth-register-password" className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">Password</label>
                   <div className="relative">
-                    <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                    <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" aria-hidden="true" />
                     <input
+                      id="auth-register-password"
                       type={showPassword ? 'text' : 'password'}
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
@@ -428,8 +443,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                     />
                     <button
                       type="button"
+                      aria-label={showPassword ? 'Hide password' : 'Show password'}
+                      aria-pressed={showPassword}
                       onClick={() => setShowPassword(!showPassword)}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300"
                     >
                       {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                     </button>
@@ -437,12 +454,14 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 </div>
 
                 <div>
-                  <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">Avatar Color</label>
-                  <div className="flex items-center gap-2">
+                  <div id="auth-avatar-color-label" className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">Avatar Color</div>
+                  <div role="group" aria-labelledby="auth-avatar-color-label" className="flex items-center gap-2">
                     {AVATAR_COLORS.map((c) => (
                       <button
                         type="button"
                         key={c}
+                        aria-label={`Use ${c} avatar color`}
+                        aria-pressed={color === c}
                         onClick={() => setColor(c)}
                         style={{ backgroundColor: c }}
                         className={`w-6 h-6 rounded-full flex items-center justify-center transition-transform cursor-pointer ${
@@ -473,8 +492,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 </p>
 
                 <div>
-                  <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">Guest Nickname</label>
+                  <label htmlFor="auth-guest-name" className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">Guest Nickname</label>
                   <input
+                    id="auth-guest-name"
                     type="text"
                     value={name}
                     onChange={(e) => setName(e.target.value)}
@@ -484,12 +504,14 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 </div>
 
                 <div>
-                  <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">Marker Color</label>
-                  <div className="flex items-center gap-2">
+                  <div id="auth-marker-color-label" className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">Marker Color</div>
+                  <div role="group" aria-labelledby="auth-marker-color-label" className="flex items-center gap-2">
                     {AVATAR_COLORS.map((c) => (
                       <button
                         type="button"
                         key={c}
+                        aria-label={`Use ${c} avatar color`}
+                        aria-pressed={color === c}
                         onClick={() => setColor(c)}
                         style={{ backgroundColor: c }}
                         className={`w-6 h-6 rounded-full flex items-center justify-center transition-transform cursor-pointer ${

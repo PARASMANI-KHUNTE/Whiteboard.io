@@ -30,7 +30,7 @@ import { ConfirmModal } from './components/ConfirmModal';
 import { AiGenerateModal } from './components/AiGenerateModal';
 import { AiChatPanel } from './components/AiChatPanel';
 import { ErrorBoundary } from './components/ErrorBoundary';
-import { Info, Sparkles, AlertCircle, CheckCircle2, UserX } from 'lucide-react';
+import { Info, Sparkles, AlertCircle, CheckCircle2, UserX, X } from 'lucide-react';
 import { isColorBlack, isColorWhite } from './utils/themeColors';
 import { routeWire } from './utils/wireGeometry';
 import { loadAiSession, saveAiSession, clearAiSession } from './utils/aiSessionStorage';
@@ -190,6 +190,7 @@ export default function App() {
     updateUserColor,
     switchRoom,
     addNotification,
+    dismissNotification,
     socket,
   } = useSocket(undefined, authUser, token);
 
@@ -1324,7 +1325,11 @@ export default function App() {
 
   if (isAuthLoading) {
     return (
-      <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-slate-900 text-white font-sans">
+      <div
+        role="status"
+        aria-live="polite"
+        className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-slate-900 text-white font-sans"
+      >
         <div className="w-14 h-14 rounded-2xl bg-blue-600 flex items-center justify-center font-bold text-2xl mb-4 shadow-xl shadow-blue-500/20 animate-pulse">
           W
         </div>
@@ -1628,18 +1633,20 @@ export default function App() {
             role="alertdialog"
             aria-modal="true"
             aria-labelledby="kicked-dialog-title"
+            aria-describedby="kicked-dialog-description"
             tabIndex={-1}
-            className="bg-white rounded-2xl p-6 w-full max-w-md border border-slate-200 shadow-2xl text-center"
+            className="bg-white dark:bg-slate-900 rounded-2xl p-6 w-full max-w-md border border-slate-200 dark:border-slate-800 shadow-2xl text-center"
           >
-            <div className="w-12 h-12 bg-rose-100 text-rose-600 rounded-full flex items-center justify-center mx-auto mb-3">
+            <div className="w-12 h-12 bg-rose-100 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400 rounded-full flex items-center justify-center mx-auto mb-3">
               <UserX className="w-6 h-6" />
             </div>
-            <h3 id="kicked-dialog-title" className="text-lg font-bold text-slate-900 mb-1">Removed from Room</h3>
-            <p className="text-sm text-slate-600 mb-6">
+            <h3 id="kicked-dialog-title" className="text-lg font-bold text-slate-900 dark:text-white mb-1">Removed from Room</h3>
+            <p id="kicked-dialog-description" className="text-sm text-slate-600 dark:text-slate-300 mb-6">
               {kickedReason || 'An admin has removed you from this collaborative session.'}
             </p>
             <div className="flex gap-2 justify-center">
               <button
+                type="button"
                 onClick={() => {
                   resetKickedState();
                   switchRoom(null);
@@ -1649,11 +1656,12 @@ export default function App() {
                 Return to Solo Canvas
               </button>
               <button
+                type="button"
                 onClick={() => {
                   resetKickedState();
                   setShowCreateRoomModal(true);
                 }}
-                className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-semibold rounded-xl transition-colors cursor-pointer"
+                className="px-4 py-2.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-sm font-semibold rounded-xl transition-colors cursor-pointer"
               >
                 Browse / Create Room
               </button>
@@ -1666,22 +1674,24 @@ export default function App() {
       {showWelcomeHint && (
         <div
           id="welcome-hint-pill"
-          className="hidden sm:block fixed top-20 left-6 z-30 bg-white border border-slate-200 shadow-xl rounded-2xl p-4 max-w-xs text-xs text-slate-700 animate-in fade-in duration-300 select-none"
+          className="hidden sm:block fixed top-20 left-6 z-30 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xl rounded-2xl p-4 max-w-xs text-xs text-slate-700 dark:text-slate-200 animate-in fade-in duration-300 select-none"
         >
           <div className="flex items-start justify-between gap-2">
-            <div className="flex items-center gap-1.5 font-semibold text-slate-900">
-              <Sparkles className="w-3.5 h-3.5 text-blue-600" />
+            <div className="flex items-center gap-1.5 font-semibold text-slate-900 dark:text-white">
+              <Sparkles className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
               <span>Real-time Whiteboard</span>
             </div>
             <button
+              type="button"
+              aria-label="Dismiss welcome hint"
               onClick={() => setShowWelcomeHint(false)}
-              className="text-slate-400 hover:text-slate-700 text-xs font-bold cursor-pointer"
+              className="text-slate-400 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-200 text-xs font-bold cursor-pointer"
             >
-              ✕
+              <X className="w-3.5 h-3.5" />
             </button>
           </div>
-          <p className="mt-1.5 text-slate-500 leading-relaxed">
-            Click <strong className="text-slate-700 font-semibold">Share</strong> to invite friends via room code or link. Room creators can manage participants and toggle write permissions.
+          <p className="mt-1.5 text-slate-500 dark:text-slate-400 leading-relaxed">
+            Click <strong className="text-slate-700 dark:text-slate-200 font-semibold">Share</strong> to invite friends via room code or link. Room creators can manage participants and toggle write permissions.
           </p>
         </div>
       )}
@@ -1689,23 +1699,35 @@ export default function App() {
       {/* Floating System Notifications */}
       <div
         id="system-notifications"
-        className="fixed top-16 sm:bottom-12 right-3 sm:right-6 z-50 flex flex-col gap-2 pointer-events-none max-w-[90vw]"
+        role="status"
+        aria-live="polite"
+        aria-atomic="false"
+        aria-label="Notifications"
+        className="fixed top-16 sm:bottom-12 right-3 sm:right-6 z-40 flex flex-col gap-2 pointer-events-none max-w-[90vw]"
       >
         {notifications.map((n) => (
           <div
             key={n.id}
             className={`px-3 py-2 rounded-xl text-xs font-medium shadow-lg pointer-events-auto flex items-center gap-2 border transition-all animate-in slide-in-from-bottom-2 duration-150 ${
               n.type === 'success'
-                ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                ? 'bg-emerald-50 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-200 border-emerald-200 dark:border-emerald-900/70'
                 : n.type === 'warning'
-                ? 'bg-amber-50 text-amber-800 border-amber-200'
-                : 'bg-slate-900 text-white border-slate-800'
+                ? 'bg-amber-50 dark:bg-amber-950/80 text-amber-800 dark:text-amber-200 border-amber-200 dark:border-amber-900/70'
+                : 'bg-slate-900 dark:bg-slate-800 text-white border-slate-800 dark:border-slate-700'
             }`}
           >
-            {n.type === 'success' && <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />}
-            {n.type === 'warning' && <AlertCircle className="w-3.5 h-3.5 text-amber-600 shrink-0" />}
+            {n.type === 'success' && <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />}
+            {n.type === 'warning' && <AlertCircle className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0" />}
             {n.type === 'info' && <Info className="w-3.5 h-3.5 text-blue-400 shrink-0" />}
             <span>{n.text}</span>
+            <button
+              type="button"
+              aria-label="Dismiss notification"
+              onClick={() => dismissNotification(n.id)}
+              className="ml-1 p-0.5 rounded text-current opacity-60 hover:opacity-100 hover:bg-black/5 dark:hover:bg-white/10 cursor-pointer transition-opacity"
+            >
+              <X className="w-3 h-3" />
+            </button>
           </div>
         ))}
       </div>
@@ -1713,14 +1735,14 @@ export default function App() {
       {/* Clean Minimalism Status Footer (Desktop only) */}
       <footer
         id="whiteboard-status-footer"
-        className="hidden sm:flex fixed bottom-0 left-0 right-0 h-7 bg-slate-50/90 backdrop-blur-xs border-t border-slate-200 px-6 items-center justify-between z-30 select-none text-[10px] text-slate-400 font-medium"
+        className="hidden sm:flex fixed bottom-0 left-0 right-0 h-7 bg-slate-50/90 dark:bg-slate-950/90 backdrop-blur-xs border-t border-slate-200 dark:border-slate-800 px-6 items-center justify-between z-30 select-none text-[10px] text-slate-400 dark:text-slate-500 font-medium"
       >
         <div className="flex items-center gap-4 font-mono">
           <span>X: {cursorCoords.x.toFixed(0)}</span>
           <span>Y: {cursorCoords.y.toFixed(0)}</span>
           <span>{isSoloMode ? 'Mode: Solo (Personal)' : `Room: ${roomId}`}</span>
-          {!isSoloMode && isHost && <span className="text-amber-600 font-semibold font-sans">★ Host</span>}
-          {!isSoloMode && !canWrite && <span className="text-rose-500 font-semibold font-sans">🔒 View-Only</span>}
+          {!isSoloMode && isHost && <span className="text-amber-600 dark:text-amber-400 font-semibold font-sans">★ Host</span>}
+          {!isSoloMode && !canWrite && <span className="text-rose-500 dark:text-rose-400 font-semibold font-sans">🔒 View-Only</span>}
         </div>
         <div className="flex items-center gap-2">
           <div
@@ -1728,7 +1750,7 @@ export default function App() {
               isSoloMode ? 'bg-blue-400' : (isConnected ? 'bg-emerald-500' : 'bg-rose-400')
             }`}
           />
-          <span className="text-[10px] text-slate-500 font-semibold uppercase tracking-wider font-sans">
+          <span className="text-[10px] text-slate-500 dark:text-slate-400 font-semibold uppercase tracking-wider font-sans">
             {isSoloMode ? 'Solo Mode' : (isConnected ? 'Socket.io Connected' : 'Socket.io Offline')}
           </span>
         </div>
