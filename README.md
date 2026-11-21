@@ -95,7 +95,7 @@ Most existing whiteboards force compromises: either you pay heavy per-seat month
   * Kick/eject disruptive participants with custom reasons.
   * Automatic host election/migration when the original room owner leaves.
 * **🔐 Complete Authentication Suite**:
-  * Secure Email & Password accounts with PBKDF2 hashing and unique 64-byte salts.
+  * Secure Email & Password accounts using PBKDF2-SHA512 (100,000 iterations, a unique 16-byte salt, and a 64-byte derived key).
   * **Google OAuth 2.0** with popup handling and direct URL hash redirect fallback (`#auth_token=`).
   * One-click Anonymous Guest identities with persistent session tokens.
 * **💾 Multi-Tier Storage**:
@@ -115,7 +115,7 @@ Most existing whiteboards force compromises: either you pay heavy per-seat month
 | **Real-Time Signaling** | Socket.io Client, WebRTC `RTCPeerConnection` (Mesh) |
 | **Backend** | Node.js (ESM), Express 4, Socket.io Server |
 | **Database** | MongoDB 7 / MongoDB Atlas Native Node Driver (required) |
-| **Security** | PBKDF2 Cryptographic Hashing, Rate Limiting, CORS Allowlist |
+| **Security** | PBKDF2-SHA512 Password Hashing (100,000 iterations), 32-byte Random Bearer Tokens, Rate Limiting, CORS Allowlist |
 | **Hosting & CI/CD** | Render, Railway, Docker, Vercel |
 
 ---

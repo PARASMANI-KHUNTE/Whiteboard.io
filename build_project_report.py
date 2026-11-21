@@ -1252,11 +1252,11 @@ def build_report():
                "A rigorous inspection of the Whiteboard.io repository was conducted across `server/package.json`, `client/package.json`, configuration files, and source directories. Based on this direct codebase analysis:")
     
     add_body_p(doc, 
-               "\"No formal automated test suite was identified in the analyzed repository.\"",
+               "\"The server includes an automated test suite using Node.js's built-in test runner (`npm test --prefix server`).\"",
                bold_prefix="Codebase Finding: ")
     
     add_body_p(doc, 
-               "The existing `package.json` scripts focus exclusively on development execution (`npm run dev`, `tsx`, `nodemon`) and production builds (`esbuild`, `vite build`). Unit testing frameworks (such as Jest, Vitest, or Mocha) and end-to-end browser automation suites (such as Cypress or Playwright) are not currently installed or configured.")
+               "The server tests use `node:test` and `node:assert` with no additional test framework dependency, covering socket payload validation, clear-vote cancellation, session token expiry, and OAuth state validation. Development scripts (`npm run dev`, `tsx`, `nodemon`) and production builds (`esbuild`, `vite build`) remain available. Browser end-to-end automation (for example, Playwright or Cypress) is not configured.")
     
     add_styled_heading(doc, "6.2 Comprehensive Recommended Test-Case Matrix", 2)
     add_body_p(doc, 

@@ -42,7 +42,7 @@ App.tsx
 ## 2. Core Custom Hooks
 
 ### 1. `useSocket(roomId, authUser, authToken)`
-Located in [`client/src/hooks/useSocket.ts`](file:///f:/Codes/Projects/Whiteboard/Whiteboard.io/client/src/hooks/useSocket.ts).
+Located in [`../client/src/hooks/useSocket.ts`](../client/src/hooks/useSocket.ts).
 - Manages the primary Socket.io connection to `BACKEND_URL`.
 - Exposes real-time state:
   - `elements`: Key-value map of canvas elements (`Record<string, CanvasElement>`).
@@ -58,8 +58,8 @@ Located in [`client/src/hooks/useSocket.ts`](file:///f:/Codes/Projects/Whiteboar
 - Listens for `elements-batch-created` and `elements-batch-deleted` to atomically render complex multi-element diagrams without overloading network buffers.
 
 ### 2. `useAuth()`
-Located in [`client/src/hooks/useAuth.ts`](file:///f:/Codes/Projects/Whiteboard/Whiteboard.io/client/src/hooks/useAuth.ts).
-- Manages user identity and JWT session persistence in `localStorage`.
+Located in [`../client/src/hooks/useAuth.ts`](../client/src/hooks/useAuth.ts).
+- Manages user identity and opaque server-issued bearer token persistence in `localStorage`.
 - Supports:
   - Account registration and login via `/api/auth/*`.
   - Ephemeral guest creation via `/api/auth/guest` with seamless identity recovery (`guestIdentity.ts`).
@@ -67,7 +67,7 @@ Located in [`client/src/hooks/useAuth.ts`](file:///f:/Codes/Projects/Whiteboard/
   - Room querying via `/api/rooms/my-rooms`.
 
 ### 3. `useVoiceChat({ socket, currentUser, roomId, users })`
-Located in [`client/src/hooks/useVoiceChat.ts`](file:///f:/Codes/Projects/Whiteboard/Whiteboard.io/client/src/hooks/useVoiceChat.ts).
+Located in [`../client/src/hooks/useVoiceChat.ts`](../client/src/hooks/useVoiceChat.ts).
 - Initializes Web Audio API `AudioContext` and `AnalyserNode`.
 - Captures microphone input (`navigator.mediaDevices.getUserMedia`).
 - Detects vocal speech using volume thresholding and broadcasts real-time `audio-level` packets.
@@ -75,7 +75,7 @@ Located in [`client/src/hooks/useVoiceChat.ts`](file:///f:/Codes/Projects/Whiteb
 - Handles audio track streaming, muting, deafening, and fallback simulated audio bars when mic access is blocked by browser policies.
 
 ### 4. `useTheme()`
-Located in [`client/src/hooks/useTheme.ts`](file:///f:/Codes/Projects/Whiteboard/Whiteboard.io/client/src/hooks/useTheme.ts).
+Located in [`../client/src/hooks/useTheme.ts`](../client/src/hooks/useTheme.ts).
 - Toggles dark mode and light mode across the application.
 - Syncs state with `localStorage` and applies the `dark` class to the root HTML document.
 
