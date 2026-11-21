@@ -122,6 +122,9 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
   const [liveStrokes, setLiveStrokes] = useState<
     Record<string, { strokeId: string; userId: string; points: Point[]; color: string; size: number; isHighlighter?: boolean }>
   >({});
+  // Stroke ids whose `stroke-live-started` has been seen; points arriving
+  // before that event stay queued instead of being dropped.
+  const activeStrokeIdsRef = useRef<Set<string>>(new Set());
   const [notifications, setNotifications] = useState<{ id: string; text: string; type: 'info' | 'success' | 'warning' }[]>([]);
   // Monotonic counter so consumers can react to an explicit board clear
   // (including remote/voted clears) without watching the element map.
@@ -298,6 +301,7 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
       setIsKicked(false);
       setKickedReason(null);
       setUsers({});
+      activeStrokeIdsRef.current.clear();
       setLiveStrokes({});
       setVoteToClear(null);
       setRoomName('');
@@ -510,13 +514,19 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
     // animation frame. Appending in place is safe because the points array is
     // replaced (not mutated) when handed to React.
     const pendingLivePoints = new Map<string, Point[]>();
+    const MAX_PENDING_LIVE_POINTS_PER_STROKE = 512;
     let liveFlushRaf: number | null = null;
 
     const flushLivePoints = () => {
       liveFlushRaf = null;
       if (pendingLivePoints.size === 0) return;
-      const batches = Array.from(pendingLivePoints.entries());
-      pendingLivePoints.clear();
+      // Keep points for strokes we have not seen a start event for; they may
+      // have overtaken the start packet on a lossy/reordered connection.
+      const batches = Array.from(pendingLivePoints.entries()).filter(([strokeId]) =>
+        activeStrokeIdsRef.current.has(strokeId)
+      );
+      if (batches.length === 0) return;
+      batches.forEach(([strokeId]) => pendingLivePoints.delete(strokeId));
       setLiveStrokes((prev) => {
         let changed = false;
         const next: typeof prev = { ...prev };
@@ -532,6 +542,7 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
 
     // Real-time live stroke events from other users
     socket.on('stroke-live-started', (data: { userId: string; strokeId: string; point: Point; color: string; size: number; isHighlighter?: boolean }) => {
+      activeStrokeIdsRef.current.add(data.strokeId);
       setLiveStrokes((prev) => ({
         ...prev,
         [data.strokeId]: {
@@ -543,12 +554,20 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
           isHighlighter: data.isHighlighter,
         },
       }));
+      // Points that arrived before this start event are now safe to append.
+      if (pendingLivePoints.has(data.strokeId) && liveFlushRaf === null) {
+        liveFlushRaf = requestAnimationFrame(flushLivePoints);
+      }
     });
 
     socket.on('stroke-live-pointed', (data: { strokeId: string; point: Point }) => {
       const pending = pendingLivePoints.get(data.strokeId);
-      if (pending) pending.push(data.point);
-      else pendingLivePoints.set(data.strokeId, [data.point]);
+      if (pending) {
+        if (pending.length >= MAX_PENDING_LIVE_POINTS_PER_STROKE) pending.shift();
+        pending.push(data.point);
+      } else {
+        pendingLivePoints.set(data.strokeId, [data.point]);
+      }
       if (liveFlushRaf === null) {
         liveFlushRaf = requestAnimationFrame(flushLivePoints);
       }
@@ -570,6 +589,8 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
     socket.on('element-created', (element: CanvasElement) => {
       setElements((prev) => ({ ...prev, [element.id]: element }));
       // Clean up live stroke representation if applicable
+      activeStrokeIdsRef.current.delete(element.id);
+      pendingLivePoints.delete(element.id);
       setLiveStrokes((prev) => {
         if (!prev[element.id]) return prev;
         const next = { ...prev };
@@ -672,6 +693,10 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
 
     socket.on('board-cleared', (info: { initiatorName: string; wasVoted: boolean }) => {
       pendingElementUpdatesRef.current.clear();
+      if (liveFlushRaf !== null) cancelAnimationFrame(liveFlushRaf);
+      liveFlushRaf = null;
+      pendingLivePoints.clear();
+      activeStrokeIdsRef.current.clear();
       setElements({});
       setLiveStrokes({});
       setBoardClearCount((count) => count + 1);
@@ -686,6 +711,7 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
       flushElementUpdates();
       if (liveFlushRaf !== null) cancelAnimationFrame(liveFlushRaf);
       pendingLivePoints.clear();
+      activeStrokeIdsRef.current.clear();
       pendingElementUpdatesRef.current.clear();
       if (elementUpdateTimerRef.current !== null) {
         clearTimeout(elementUpdateTimerRef.current);
@@ -803,6 +829,7 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
 
   const emitClearBoardDirect = useCallback(() => {
     pendingElementUpdatesRef.current.clear();
+    activeStrokeIdsRef.current.clear();
     setElements({});
     setLiveStrokes({});
     setBoardClearCount((count) => count + 1);
@@ -856,6 +883,7 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
       }
       setElements({});
       elementsRef.current = {};
+      activeStrokeIdsRef.current.clear();
       setLiveStrokes({});
       setUsers({});
       setIsHost(true);
@@ -874,6 +902,7 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
     // Only clear the current board once we know we are actually switching rooms.
     setElements({});
     elementsRef.current = {};
+    activeStrokeIdsRef.current.clear();
     setLiveStrokes({});
     setUsers({});
     setRoomName('');
