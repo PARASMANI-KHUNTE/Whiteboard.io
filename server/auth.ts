@@ -42,6 +42,12 @@ export type RoomRole = 'admin' | 'editor' | 'viewer';
 export interface RoomPermission {
   canWrite: boolean;
   role: RoomRole;
+  /**
+   * True when the host explicitly granted/revoked this user. Explicit choices
+   * survive room-lock toggles; `canWrite` is the host's decision, while the
+   * effective access is `canWrite && !isLocked`.
+   */
+  explicit?: boolean;
 }
 
 export interface SessionRoomMeta {

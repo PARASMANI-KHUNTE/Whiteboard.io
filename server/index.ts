@@ -23,12 +23,18 @@ import {
   transferRoomOwnership,
   deleteRoom,
   flushAllPendingSaves,
+  type RoomPermission,
 } from "./auth";
 import { connectDb, checkDbHealth } from "./db";
 import { resolveSocketIdentity } from "./socketIdentity";
 import { chooseReplacementHost } from "./roomHost";
 import { canDirectClearBoard } from "./boardClear";
 import { getEligibleVoterIds, pruneVoteEligibility, tallyVote } from "./voteEligibility";
+import {
+  applyLockToStoredPermissions,
+  effectivePermission,
+  setExplicitPermission,
+} from "./roomPermissions";
 import {
   isRecord,
   readBoolean,
@@ -150,7 +156,7 @@ interface RoomData {
   createdAt: number;
   isLocked: boolean;
   kickedUserIds: Set<string>;
-  userPermissions: Record<string, { canWrite: boolean; role: 'admin' | 'editor' | 'viewer' }>;
+  userPermissions: Record<string, RoomPermission>;
   elements: Record<string, CanvasElement>;
   users: Record<string, UserSession>;
   voteToClear: VoteState | null;
@@ -1151,17 +1157,22 @@ async function startServer() {
           (accountId ? room.userPermissions[accountId] : undefined);
         const userPerm = storedPerm || previousPermission;
         if (userPerm) {
-          canWrite = userPerm.canWrite;
-          role = userPerm.role;
+          // Explicit host decisions are evaluated against the current lock
+          // state; a locked room still overrides a stored grant (#70).
+          const resolved = effectivePermission(userPerm, room.isLocked);
+          canWrite = resolved.canWrite;
+          role = resolved.role;
           // Carry a restriction across an in-place login so signing in cannot
-          // be used to shed a host-revoked view-only state.
+          // be used to shed a host-revoked view-only state. Keep the stored
+          // decision itself so an unlock can restore an explicit grant later.
           if (!storedPerm) {
-            room.userPermissions[actualUserId] = { canWrite, role };
+            room.userPermissions[actualUserId] = { ...userPerm };
             persistRoomAccess(room);
           }
         } else {
-          canWrite = !room.isLocked;
-          role = room.isLocked ? 'viewer' : 'editor';
+          const resolved = effectivePermission(undefined, room.isLocked);
+          canWrite = resolved.canWrite;
+          role = resolved.role;
           room.userPermissions[actualUserId] = { canWrite, role };
         }
       }
@@ -1213,14 +1224,18 @@ async function startServer() {
       if (!currentRoomId || !currentUser || !currentUser.isHost) return;
       if (!isRecord(payload)) return;
       const targetUserId = readId(payload.targetUserId);
-      const canWrite = readBoolean(payload.canWrite);
-      if (!targetUserId || canWrite === null) return;
+      const requestedCanWrite = readBoolean(payload.canWrite);
+      if (!targetUserId || requestedCanWrite === null) return;
       const room = rooms.get(currentRoomId);
       if (!room) return;
       if (targetUserId === currentUser.id) return; // Host cannot revoke self
 
-      const role: 'editor' | 'viewer' = canWrite ? 'editor' : 'viewer';
-      room.userPermissions[targetUserId] = { canWrite, role };
+      // Store the host's decision explicitly so lock/unlock cannot undo it.
+      setExplicitPermission(room.userPermissions, targetUserId, requestedCanWrite);
+      const { canWrite, role } = effectivePermission(
+        room.userPermissions[targetUserId],
+        room.isLocked
+      );
 
       if (room.users[targetUserId]) {
         room.users[targetUserId].canWrite = canWrite;
@@ -1234,8 +1249,10 @@ async function startServer() {
         io.to(targetUser.socketId).emit("permission-updated", {
           canWrite,
           role,
-          message: canWrite
-            ? "Writing permission has been granted by the host."
+          message: requestedCanWrite
+            ? canWrite
+              ? "Writing permission has been granted by the host."
+              : "Writing permission was granted by the host and applies when the room is unlocked."
             : "Writing permission has been revoked by the host. You are in view-only mode.",
         });
       }
@@ -1306,19 +1323,17 @@ async function startServer() {
       if (!room) return;
       room.isLocked = isLocked;
 
-      // Update live participants and persisted permissions, including users who
-      // are currently offline, so a restart/unlock does not leave stale viewers.
-      const nextRole: 'editor' | 'viewer' = isLocked ? 'viewer' : 'editor';
-      const nextCanWrite = !isLocked;
-      Object.keys(room.userPermissions).forEach((userId) => {
-        if (userId === room.creatorId) return;
-        room.userPermissions[userId] = { canWrite: nextCanWrite, role: nextRole };
-      });
+      // Update live participants and persisted permissions, including users
+      // who are currently offline. Explicit host grants/revocations are kept,
+      // so an unlock cannot silently restore access the host removed (#70).
+      applyLockToStoredPermissions(room.userPermissions, isLocked, room.creatorId);
       Object.values(room.users).forEach((u) => {
-        if (!u.isHost) {
-          u.canWrite = nextCanWrite;
-          u.role = nextRole;
-          room.userPermissions[u.id] = { canWrite: nextCanWrite, role: nextRole };
+        if (u.isHost) return;
+        const resolved = effectivePermission(room.userPermissions[u.id], isLocked);
+        u.canWrite = resolved.canWrite;
+        u.role = resolved.role;
+        if (!room.userPermissions[u.id]) {
+          room.userPermissions[u.id] = { ...resolved };
         }
       });
       syncVoteEligibility(io, room);
