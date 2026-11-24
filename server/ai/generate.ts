@@ -9,6 +9,7 @@ import type {
   DiagramType,
 } from "./types";
 import { sanitizeSessionId } from "./types";
+import { RequestAbortedError, throwIfAborted } from "./abort";
 import { QueueFullError, ThrottledQueue } from "./requestQueue";
 import { TimedCache } from "./responseCache";
 import {
@@ -94,8 +95,12 @@ function outboundIntervalMs(provider: AiProviderInfo): number {
   return 3000;
 }
 
-function scheduleThrottledTask<T>(intervalMs: number, task: () => Promise<T>): Promise<T> {
-  return outboundQueue.schedule(intervalMs, task);
+function scheduleThrottledTask<T>(
+  intervalMs: number,
+  task: () => Promise<T>,
+  signal?: AbortSignal
+): Promise<T> {
+  return outboundQueue.schedule(intervalMs, task, signal);
 }
 
 // ---------------------------------------------------------------------------
@@ -131,27 +136,33 @@ function callModelOnce(
   provider: AiProviderInfo,
   message: string,
   temperature: number,
-  maxRetries: number
+  maxRetries: number,
+  signal?: AbortSignal
 ): Promise<unknown> {
-  return scheduleThrottledTask(outboundIntervalMs(provider), () =>
-    callAiModel(provider, message, temperature, { maxRetries })
+  return scheduleThrottledTask(
+    outboundIntervalMs(provider),
+    () => callAiModel(provider, message, temperature, { maxRetries, signal }),
+    signal
   );
 }
 
-/** Injectable so overload behavior can be tested without a live provider chain. */
+/** Injectable so overload and cancellation behavior can be tested without a live provider chain. */
 export type ModelCall = (
   provider: AiProviderInfo,
   message: string,
   temperature: number,
-  maxRetries: number
+  maxRetries: number,
+  signal?: AbortSignal
 ) => Promise<unknown>;
 
 export async function callModelChain(
   chain: AiProviderInfo[],
   message: string,
   temperature: number,
-  call: ModelCall = callModelOnce
+  call: ModelCall = callModelOnce,
+  signal?: AbortSignal
 ): Promise<ChainResult> {
+  throwIfAborted(signal);
   const failed: AiProviderInfo[] = [];
   const errors: string[] = [];
   // With alternatives available, fail over quickly instead of retrying the same
@@ -159,8 +170,9 @@ export async function callModelChain(
   const maxRetries = chain.length > 1 ? 1 : 3;
 
   for (const provider of chain) {
+    throwIfAborted(signal);
     try {
-      const raw = await call(provider, message, temperature, maxRetries);
+      const raw = await call(provider, message, temperature, maxRetries, signal);
       if (failed.length > 0) {
         console.warn(
           `[AI Failover]: ${provider.label} (${provider.model}) answered after skipping ${failed.map((p) => p.model).join(", ")}.`
@@ -168,6 +180,8 @@ export async function callModelChain(
       }
       return { raw, provider, failed };
     } catch (error: unknown) {
+      throwIfAborted(signal);
+      if (error instanceof RequestAbortedError) throw error;
       // Every provider shares the same queue. Trying the next one cannot help,
       // and converting this into AiFailoverError hides overload as a 200
       // fallback instead of the documented 429 (#65).
@@ -317,10 +331,12 @@ export interface GenerateDiagramParams {
   canvasCenter?: CanvasCenter;
   author?: DiagramAuthor;
   sessionId?: string;
+  signal?: AbortSignal;
 }
 
 export async function generateDiagram(params: GenerateDiagramParams): Promise<DiagramPayload> {
-  const { prompt, type, detail, direction, canvasCenter = { x: 0, y: 0 } } = params;
+  const { prompt, type, detail, direction, canvasCenter = { x: 0, y: 0 }, signal } = params;
+  throwIfAborted(signal);
 
   const chain = resolveProviderChain();
   const provider = chain[0] ?? null;
@@ -372,7 +388,7 @@ export async function generateDiagram(params: GenerateDiagramParams): Promise<Di
 
   try {
     const baseMessage = buildInitialUserMessage(prompt, type, detail, direction);
-    const attempt = await callModelChain(chain, baseMessage, 0.4);
+    const attempt = await callModelChain(chain, baseMessage, 0.4, callModelOnce, signal);
     const chosen = attempt.provider;
     let best = normalizeGraph(attempt.raw, options);
 
@@ -380,10 +396,12 @@ export async function generateDiagram(params: GenerateDiagramParams): Promise<Di
       console.warn(`[AI Quality Gate]: ${best.issues.join(" ")} Retrying once with stricter guidance.`);
       const retryMessage = buildRetryUserMessage(baseMessage, best.issues);
       try {
-        const secondRaw = await callModelOnce(chosen, retryMessage, 0.3, 2);
+        const secondRaw = await callModelOnce(chosen, retryMessage, 0.3, 2, signal);
         best = pickBetter(best, normalizeGraph(secondRaw, options));
       } catch (retryError: unknown) {
-        if (retryError instanceof QueueFullError) throw retryError;
+        if (retryError instanceof RequestAbortedError || retryError instanceof QueueFullError) {
+          throw retryError;
+        }
         console.warn(
           `[AI Quality Gate]: Retry failed: ${(retryError as Error).message}. Keeping the first result.`
         );
@@ -395,6 +413,7 @@ export async function generateDiagram(params: GenerateDiagramParams): Promise<Di
     }
 
     if (best.issues.length === 0) {
+      throwIfAborted(signal);
       graphCache.set(key, { graph: best.graph, provider: chosen });
     }
 
@@ -415,7 +434,8 @@ export async function generateDiagram(params: GenerateDiagramParams): Promise<Di
       ...(notice ? { notice } : {}),
     });
   } catch (error: unknown) {
-    if (error instanceof QueueFullError) throw error;
+    throwIfAborted(signal);
+    if (error instanceof RequestAbortedError || error instanceof QueueFullError) throw error;
     console.warn(
       `[AI Graceful Fallback]: ${(error as Error).message}. Using the local diagram engine.`
     );
@@ -448,6 +468,7 @@ export interface ReviseDiagramParams {
   canvasCenter?: CanvasCenter;
   author?: DiagramAuthor;
   sessionId?: string;
+  signal?: AbortSignal;
 }
 
 export async function reviseDiagram(params: ReviseDiagramParams): Promise<DiagramPayload> {
@@ -459,7 +480,9 @@ export async function reviseDiagram(params: ReviseDiagramParams): Promise<Diagra
     detail,
     direction,
     canvasCenter = { x: 0, y: 0 },
+    signal,
   } = params;
+  throwIfAborted(signal);
 
   const sessionId = sanitizeSessionId(params.sessionId);
   const current = normalizeGraph(graph, {
@@ -512,7 +535,7 @@ export async function reviseDiagram(params: ReviseDiagramParams): Promise<Diagra
       fallbackSummary: current.graph.summary,
     };
 
-    const attempt = await callModelChain(chain, baseMessage, 0.3);
+    const attempt = await callModelChain(chain, baseMessage, 0.3, callModelOnce, signal);
     const chosen = attempt.provider;
     let best = normalizeGraph(attempt.raw, options);
 
@@ -520,12 +543,14 @@ export async function reviseDiagram(params: ReviseDiagramParams): Promise<Diagra
     if (best.issues.length > 0) {
       const retryMessage = buildRetryUserMessage(baseMessage, best.issues);
       try {
-        const secondRaw = await callModelOnce(chosen, retryMessage, 0.25, 2);
+        const secondRaw = await callModelOnce(chosen, retryMessage, 0.25, 2, signal);
         const second = normalizeGraph(secondRaw, options);
         if (pickBetter(best, second) === second) bestRaw = secondRaw;
         best = pickBetter(best, second);
       } catch (retryError: unknown) {
-        if (retryError instanceof QueueFullError) throw retryError;
+        if (retryError instanceof RequestAbortedError || retryError instanceof QueueFullError) {
+          throw retryError;
+        }
         console.warn(
           `[AI Quality Gate]: Revision retry failed: ${(retryError as Error).message}. Keeping the first result.`
         );
@@ -560,7 +585,8 @@ export async function reviseDiagram(params: ReviseDiagramParams): Promise<Diagra
       ...(notice ? { notice } : {}),
     });
   } catch (error: unknown) {
-    if (error instanceof QueueFullError) throw error;
+    throwIfAborted(signal);
+    if (error instanceof RequestAbortedError || error instanceof QueueFullError) throw error;
     console.warn(
       `[AI Revision Graceful Fallback]: ${(error as Error).message}. Keeping the current diagram.`
     );

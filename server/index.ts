@@ -76,6 +76,7 @@ import {
   OAUTH_STATE_TTL_MS,
 } from "./oauthState";
 import { AiQueueFullError, generateDiagram, reviseDiagram } from "./ai/generate";
+import { bindRequestAbort } from "./ai/abort";
 import { getProviderSummary } from "./ai/providers";
 import {
   coerceDiagramType,
@@ -588,6 +589,7 @@ async function startServer() {
 
   // AI Diagram Generation Route (Rate limited to 10 requests / min per IP)
   app.post("/api/ai/generate-diagram", authRateLimiter(10, 60000, "ai-generate"), async (req, res) => {
+    const requestAbort = bindRequestAbort(req, res);
     try {
       const body = req.body ?? {};
       const prompt = typeof body.prompt === "string" ? body.prompt.trim() : "";
@@ -618,18 +620,24 @@ async function startServer() {
         canvasCenter,
         author,
         sessionId: typeof body.sessionId === "string" ? body.sessionId : undefined,
+        signal: requestAbort.signal,
       });
 
+      if (requestAbort.signal.aborted) return;
       res.json({ success: true, ...result });
     } catch (err: any) {
+      if (requestAbort.signal.aborted) return;
       const status = err instanceof AiQueueFullError ? 429 : 500;
       console.error("[AI Generate Error]:", err.message);
       res.status(status).json({ success: false, error: err.message || "Failed to generate diagram" });
+    } finally {
+      requestAbort.dispose();
     }
   });
 
   // AI Follow-up Revision Route (stateless: client sends the current graph)
   app.post("/api/ai/revise-diagram", authRateLimiter(20, 60000, "ai-revise"), async (req, res) => {
+    const requestAbort = bindRequestAbort(req, res);
     try {
       const body = req.body ?? {};
       const instruction = typeof body.instruction === "string" ? body.instruction.trim() : "";
@@ -683,13 +691,18 @@ async function startServer() {
         canvasCenter,
         author,
         sessionId: typeof body.sessionId === "string" ? body.sessionId : undefined,
+        signal: requestAbort.signal,
       });
 
+      if (requestAbort.signal.aborted) return;
       res.json({ success: true, ...result });
     } catch (err: any) {
+      if (requestAbort.signal.aborted) return;
       const status = err instanceof AiQueueFullError ? 429 : 500;
       console.error("[AI Revision Error]:", err.message);
       res.status(status).json({ success: false, error: err.message || "Failed to revise diagram" });
+    } finally {
+      requestAbort.dispose();
     }
   });
 

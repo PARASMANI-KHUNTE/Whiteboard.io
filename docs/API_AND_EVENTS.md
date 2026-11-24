@@ -274,6 +274,7 @@ Retrieves the active server AI backend configuration for client badges and model
 Generates structured canvas elements from natural language prompts using Gemini or local Ollama, with automated model failover and offline procedural fallback.
 
 * **Rate limit**: 10 requests / minute per IP address.
+* **Cancellation**: Aborting the browser request also aborts the server-side provider call and releases its queue slot. Cancelled requests are never cached and return no response body.
 * **Headers**: `Authorization: Bearer <token>` (optional; unauthenticated calls credit the answering AI model as author).
 * **Request Body**:
   ```json
@@ -352,6 +353,7 @@ Generates structured canvas elements from natural language prompts using Gemini 
 Stateless endpoint for iteratively revising an existing diagram from follow-up user instructions.
 
 * **Rate limit**: 20 requests / minute per IP address.
+* **Cancellation**: Aborting the browser request cancels the in-flight revision call and frees its queue slot; no fallback payload is generated for a cancelled request.
 * **Headers**: `Authorization: Bearer <token>` (optional).
 * **Request Body**:
   ```json
