@@ -25,6 +25,8 @@ server/data/
 *.pptx
 *.xlsx
 
-# Allow project report
+# Allow project report and presentation deck
 !Generated_Project_Report.docx
 !docs/Generated_Project_Report.docx
+!Whiteboard_io_Presentation.pptx
+!docs/Whiteboard_io_Presentation.pptx
