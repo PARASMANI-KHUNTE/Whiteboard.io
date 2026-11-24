@@ -1,6 +1,7 @@
 import React from 'react';
 import { ZoomIn, ZoomOut, RotateCcw } from 'lucide-react';
 import { getHandToggleMeta } from './ui/toolActions';
+import type { WhiteboardHandToggleAction } from '../hooks/useWhiteboardActions';
 
 interface ZoomControlsProps {
   zoom: number;
@@ -10,6 +11,7 @@ interface ZoomControlsProps {
   isHandTool?: boolean;
   canWrite?: boolean;
   onToggleHand?: () => void;
+  handToggle?: WhiteboardHandToggleAction;
 }
 
 export const ZoomControls: React.FC<ZoomControlsProps> = ({
@@ -20,10 +22,16 @@ export const ZoomControls: React.FC<ZoomControlsProps> = ({
   isHandTool = false,
   canWrite = true,
   onToggleHand,
+  handToggle,
 }) => {
   const percentage = Math.round(zoom * 100);
-  const handMeta = getHandToggleMeta(isHandTool, canWrite);
-  const HandIcon = handMeta.Icon;
+  const fallbackMeta = getHandToggleMeta(isHandTool, canWrite);
+  const handHandler = handToggle?.handler ?? onToggleHand;
+  const handActive = handToggle?.active ?? isHandTool;
+  const handAriaLabel = handToggle?.ariaLabel ?? fallbackMeta.ariaLabel;
+  const handTitle = handToggle?.title ?? fallbackMeta.title;
+  const HandIcon = handToggle?.icon ?? fallbackMeta.Icon;
+  const handButtonId = handToggle?.id ?? 'zoom-hand-toggle-btn';
 
   return (
     <div
@@ -31,20 +39,20 @@ export const ZoomControls: React.FC<ZoomControlsProps> = ({
       className="fixed bottom-20 sm:bottom-6 left-3 sm:left-4 z-40 wb-surface-glass rounded-2xl p-1 sm:p-1.5 flex items-center gap-0.5 sm:gap-1 select-none pointer-events-auto transition-all text-slate-700 dark:text-slate-200 wb-bottom-chat-aware wb-bottom-zoom shadow-xl"
     >
       {/* Hand / Pan Toggle Button (sourced from shared tool registry) */}
-      {onToggleHand && (
+      {handHandler && (
         <>
           <button
-            id="zoom-hand-toggle-btn"
+            id={handButtonId}
             type="button"
-            aria-label={handMeta.ariaLabel}
-            aria-pressed={isHandTool}
-            onClick={onToggleHand}
+            aria-label={handAriaLabel}
+            aria-pressed={handActive}
+            onClick={handHandler}
             className={`p-2 sm:p-2 rounded-xl transition-colors cursor-pointer flex items-center justify-center min-w-[36px] min-h-[36px] sm:min-w-[32px] sm:min-h-[32px] btn-press ${
-              isHandTool
+              handActive
                 ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400 font-semibold ring-1.5 ring-blue-500 shadow-xs'
                 : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100/80 dark:hover:bg-slate-800/80'
             }`}
-            title={handMeta.title}
+            title={handTitle}
           >
             <HandIcon className="w-4 h-4" />
           </button>

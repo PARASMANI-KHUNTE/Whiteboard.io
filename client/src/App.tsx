@@ -17,6 +17,7 @@ import { useVoiceChat } from './hooks/useVoiceChat';
 import { useTheme } from './hooks/useTheme';
 import { useModalA11y } from './hooks/useModalA11y';
 import { useTouchPointerBridge } from './hooks/useTouchPointerBridge';
+import { useWhiteboardActions } from './hooks/useWhiteboardActions';
 import { Header } from './components/Header';
 import Sidebar from './components/Sidebar';
 import { Toolbar } from './components/Toolbar';
@@ -24,6 +25,7 @@ import { Canvas } from './components/Canvas';
 import { VoteToClearModal } from './components/VoteToClearModal';
 import { AuthModal } from './components/AuthModal';
 import { ProfileModal } from './components/AccountPanel';
+import { AboutModal } from './components/AboutModal';
 import { CreateRoomModal } from './components/CreateRoomModal';
 import { ShareRoomModal } from './components/ShareRoomModal';
 import { AdminPanelModal } from './components/AdminPanelModal';
@@ -114,6 +116,7 @@ export default function App() {
   const [showShareModal, setShowShareModal] = useState<boolean>(false);
   const [showAdminModal, setShowAdminModal] = useState<boolean>(false);
   const [showAiModal, setShowAiModal] = useState<boolean>(false);
+  const [showAboutModal, setShowAboutModal] = useState<boolean>(false);
   const [showShortcutsModal, setShowShortcutsModal] = useState<boolean>(false);
   const [aiSession, setAiSession] = useState<AiSessionState | null>(null);
   const [isAiChatOpen, setIsAiChatOpen] = useState<boolean>(false);
@@ -1381,6 +1384,40 @@ export default function App() {
 
   const isMultiplayer = Object.keys(users).length > 1;
 
+  const whiteboardActions = useWhiteboardActions({
+    currentTool,
+    theme,
+    canWrite,
+    canUndo,
+    canRedo,
+    isMultiplayer,
+    isSoloMode,
+    isHost,
+    isSignedIn: Boolean(authUser),
+    isVoiceConnected,
+    isMuted,
+    isAiChatOpen,
+    onSelectTool: setCurrentTool,
+    onToggleTheme: handleToggleTheme,
+    onSelectAll: () => selectAllHandlerRef.current?.(),
+    onUndo: handleUndo,
+    onRedo: handleRedo,
+    onExport: handleExport,
+    onRequestClear: handleRequestClear,
+    onOpenRooms: () => setShowCreateRoomModal(true),
+    onOpenShare: () => setShowShareModal(true),
+    onShareAndGoLive: handleShareAndGoLive,
+    onOpenAdmin: () => setShowAdminModal(true),
+    onOpenAiDiagram: openAiDiagram,
+    onToggleAiChat: toggleAiChat,
+    onToggleVoice: handleToggleVoice,
+    onToggleMute: toggleMute,
+    onOpenShortcuts: () => setShowShortcutsModal(true),
+    onOpenProfile: () => setShowProfileModal(true),
+    onOpenAuth: () => setShowAuthModal(true),
+    onOpenAbout: () => setShowAboutModal(true),
+  });
+
   useModalA11y({
     isOpen: isKicked,
     onClose: () => {
@@ -1409,6 +1446,7 @@ export default function App() {
     !authUser ||
     showAuthModal ||
     showProfileModal ||
+    showAboutModal ||
     showCreateRoomModal ||
     showShareModal ||
     showAdminModal ||
@@ -1439,18 +1477,10 @@ export default function App() {
         canWrite={canWrite}
         isLocked={isLocked}
         authUser={authUser}
-        onOpenAuthModal={() => setShowAuthModal(true)}
-        onOpenProfile={() => setShowProfileModal(true)}
-        onOpenCreateRoomModal={() => setShowCreateRoomModal(true)}
-        onOpenShareModal={() => setShowShareModal(true)}
-        onShareAndGoLive={handleShareAndGoLive}
-        onOpenAdminModal={() => setShowAdminModal(true)}
-        onOpenAiModal={openAiDiagram}
-        onToggleAiChat={toggleAiChat}
-        isAiChatOpen={isAiChatOpen}
+        actions={whiteboardActions}
         onSwitchRoom={switchRoom}
         theme={theme}
-        onToggleTheme={handleToggleTheme}
+        isAiChatOpen={isAiChatOpen}
         isVoiceConnected={isVoiceConnected}
         isMuted={isMuted}
         isDeafened={isDeafened}
@@ -1464,8 +1494,6 @@ export default function App() {
         onClearError={clearVoiceError}
         isIframeRestricted={isIframeRestricted}
         activeSpeakers={activeSpeakers}
-        onToggleVoice={handleToggleVoice}
-        onToggleMute={toggleMute}
         onToggleDeafen={toggleDeafen}
         onToggleSimulated={toggleSimulated}
         onOpenInNewTab={openInNewTab}
@@ -1474,34 +1502,9 @@ export default function App() {
 
       {/* Grouped controls rail — keeps the canvas uncluttered while every action stays reachable. */}
       <Sidebar
-        currentTool={currentTool}
+        actions={whiteboardActions}
         theme={theme}
-        canWrite={canWrite}
-        canUndo={canUndo}
-        canRedo={canRedo}
-        isMultiplayer={isMultiplayer}
-        isHost={isHost}
-        isSignedIn={Boolean(authUser)}
         isVoiceConnected={isVoiceConnected}
-        isMuted={isMuted}
-        isAiChatOpen={isAiChatOpen}
-        onSelectTool={setCurrentTool}
-        onToggleTheme={handleToggleTheme}
-        onSelectAll={() => selectAllHandlerRef.current?.()}
-        onUndo={handleUndo}
-        onRedo={handleRedo}
-        onExport={handleExport}
-        onRequestClear={handleRequestClear}
-        onOpenRooms={() => setShowCreateRoomModal(true)}
-        onOpenShare={() => setShowShareModal(true)}
-        onOpenAdmin={() => setShowAdminModal(true)}
-        onOpenAi={openAiDiagram}
-        onToggleAiChat={toggleAiChat}
-        onToggleVoice={handleToggleVoice}
-        onToggleMute={toggleMute}
-        onOpenShortcuts={() => setShowShortcutsModal(true)}
-        onOpenProfile={() => setShowProfileModal(true)}
-        onOpenAuth={() => setShowAuthModal(true)}
       />
 
       {/* Main Interactive Canvas Area */}
@@ -1514,7 +1517,6 @@ export default function App() {
         canWrite={canWrite}
         shortcutsBlocked={isBlockingOverlayOpen}
         isShortcutsOpen={showShortcutsModal}
-        onOpenShortcuts={() => setShowShortcutsModal(true)}
         onCloseShortcuts={() => setShowShortcutsModal(false)}
         theme={theme}
         onRestrictedAttempt={() =>
@@ -1539,6 +1541,7 @@ export default function App() {
         onStrokeLiveStart={emitStrokeLiveStart}
         onStrokeLivePoint={emitStrokeLivePoint}
         onSelectTool={setCurrentTool}
+        actions={whiteboardActions}
         selectedShapeType={selectedShapeType}
         selectedIconName={selectedIconName}
         selectedWireStyle={selectedWireStyle}
@@ -1558,27 +1561,19 @@ export default function App() {
 
       {/* Bottom Floating Toolbar */}
       <Toolbar
+        actions={whiteboardActions}
         currentTool={currentTool}
         currentColor={currentColor}
         currentSize={currentSize}
-        canUndo={canUndo}
-        canRedo={canRedo}
         canWrite={canWrite}
         selectedShapeType={selectedShapeType}
         selectedIconName={selectedIconName}
         selectedWireStyle={selectedWireStyle}
-        onSelectTool={setCurrentTool}
         onSelectColor={setCurrentColor}
         onSelectSize={setCurrentSize}
         onSelectShape={setSelectedShapeType}
         onSelectIcon={setSelectedIconName}
         onSelectWireStyle={setSelectedWireStyle}
-        onUndo={handleUndo}
-        onRedo={handleRedo}
-        onRequestClear={handleRequestClear}
-        onExport={handleExport}
-        onSelectAll={() => selectAllHandlerRef.current?.()}
-        isMultiplayer={isMultiplayer}
       />
 
       {/* Vote to Clear Modal Banner */}
@@ -1707,6 +1702,15 @@ export default function App() {
         isOpen={showShortcutsModal}
         onClose={() => setShowShortcutsModal(false)}
       />
+
+      {/* About & Alternatives Comparison Modal */}
+      <ErrorBoundary fallbackTitle="About Dialog">
+        <AboutModal
+          isOpen={showAboutModal}
+          onClose={() => setShowAboutModal(false)}
+          onOpenAiModal={whiteboardActions.actions.aiDiagram.handler}
+        />
+      </ErrorBoundary>
 
       {/* Gemini AI Diagram Generator Modal */}
       <AiGenerateModal

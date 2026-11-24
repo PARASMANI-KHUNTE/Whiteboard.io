@@ -6,61 +6,20 @@ import {
   type ReactNode,
 } from 'react';
 import {
-  Download,
-  Info,
-  Keyboard,
-  ListChecks,
-  LogIn,
   PanelLeftClose,
   PanelLeftOpen,
-  Redo2,
-  Share2,
-  Shield,
-  Trash2,
-  Undo2,
-  UserRound,
-  Users,
   Menu,
   type LucideIcon,
 } from 'lucide-react';
 import type { ThemeMode } from '../hooks/useTheme';
-import type { ToolType } from '../types';
-import { getThemeToggleMeta } from './ui/ThemeToggle';
-import { getVoiceConnectionMeta, getVoiceMuteMeta } from './ui/voiceActions';
-import { getAiChatActionMeta, getAiDiagramActionMeta } from './ui/aiActions';
-import { CANVAS_TOOL_DEFINITIONS } from './ui/toolActions';
+import type { WhiteboardAction, WhiteboardActionRegistry, WhiteboardToolAction } from '../hooks/useWhiteboardActions';
 
 type IconComponent = LucideIcon;
 
 export interface SidebarProps {
-  currentTool: ToolType;
+  actions: WhiteboardActionRegistry;
   theme: ThemeMode;
-  canWrite: boolean;
-  canUndo: boolean;
-  canRedo: boolean;
-  isMultiplayer: boolean;
-  isHost: boolean;
-  isSignedIn: boolean;
   isVoiceConnected: boolean;
-  isMuted: boolean;
-  isAiChatOpen: boolean;
-  onSelectTool: (tool: ToolType) => void;
-  onToggleTheme: () => void;
-  onSelectAll: () => void;
-  onUndo: () => void;
-  onRedo: () => void;
-  onExport: () => void;
-  onRequestClear: () => void;
-  onOpenRooms: () => void;
-  onOpenShare: () => void;
-  onOpenAdmin: () => void;
-  onOpenAi: () => void;
-  onToggleAiChat: () => void;
-  onToggleVoice: () => void;
-  onToggleMute: () => void;
-  onOpenShortcuts: () => void;
-  onOpenProfile: () => void;
-  onOpenAuth: () => void;
 }
 
 interface SidebarButtonProps {
@@ -111,6 +70,30 @@ function SidebarButton({
   );
 }
 
+interface SidebarActionItemProps {
+  action: WhiteboardAction | WhiteboardToolAction;
+  id?: string;
+  expanded: boolean;
+  runAction: (fn: () => void) => void;
+}
+
+function SidebarActionItem({ action, id, expanded, runAction }: SidebarActionItemProps) {
+  return (
+    <SidebarButton
+      id={id}
+      icon={action.icon}
+      label={action.label}
+      title={action.title}
+      ariaLabel={'ariaLabel' in action ? action.ariaLabel : action.label}
+      expanded={expanded}
+      active={action.active}
+      pressed={'pressed' in action ? action.pressed : action.active}
+      disabled={action.disabled}
+      onClick={() => runAction(action.handler)}
+    />
+  );
+}
+
 interface SidebarSectionProps {
   title: string;
   expanded: boolean;
@@ -133,34 +116,8 @@ function SidebarSection({ title, expanded, children }: SidebarSectionProps) {
 }
 
 export default function Sidebar({
-  currentTool,
-  theme,
-  canWrite,
-  canUndo,
-  canRedo,
-  isMultiplayer,
-  isHost,
-  isSignedIn,
+  actions,
   isVoiceConnected,
-  isMuted,
-  isAiChatOpen,
-  onSelectTool,
-  onToggleTheme,
-  onSelectAll,
-  onUndo,
-  onRedo,
-  onExport,
-  onRequestClear,
-  onOpenRooms,
-  onOpenShare,
-  onOpenAdmin,
-  onOpenAi,
-  onToggleAiChat,
-  onToggleVoice,
-  onToggleMute,
-  onOpenShortcuts,
-  onOpenProfile,
-  onOpenAuth,
 }: SidebarProps) {
   const [isOpen, setIsOpen] = useState(false);
   const sidebarRef = useRef<HTMLElement>(null);
@@ -221,13 +178,6 @@ export default function Sidebar({
     action();
     if (window.innerWidth < 1024) setIsOpen(false);
   }, []);
-
-  const clickHeaderControl = useCallback(
-    (id: string) => runAction(() => document.getElementById(id)?.click()),
-    [runAction]
-  );
-
-  const toolButtons = CANVAS_TOOL_DEFINITIONS;
 
   return (
     <>
@@ -296,173 +246,75 @@ export default function Sidebar({
 
         <nav className="flex-1 space-y-3 overflow-y-auto px-2 py-3" aria-label="Whiteboard tools">
           <SidebarSection title="Tools" expanded={isOpen}>
-            {toolButtons.map(({ tool, label, icon, needsWrite }) => (
-              <SidebarButton
-                key={tool}
-                id={`sidebar-tool-${tool}`}
-                icon={icon}
-                label={label}
+            {actions.tools.map((toolAction) => (
+              <SidebarActionItem
+                key={toolAction.tool}
+                id={`sidebar-${toolAction.id}`}
+                action={toolAction}
                 expanded={isOpen}
-                active={currentTool === tool}
-                pressed={currentTool === tool}
-                disabled={needsWrite && !canWrite}
-                onClick={() => runAction(() => onSelectTool(tool))}
+                runAction={runAction}
               />
             ))}
           </SidebarSection>
 
           <SidebarSection title="Board" expanded={isOpen}>
-            <SidebarButton
-              id="sidebar-select-all"
-              icon={ListChecks}
-              label="Select all"
-              expanded={isOpen}
-              onClick={() => runAction(onSelectAll)}
-            />
-            <SidebarButton
-              icon={Undo2}
-              label="Undo"
-              expanded={isOpen}
-              disabled={!canUndo || !canWrite}
-              onClick={() => runAction(onUndo)}
-            />
-            <SidebarButton
-              icon={Redo2}
-              label="Redo"
-              expanded={isOpen}
-              disabled={!canRedo || !canWrite}
-              onClick={() => runAction(onRedo)}
-            />
-            <SidebarButton
-              icon={Download}
-              label="Export PNG"
-              expanded={isOpen}
-              onClick={() => runAction(onExport)}
-            />
-            <SidebarButton
-              icon={Trash2}
-              label={isMultiplayer ? 'Vote to clear' : 'Clear board'}
-              expanded={isOpen}
-              disabled={!canWrite}
-              onClick={() => runAction(onRequestClear)}
-            />
+            {[
+              actions.actions.selectAll,
+              actions.actions.undo,
+              actions.actions.redo,
+              actions.actions.exportPng,
+              actions.actions.clearBoard,
+            ].map((action) => (
+              <SidebarActionItem
+                key={action.id}
+                id={action.id === 'selectAll' ? 'sidebar-select-all' : undefined}
+                action={action}
+                expanded={isOpen}
+                runAction={runAction}
+              />
+            ))}
           </SidebarSection>
 
           <SidebarSection title="Collaborate" expanded={isOpen}>
-            <SidebarButton
-              icon={Users}
-              label="Rooms"
-              expanded={isOpen}
-              onClick={() => runAction(onOpenRooms)}
-            />
-            <SidebarButton
-              icon={Share2}
-              label="Share board"
-              expanded={isOpen}
-              onClick={() => runAction(onOpenShare)}
-            />
-            <SidebarButton
-              icon={Shield}
-              label="Admin panel"
-              expanded={isOpen}
-              disabled={!isHost}
-              onClick={() => runAction(onOpenAdmin)}
-            />
-            {(() => {
-              const aiDiagramMeta = getAiDiagramActionMeta(canWrite);
-              const aiChatMeta = getAiChatActionMeta(isAiChatOpen);
-              return (
-                <>
-                  <SidebarButton
-                    icon={aiDiagramMeta.Icon}
-                    label={aiDiagramMeta.label}
-                    title={aiDiagramMeta.title}
-                    ariaLabel={aiDiagramMeta.ariaLabel}
-                    expanded={isOpen}
-                    disabled={aiDiagramMeta.disabled}
-                    onClick={() => runAction(onOpenAi)}
-                  />
-                  <SidebarButton
-                    icon={aiChatMeta.Icon}
-                    label={aiChatMeta.label}
-                    title={aiChatMeta.title}
-                    ariaLabel={aiChatMeta.ariaLabel}
-                    expanded={isOpen}
-                    active={isAiChatOpen}
-                    pressed={isAiChatOpen}
-                    onClick={() => runAction(onToggleAiChat)}
-                  />
-                </>
-              );
-            })()}
-            {(() => {
-              const voiceConnectionMeta = getVoiceConnectionMeta(isVoiceConnected);
-              const voiceMuteMeta = getVoiceMuteMeta(isMuted);
-              return (
-                <>
-                  <SidebarButton
-                    icon={voiceConnectionMeta.Icon}
-                    label={voiceConnectionMeta.label}
-                    title={voiceConnectionMeta.title}
-                    ariaLabel={voiceConnectionMeta.ariaLabel}
-                    disabled={voiceConnectionMeta.disabled}
-                    expanded={isOpen}
-                    active={isVoiceConnected}
-                    pressed={isVoiceConnected}
-                    onClick={() => runAction(onToggleVoice)}
-                  />
-                  {isVoiceConnected && (
-                    <SidebarButton
-                      icon={voiceMuteMeta.Icon}
-                      label={voiceMuteMeta.label}
-                      title={voiceMuteMeta.title}
-                      ariaLabel={voiceMuteMeta.ariaLabel}
-                      disabled={voiceMuteMeta.disabled}
-                      expanded={isOpen}
-                      active={isMuted}
-                      pressed={isMuted}
-                      onClick={() => runAction(onToggleMute)}
-                    />
-                  )}
-                </>
-              );
-            })()}
+            {[
+              actions.actions.rooms,
+              actions.actions.share,
+              actions.actions.admin,
+              actions.actions.aiDiagram,
+              actions.actions.aiChat,
+              actions.actions.voiceToggle,
+              ...(isVoiceConnected ? [actions.actions.voiceMute] : []),
+            ].map((action) => (
+              <SidebarActionItem
+                key={action.id}
+                action={action}
+                expanded={isOpen}
+                runAction={runAction}
+              />
+            ))}
           </SidebarSection>
 
           <SidebarSection title="View" expanded={isOpen}>
-            <SidebarButton
-              id="sidebar-shortcuts"
-              icon={Keyboard}
-              label="Keyboard shortcuts"
-              expanded={isOpen}
-              onClick={() => runAction(onOpenShortcuts)}
-            />
-            {(() => {
-              const themeMeta = getThemeToggleMeta(theme);
-              return (
-                <SidebarButton
-                  icon={themeMeta.Icon}
-                  label={themeMeta.label}
-                  expanded={isOpen}
-                  onClick={() => runAction(onToggleTheme)}
-                />
-              );
-            })()}
+            {[actions.actions.shortcuts, actions.actions.theme].map((action) => (
+              <SidebarActionItem
+                key={action.id}
+                id={action.id === 'shortcuts' ? 'sidebar-shortcuts' : undefined}
+                action={action}
+                expanded={isOpen}
+                runAction={runAction}
+              />
+            ))}
           </SidebarSection>
 
           <SidebarSection title="Account" expanded={isOpen}>
-            <SidebarButton
-              icon={isSignedIn ? UserRound : LogIn}
-              label={isSignedIn ? 'Profile' : 'Sign in'}
-              expanded={isOpen}
-              onClick={() => runAction(isSignedIn ? onOpenProfile : onOpenAuth)}
-            />
-            <SidebarButton
-              icon={Info}
-              label="About"
-              expanded={isOpen}
-              onClick={() => clickHeaderControl('about-app-btn')}
-            />
+            {[actions.actions.account, actions.actions.about].map((action) => (
+              <SidebarActionItem
+                key={action.id}
+                action={action}
+                expanded={isOpen}
+                runAction={runAction}
+              />
+            ))}
           </SidebarSection>
         </nav>
       </aside>
