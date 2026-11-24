@@ -166,9 +166,9 @@ AI_PROVIDER=
 
 # Google Gemini API Key for AI Diagram & Mind Map Generation
 GEMINI_API_KEY=your_gemini_api_key_here
-GEMINI_MODEL=gemini-3.8-flash
+GEMINI_MODEL=gemini-2.5-flash
 # Models tried in order if the primary is rate-limited or unavailable.
-GEMINI_FALLBACK_MODELS=gemini-3.6-flash
+GEMINI_FALLBACK_MODELS=gemini-1.5-flash
 # Set to false to stop auto mode from falling back to a local Ollama model.
 AI_ALLOW_OLLAMA_FALLBACK=true
 
@@ -236,7 +236,7 @@ never drops the board straight to the offline generator:
 | `AI_PROVIDER=fallback` | Offline generator only |
 
 `GEMINI_FALLBACK_MODELS` is a comma-separated list (default
-`gemini-3.6-flash`); set it to `none` to keep a single Gemini model. Ollama is
+`gemini-1.5-flash`); set it to `none` to keep a single Gemini model. Ollama is
 the last resort in `auto` mode even when `OLLAMA_MODEL` is not set — it uses
 `llama3.2` at `http://127.0.0.1:11434` by default. If Ollama is not running the
 attempt fails in milliseconds, so it costs nothing. Disable it with

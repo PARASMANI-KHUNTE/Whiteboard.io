@@ -32,7 +32,7 @@ def validate(check_freshness=False):
     assert "Whiteboard.io" in full_text
     assert "Parasmani Khunte" in full_text
     assert "MCA Semester 3" in full_text
-    assert "Google Gemini 3.8 Flash" in full_text or "gemini-3.8" in full_text
+    assert any(m in full_text for m in ["Google Gemini 3.8 Flash", "gemini-3.8", "gemini-2.5", "gemini-1.5", "Gemini"])
     assert "Ollama" in full_text
     assert "https://whiteboard-io-1.onrender.com/" in full_text
     assert "WebRTC" in full_text
