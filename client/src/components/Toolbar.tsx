@@ -1,59 +1,39 @@
 import React, { useState, useMemo, useCallback, useRef } from 'react';
 import { ToolType, ShapeType, WireStyle } from '../types';
 import { usePopoverDismiss } from '../hooks/usePopoverDismiss';
+import type { WhiteboardActionRegistry } from '../hooks/useWhiteboardActions';
 import { AVAILABLE_ICONS } from '../constants/icons';
 import { TOOLBAR_COLORS } from '../constants/palettes';
 import { ColorSwatches } from './ui/ColorSwatches';
 import { SearchablePickerPopover } from './ui/SearchablePickerPopover';
 import {
-  MousePointer,
-  Pencil,
-  Highlighter,
-  Eraser,
-  StickyNote as StickyIcon,
-  Type,
-  Shapes,
   Square,
   Circle,
   Diamond,
   Triangle,
   Star,
   ArrowRight,
-  Smile,
-  Undo2,
-  Redo2,
-  Trash2,
-  Download,
   Lock,
   SlidersHorizontal,
   ChevronRight,
-  CheckSquare,
   Spline,
   Minus,
 } from 'lucide-react';
 
 interface ToolbarProps {
+  actions: WhiteboardActionRegistry;
   currentTool: ToolType;
   currentColor: string;
   currentSize: number;
-  canUndo: boolean;
-  canRedo?: boolean;
   canWrite?: boolean;
   selectedShapeType: ShapeType;
   selectedIconName: string;
   selectedWireStyle?: WireStyle;
-  onSelectTool: (tool: ToolType) => void;
   onSelectColor: (color: string) => void;
   onSelectSize: (size: number) => void;
   onSelectShape: (shape: ShapeType) => void;
   onSelectIcon: (iconName: string) => void;
   onSelectWireStyle?: (style: WireStyle) => void;
-  onUndo: () => void;
-  onRedo?: () => void;
-  onRequestClear: () => void;
-  onExport: () => void;
-  onSelectAll?: () => void;
-  isMultiplayer: boolean;
 }
 
 const SIZES = [
@@ -72,28 +52,21 @@ const SHAPES_CONFIG: { type: ShapeType; label: string; keywords: string[]; icon:
 ];
 
 export const Toolbar: React.FC<ToolbarProps> = ({
+  actions,
   currentTool,
   currentColor,
   currentSize,
-  canUndo,
-  canRedo = false,
   canWrite = true,
   selectedShapeType,
   selectedIconName,
   selectedWireStyle = 'curve',
-  onSelectTool,
   onSelectColor,
   onSelectSize,
   onSelectShape,
   onSelectIcon,
   onSelectWireStyle,
-  onUndo,
-  onRedo,
-  onRequestClear,
-  onExport,
-  onSelectAll,
-  isMultiplayer,
 }) => {
+  const { actions: actionMap, toolsById, selectTool } = actions;
   const [showShapePicker, setShowShapePicker] = useState(false);
   const [showIconPicker, setShowIconPicker] = useState(false);
   const [showWirePicker, setShowWirePicker] = useState(false);
@@ -138,14 +111,14 @@ export const Toolbar: React.FC<ToolbarProps> = ({
 
   const handleShapeSelect = (shape: ShapeType) => {
     onSelectShape(shape);
-    onSelectTool('shape');
+    selectTool('shape');
     setShowShapePicker(false);
     setShapeSearchQuery('');
   };
 
   const handleIconSelect = (iconName: string) => {
     onSelectIcon(iconName);
-    onSelectTool('icon');
+    selectTool('icon');
     setShowIconPicker(false);
     setIconSearchQuery('');
   };
@@ -254,7 +227,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
           <button
             onClick={() => {
               onSelectWireStyle?.('curve');
-              onSelectTool('wire');
+              selectTool('wire');
               setShowWirePicker(false);
             }}
             className={`p-3 rounded-xl border flex flex-col items-center gap-2 transition-all cursor-pointer btn-press ${
@@ -273,7 +246,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
           <button
             onClick={() => {
               onSelectWireStyle?.('line');
-              onSelectTool('wire');
+              selectTool('wire');
               setShowWirePicker(false);
             }}
             className={`p-3 rounded-xl border flex flex-col items-center gap-2 transition-all cursor-pointer btn-press ${
@@ -300,210 +273,196 @@ export const Toolbar: React.FC<ToolbarProps> = ({
       >
         {/* Primary Drawing & Navigation Tools */}
         <div className="flex items-center gap-0.5 sm:gap-1 shrink-0">
-          <button
-            id="tool-select"
-            onClick={() => {
-              onSelectTool('select');
-              setShowShapePicker(false);
-              setShowIconPicker(false);
-              setShowWirePicker(false);
-            }}
-            title="Select tool (V) — Click to select, move, and edit shapes or stickers"
-            className={`min-h-[40px] min-w-[40px] p-2 sm:p-2.5 rounded-xl flex items-center justify-center gap-1.5 text-xs font-medium transition-colors cursor-pointer btn-press ${
-              currentTool === 'select'
-                ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400 font-semibold ring-1.5 ring-blue-500 shadow-xs'
-                : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800'
-            }`}
-          >
-            <MousePointer className="w-4 h-4" />
-            <span className="hidden md:inline">Select</span>
-          </button>
+          {(['select'] as const).map((toolKey) => {
+            const toolAction = toolsById[toolKey];
+            const ToolIcon = toolAction.icon;
+            return (
+              <button
+                key={toolKey}
+                id={toolAction.id}
+                onClick={() => {
+                  toolAction.handler();
+                  setShowShapePicker(false);
+                  setShowIconPicker(false);
+                  setShowWirePicker(false);
+                }}
+                title={toolAction.title}
+                className={`min-h-[40px] min-w-[40px] p-2 sm:p-2.5 rounded-xl flex items-center justify-center gap-1.5 text-xs font-medium transition-colors cursor-pointer btn-press ${
+                  toolAction.active
+                    ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400 font-semibold ring-1.5 ring-blue-500 shadow-xs'
+                    : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800'
+                }`}
+              >
+                <ToolIcon className="w-4 h-4" />
+                <span className="hidden md:inline">{toolAction.shortLabel}</span>
+              </button>
+            );
+          })}
 
-          {currentTool === 'select' && onSelectAll && (
-            <button
-              id="tool-select-all"
-              onClick={onSelectAll}
-              title="Select All (Ctrl+A) — Select all elements on the canvas"
-              className="min-h-[40px] px-2.5 rounded-xl flex items-center justify-center gap-1.5 text-xs font-semibold bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900/50 border border-blue-200 dark:border-blue-800/60 transition-colors cursor-pointer animate-in fade-in zoom-in-95 duration-150 btn-press"
-            >
-              <CheckSquare className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Select All</span>
-            </button>
-          )}
+          {currentTool === 'select' && (() => {
+            const selectAll = actionMap.selectAll;
+            const SelectAllIcon = selectAll.icon;
+            return (
+              <button
+                id="tool-select-all"
+                onClick={selectAll.handler}
+                title={selectAll.title}
+                className="min-h-[40px] px-2.5 rounded-xl flex items-center justify-center gap-1.5 text-xs font-semibold bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900/50 border border-blue-200 dark:border-blue-800/60 transition-colors cursor-pointer animate-in fade-in zoom-in-95 duration-150 btn-press"
+              >
+                <SelectAllIcon className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">{selectAll.label}</span>
+              </button>
+            );
+          })()}
 
-          <button
-            id="tool-pen"
-            disabled={!canWrite}
-            onClick={() => {
-              onSelectTool('pen');
-              setShowShapePicker(false);
-              setShowIconPicker(false);
-              setShowWirePicker(false);
-            }}
-            title={canWrite ? "Pen (P) — Freehand drawing" : "Drawing restricted"}
-            className={`min-h-[40px] min-w-[40px] p-2 sm:p-2.5 rounded-xl flex items-center justify-center gap-1.5 text-xs font-medium transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed btn-press ${
-              currentTool === 'pen' && canWrite
-                ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400 font-semibold ring-1.5 ring-blue-500 shadow-xs'
-                : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800'
-            }`}
-          >
-            <Pencil className="w-4 h-4" />
-            <span className="hidden md:inline">Pen</span>
-          </button>
-
-          <button
-            id="tool-highlighter"
-            disabled={!canWrite}
-            onClick={() => {
-              onSelectTool('highlighter');
-              setShowShapePicker(false);
-              setShowIconPicker(false);
-              setShowWirePicker(false);
-            }}
-            title={canWrite ? "Highlighter (Y)" : "Drawing restricted"}
-            className={`min-h-[40px] min-w-[40px] p-2 sm:p-2.5 rounded-xl flex items-center justify-center gap-1.5 text-xs font-medium transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed btn-press ${
-              currentTool === 'highlighter' && canWrite
-                ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400 font-semibold ring-1.5 ring-blue-500 shadow-xs'
-                : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800'
-            }`}
-          >
-            <Highlighter className="w-4 h-4" />
-            <span className="hidden md:inline">Highlight</span>
-          </button>
-
-          <button
-            id="tool-eraser"
-            disabled={!canWrite}
-            onClick={() => {
-              onSelectTool('eraser');
-              setShowShapePicker(false);
-              setShowIconPicker(false);
-              setShowWirePicker(false);
-            }}
-            title={canWrite ? "Eraser (E)" : "Drawing restricted"}
-            className={`min-h-[40px] min-w-[40px] p-2 sm:p-2.5 rounded-xl flex items-center justify-center gap-1.5 text-xs font-medium transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed btn-press ${
-              currentTool === 'eraser' && canWrite
-                ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400 font-semibold ring-1.5 ring-blue-500 shadow-xs'
-                : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800'
-            }`}
-          >
-            <Eraser className="w-4 h-4" />
-            <span className="hidden md:inline">Eraser</span>
-          </button>
+          {(['pen', 'highlighter', 'eraser'] as const).map((toolKey) => {
+            const toolAction = toolsById[toolKey];
+            const ToolIcon = toolAction.icon;
+            return (
+              <button
+                key={toolKey}
+                id={toolAction.id}
+                disabled={toolAction.disabled}
+                onClick={() => {
+                  toolAction.handler();
+                  setShowShapePicker(false);
+                  setShowIconPicker(false);
+                  setShowWirePicker(false);
+                }}
+                title={toolAction.title}
+                className={`min-h-[40px] min-w-[40px] p-2 sm:p-2.5 rounded-xl flex items-center justify-center gap-1.5 text-xs font-medium transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed btn-press ${
+                  toolAction.active
+                    ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400 font-semibold ring-1.5 ring-blue-500 shadow-xs'
+                    : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800'
+                }`}
+              >
+                <ToolIcon className="w-4 h-4" />
+                <span className="hidden md:inline">{toolAction.shortLabel}</span>
+              </button>
+            );
+          })}
 
           {/* Shapes Tool Button */}
-          <button
-            id="tool-shapes"
-            data-popover-trigger
-            disabled={!canWrite}
-            onClick={() => {
-              setShowShapePicker(!showShapePicker);
-              setShowIconPicker(false);
-              setShowWirePicker(false);
-              if (!showShapePicker) onSelectTool('shape');
-            }}
-            title={canWrite ? "Add Shapes (R) — Rectangle, Circle, Triangle..." : "Drawing restricted"}
-            className={`min-h-[40px] min-w-[40px] p-2 sm:p-2.5 rounded-xl flex items-center justify-center gap-1.5 text-xs font-medium transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed btn-press ${
-              (currentTool === 'shape' || showShapePicker) && canWrite
-                ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400 font-semibold ring-1.5 ring-blue-500 shadow-xs'
-                : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800'
-            }`}
-          >
-            <Shapes className="w-4 h-4" />
-            <span className="hidden md:inline">Shapes</span>
-          </button>
+          {(() => {
+            const shapeTool = toolsById.shape;
+            const ShapeIcon = shapeTool.icon;
+            return (
+              <button
+                id="tool-shapes"
+                data-popover-trigger
+                disabled={shapeTool.disabled}
+                onClick={() => {
+                  setShowShapePicker(!showShapePicker);
+                  setShowIconPicker(false);
+                  setShowWirePicker(false);
+                  if (!showShapePicker) selectTool('shape');
+                }}
+                title={shapeTool.title}
+                className={`min-h-[40px] min-w-[40px] p-2 sm:p-2.5 rounded-xl flex items-center justify-center gap-1.5 text-xs font-medium transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed btn-press ${
+                  (currentTool === 'shape' || showShapePicker) && !shapeTool.disabled
+                    ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400 font-semibold ring-1.5 ring-blue-500 shadow-xs'
+                    : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800'
+                }`}
+              >
+                <ShapeIcon className="w-4 h-4" />
+                <span className="hidden md:inline">{shapeTool.shortLabel}</span>
+              </button>
+            );
+          })()}
 
           {/* Stickers / Icons Tool Button */}
-          <button
-            id="tool-icons"
-            data-popover-trigger
-            disabled={!canWrite}
-            onClick={() => {
-              setShowIconPicker(!showIconPicker);
-              setShowShapePicker(false);
-              setShowWirePicker(false);
-              if (!showIconPicker) onSelectTool('icon');
-            }}
-            title={canWrite ? "Add Icons & Stickers (I)" : "Drawing restricted"}
-            className={`min-h-[40px] min-w-[40px] p-2 sm:p-2.5 rounded-xl flex items-center justify-center gap-1.5 text-xs font-medium transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed btn-press ${
-              (currentTool === 'icon' || showIconPicker) && canWrite
-                ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400 font-semibold ring-1.5 ring-blue-500 shadow-xs'
-                : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800'
-            }`}
-          >
-            <Smile className="w-4 h-4" />
-            <span className="hidden md:inline">Icons</span>
-          </button>
+          {(() => {
+            const iconTool = toolsById.icon;
+            const StickerToolIcon = iconTool.icon;
+            return (
+              <button
+                id="tool-icons"
+                data-popover-trigger
+                disabled={iconTool.disabled}
+                onClick={() => {
+                  setShowIconPicker(!showIconPicker);
+                  setShowShapePicker(false);
+                  setShowWirePicker(false);
+                  if (!showIconPicker) selectTool('icon');
+                }}
+                title={iconTool.title}
+                className={`min-h-[40px] min-w-[40px] p-2 sm:p-2.5 rounded-xl flex items-center justify-center gap-1.5 text-xs font-medium transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed btn-press ${
+                  (currentTool === 'icon' || showIconPicker) && !iconTool.disabled
+                    ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400 font-semibold ring-1.5 ring-blue-500 shadow-xs'
+                    : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800'
+                }`}
+              >
+                <StickerToolIcon className="w-4 h-4" />
+                <span className="hidden md:inline">{iconTool.shortLabel}</span>
+              </button>
+            );
+          })()}
 
-          <button
-            id="tool-sticky"
-            disabled={!canWrite}
-            onClick={() => {
-              onSelectTool('sticky');
-              setShowShapePicker(false);
-              setShowIconPicker(false);
-              setShowWirePicker(false);
-            }}
-            title={canWrite ? "Add Sticky Note (S) — Hold Alt while dragging to duplicate" : "Drawing restricted"}
-            className={`min-h-[40px] min-w-[40px] p-2 sm:p-2.5 rounded-xl flex items-center justify-center gap-1.5 text-xs font-medium transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed btn-press ${
-              currentTool === 'sticky' && canWrite
-                ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400 font-semibold ring-1.5 ring-blue-500 shadow-xs'
-                : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800'
-            }`}
-          >
-            <StickyIcon className="w-4 h-4" />
-            <span className="hidden md:inline">Sticky Note</span>
-          </button>
-
-          <button
-            id="tool-text"
-            disabled={!canWrite}
-            onClick={() => {
-              onSelectTool('text');
-              setShowShapePicker(false);
-              setShowIconPicker(false);
-              setShowWirePicker(false);
-            }}
-            title={canWrite ? "Add Text (T)" : "Drawing restricted"}
-            className={`min-h-[40px] min-w-[40px] p-2 sm:p-2.5 rounded-xl flex items-center justify-center gap-1.5 text-xs font-medium transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed btn-press ${
-              currentTool === 'text' && canWrite
-                ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400 font-semibold ring-1.5 ring-blue-500 shadow-xs'
-                : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800'
-            }`}
-          >
-            <Type className="w-4 h-4" />
-            <span className="hidden md:inline">Text</span>
-          </button>
+          {(['sticky', 'text'] as const).map((toolKey) => {
+            const toolAction = toolsById[toolKey];
+            const ToolIcon = toolAction.icon;
+            return (
+              <button
+                key={toolKey}
+                id={toolAction.id}
+                disabled={toolAction.disabled}
+                onClick={() => {
+                  toolAction.handler();
+                  setShowShapePicker(false);
+                  setShowIconPicker(false);
+                  setShowWirePicker(false);
+                }}
+                title={toolAction.title}
+                className={`min-h-[40px] min-w-[40px] p-2 sm:p-2.5 rounded-xl flex items-center justify-center gap-1.5 text-xs font-medium transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed btn-press ${
+                  toolAction.active
+                    ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400 font-semibold ring-1.5 ring-blue-500 shadow-xs'
+                    : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800'
+                }`}
+              >
+                <ToolIcon className="w-4 h-4" />
+                <span className="hidden md:inline">{toolAction.shortLabel}</span>
+              </button>
+            );
+          })}
 
           {/* Wire / Connector Tool Button */}
-          <button
-            id="tool-wire"
-            data-popover-trigger
-            disabled={!canWrite}
-            onClick={() => {
-              if (currentTool === 'wire') {
-                setShowWirePicker(!showWirePicker);
-              } else {
-                onSelectTool('wire');
-                setShowWirePicker(false);
-              }
-              setShowShapePicker(false);
-              setShowIconPicker(false);
-            }}
-            title={canWrite ? `Wire Connector (W) (${selectedWireStyle === 'line' ? 'Straight Line' : 'Smooth Curve'}) — Click or drag to connect 2 objects` : "Drawing restricted"}
-            className={`min-h-[40px] min-w-[40px] p-2 sm:p-2.5 rounded-xl flex items-center justify-center gap-1.5 text-xs font-medium transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed btn-press ${
-              (currentTool === 'wire' || showWirePicker) && canWrite
-                ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400 font-semibold ring-1.5 ring-blue-500 shadow-xs'
-                : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800'
-            }`}
-          >
-            {selectedWireStyle === 'line' ? (
-              <Minus className="w-4 h-4" />
-            ) : (
-              <Spline className="w-4 h-4" />
-            )}
-            <span className="hidden md:inline">Wire</span>
-          </button>
+          {(() => {
+            const wireTool = toolsById.wire;
+            return (
+              <button
+                id="tool-wire"
+                data-popover-trigger
+                disabled={wireTool.disabled}
+                onClick={() => {
+                  if (currentTool === 'wire') {
+                    setShowWirePicker(!showWirePicker);
+                  } else {
+                    selectTool('wire');
+                    setShowWirePicker(false);
+                  }
+                  setShowShapePicker(false);
+                  setShowIconPicker(false);
+                }}
+                title={
+                  wireTool.disabled
+                    ? wireTool.title
+                    : `Wire Connector (${wireTool.shortcut}) (${selectedWireStyle === 'line' ? 'Straight Line' : 'Smooth Curve'}) — Click or drag to connect 2 objects`
+                }
+                className={`min-h-[40px] min-w-[40px] p-2 sm:p-2.5 rounded-xl flex items-center justify-center gap-1.5 text-xs font-medium transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed btn-press ${
+                  (currentTool === 'wire' || showWirePicker) && !wireTool.disabled
+                    ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400 font-semibold ring-1.5 ring-blue-500 shadow-xs'
+                    : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800'
+                }`}
+              >
+                {selectedWireStyle === 'line' ? (
+                  <Minus className="w-4 h-4" />
+                ) : (
+                  <Spline className="w-4 h-4" />
+                )}
+                <span className="hidden md:inline">{wireTool.shortLabel}</span>
+              </button>
+            );
+          })()}
         </div>
 
         <div className="h-6 w-[1px] bg-slate-200 dark:bg-slate-800 mx-0.5 sm:mx-1 shrink-0" />
@@ -581,55 +540,44 @@ export const Toolbar: React.FC<ToolbarProps> = ({
 
         {/* Action Utilities: Always Visible */}
         <div className="flex items-center gap-0.5 sm:gap-1 shrink-0">
-          <button
-            id="undo-btn"
-            onClick={onUndo}
-            disabled={!canUndo || !canWrite}
-            title="Undo (Ctrl+Z)"
-            className="p-2 sm:p-2.5 min-h-[38px] min-w-[38px] flex items-center justify-center text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800 rounded-xl disabled:opacity-20 disabled:pointer-events-none transition-colors cursor-pointer btn-press"
-          >
-            <Undo2 className="w-4 h-4" />
-          </button>
+          {([
+            { action: actionMap.undo, domId: 'undo-btn' },
+            { action: actionMap.redo, domId: 'redo-btn' },
+            { action: actionMap.exportPng, domId: 'export-btn' },
+          ] as const).map(({ action, domId }) => {
+            const Icon = action.icon;
+            return (
+              <button
+                key={action.id}
+                id={domId}
+                onClick={action.handler}
+                disabled={action.disabled}
+                title={action.title}
+                aria-label={action.ariaLabel}
+                className="p-2 sm:p-2.5 min-h-[38px] min-w-[38px] flex items-center justify-center text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800 rounded-xl disabled:opacity-20 disabled:pointer-events-none transition-colors cursor-pointer btn-press"
+              >
+                <Icon className="w-4 h-4" />
+              </button>
+            );
+          })}
 
-          {onRedo && (
-            <button
-              id="redo-btn"
-              onClick={onRedo}
-              disabled={!canRedo || !canWrite}
-              title="Redo (Ctrl+Shift+Z)"
-              className="p-2 sm:p-2.5 min-h-[38px] min-w-[38px] flex items-center justify-center text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800 rounded-xl disabled:opacity-20 disabled:pointer-events-none transition-colors cursor-pointer btn-press"
-            >
-              <Redo2 className="w-4 h-4" />
-            </button>
-          )}
-
-          <button
-            id="export-btn"
-            onClick={onExport}
-            title="Export whiteboard as PNG"
-            className="p-2 sm:p-2.5 min-h-[38px] min-w-[38px] flex items-center justify-center text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800 rounded-xl transition-colors cursor-pointer btn-press"
-          >
-            <Download className="w-4 h-4" />
-          </button>
-
-          <button
-            id="clear-board-btn"
-            onClick={onRequestClear}
-            disabled={!canWrite}
-            title={
-              !canWrite
-                ? 'Clearing board is restricted'
-                : isMultiplayer
-                ? 'Vote to clear whiteboard with room'
-                : 'Clear whiteboard'
-            }
-            className="p-2 sm:p-2.5 min-h-[38px] text-slate-500 dark:text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-xl transition-colors cursor-pointer flex items-center gap-1.5 disabled:opacity-20 disabled:pointer-events-none font-medium text-xs btn-press"
-          >
-            <Trash2 className="w-4 h-4" />
-            <span>
-              {isMultiplayer ? 'Vote Clear' : 'Clear'}
-            </span>
-          </button>
+          {(() => {
+            const clearAction = actionMap.clearBoard;
+            const ClearIcon = clearAction.icon;
+            return (
+              <button
+                id="clear-board-btn"
+                onClick={clearAction.handler}
+                disabled={clearAction.disabled}
+                title={clearAction.title}
+                aria-label={clearAction.ariaLabel}
+                className="p-2 sm:p-2.5 min-h-[38px] text-slate-500 dark:text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-xl transition-colors cursor-pointer flex items-center gap-1.5 disabled:opacity-20 disabled:pointer-events-none font-medium text-xs btn-press"
+              >
+                <ClearIcon className="w-4 h-4" />
+                <span>{clearAction.shortLabel ?? clearAction.label}</span>
+              </button>
+            );
+          })()}
         </div>
       </div>
     </div>

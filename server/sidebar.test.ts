@@ -22,46 +22,38 @@ test('sidebar is a labelled, expandable navigation surface (#147)', () => {
   }
 });
 
-test('sidebar actions reuse existing controls instead of duplicating logic (#147)', () => {
+test('chrome surfaces consume shared whiteboard action registry without DOM shims (#162)', () => {
   const sidebar = source('components/Sidebar.tsx');
-
-  for (const id of [
-    'about-app-btn',
-  ]) {
-    assert.ok(sidebar.includes(id), `sidebar must reuse #${id}`);
-  }
-  assert.doesNotMatch(sidebar, /user-profile-btn|sign-in-prompt-btn/);
-  assert.match(sidebar, /onOpenProfile/);
-  assert.match(sidebar, /onOpenAuth/);
-
-  assert.match(sidebar, /onClick=\{\(\) => runAction\(onOpenShortcuts\)\}/);
-  assert.doesNotMatch(sidebar, /clickHeaderControl\('shortcuts-btn'\)/);
-  assert.match(sidebar, /onSelectTool\(tool\)/);
-  assert.match(sidebar, /disabled=\{needsWrite && !canWrite\}/);
-  assert.match(sidebar, /getVoiceConnectionMeta\(isVoiceConnected\)/);
-  assert.match(sidebar, /getVoiceMuteMeta\(isMuted\)/);
-  assert.match(sidebar, /getAiDiagramActionMeta\(canWrite\)/);
-  assert.match(sidebar, /getAiChatActionMeta\(isAiChatOpen\)/);
-  assert.match(sidebar, /getThemeToggleMeta\(theme\)/);
-});
-
-test('App mounts the sidebar with all grouped actions wired (#147)', () => {
+  const header = source('components/Header.tsx');
+  const toolbar = source('components/Toolbar.tsx');
+  const canvas = source('components/Canvas.tsx');
   const app = source('App.tsx');
 
-  assert.match(app, /<Sidebar/);
-  for (const prop of [
-    'currentTool={currentTool}',
-    'canWrite={canWrite}',
-    'onSelectTool={setCurrentTool}',
-    'onToggleTheme={handleToggleTheme}',
-    'onOpenShare=',
-    'onOpenAi={openAiDiagram}',
-    'onToggleAiChat={toggleAiChat}',
-    'onToggleVoice={handleToggleVoice}',
-    'onOpenShortcuts=',
-  ]) {
-    assert.ok(app.includes(prop), `Sidebar missing ${prop}`);
+  assert.doesNotMatch(
+    sidebar,
+    /document\.getElementById|clickHeaderControl|user-profile-btn|sign-in-prompt-btn|about-app-btn|shortcuts-btn/
+  );
+  assert.match(sidebar, /actions\.tools\.map/);
+  assert.match(sidebar, /actions\.actions\.selectAll/);
+  assert.match(sidebar, /actions\.actions\.account/);
+  assert.match(sidebar, /actions\.actions\.about/);
+
+  assert.match(app, /useWhiteboardActions\(/);
+  assert.match(app, /<AboutModal/);
+  assert.match(header, /actions\.actions/);
+  assert.match(toolbar, /actions:\s*actionMap.*= actions/);
+  assert.match(toolbar, /actionMap\.undo/);
+  assert.match(canvas, /actions\.actions\.shortcuts/);
+  assert.match(canvas, /actions\.handToggle/);
+});
+
+test('App mounts Header, Sidebar, Canvas, and Toolbar with shared actions (#147, #162)', () => {
+  const app = source('App.tsx');
+
+  for (const surface of ['<Header', '<Sidebar', '<Canvas', '<Toolbar']) {
+    assert.ok(app.includes(surface), `App missing ${surface}`);
   }
+  assert.equal((app.match(/actions=\{whiteboardActions\}/g) ?? []).length, 4);
   assert.doesNotMatch(app, /onJoinVoice=|onLeaveVoice=/);
 
   assert.match(app, /board\?\.clientWidth \|\| window\.innerWidth/);

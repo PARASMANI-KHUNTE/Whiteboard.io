@@ -22,16 +22,15 @@ import { WireItem, WireOverlay } from './WireItem';
 import { ZoomControls } from './ZoomControls';
 import { ContextMenu, ContextMenuEntry } from './ContextMenu';
 import { ShortcutsLauncherButton } from './ui/ShortcutsLauncherButton';
-import { getHandFallbackTool } from './ui/toolActions';
+import { CANVAS_TOOL_DEFINITIONS } from './ui/toolActions';
+import type { WhiteboardActionRegistry } from '../hooks/useWhiteboardActions';
 import {
-  CheckSquare,
   Copy,
   Scissors,
   ClipboardPaste,
   Trash2,
   X,
   MousePointer,
-  Keyboard,
   ChevronsUp,
   ChevronUp,
   ChevronDown,
@@ -100,31 +99,18 @@ interface CanvasProps {
   onStrokeLiveStart: (strokeId: string, point: Point, color: string, size: number, isHighlighter?: boolean) => void;
   onStrokeLivePoint: (strokeId: string, point: Point) => void;
   onSelectTool?: (tool: ToolType) => void;
+  actions: WhiteboardActionRegistry;
   onRegisterSelectAll?: (fn: () => void) => void;
   onRegisterNavigateToElements?: (fn: (elements: CanvasElement[]) => void) => void;
   onRegisterGetWorldCenter?: (fn: () => { x: number; y: number }) => void;
   onRegisterGetViewport?: (fn: () => { pan: { x: number; y: number }; zoom: number }) => void;
   isShortcutsOpen?: boolean;
-  onOpenShortcuts?: () => void;
   onCloseShortcuts?: () => void;
 }
 
-// Distance from point to line segment
-
-const TOOL_KEY_MAP: Record<string, ToolType> = {
-  v: 'select',
-  h: 'hand',
-  p: 'pen',
-  y: 'highlighter',
-  e: 'eraser',
-  s: 'sticky',
-  t: 'text',
-  r: 'shape',
-  i: 'icon',
-  w: 'wire',
-};
-
-
+const TOOL_KEY_MAP: Record<string, ToolType> = Object.fromEntries(
+  CANVAS_TOOL_DEFINITIONS.map((def) => [def.shortcut.toLowerCase(), def.tool])
+) as Record<string, ToolType>;
 
 export const Canvas: React.FC<CanvasProps> = ({
   currentTool,
@@ -155,12 +141,12 @@ export const Canvas: React.FC<CanvasProps> = ({
   onStrokeLiveStart,
   onStrokeLivePoint,
   onSelectTool,
+  actions,
   onRegisterSelectAll,
   onRegisterNavigateToElements,
   onRegisterGetWorldCenter,
   onRegisterGetViewport,
   isShortcutsOpen = false,
-  onOpenShortcuts,
   onCloseShortcuts,
 }) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -602,71 +588,132 @@ export const Canvas: React.FC<CanvasProps> = ({
     [findElementsAtCoords]
   );
 
-  const contextMenuItems = useMemo<ContextMenuEntry[]>(() => {
+  const selectionActionDefs = useMemo(() => {
     const hasSelection = selectedElementIds.size > 0;
     // Only touch localStorage while the menu is actually visible.
     const clipboardReady = contextMenu ? hasClipboardContent() : false;
 
-    return [
-      {
-        type: 'item',
+    return {
+      selectAll: {
+        id: 'select-all',
+        label: actions.actions.selectAll.label,
+        title: actions.actions.selectAll.title,
+        shortcut: actions.actions.selectAll.shortcut,
+        icon: actions.actions.selectAll.icon,
+        iconClassName: 'text-blue-500',
+        disabled: false,
+        handler: handleSelectAll,
+      },
+      copy: {
         id: 'copy',
         label: 'Copy',
+        title: 'Copy Selected (Ctrl+C)',
         shortcut: 'Ctrl C',
-        icon: <Copy className="w-3.5 h-3.5" />,
+        icon: Copy,
+        iconClassName: 'text-sky-500',
         disabled: !hasSelection,
-        onSelect: handleCopySelected,
+        handler: handleCopySelected,
       },
-      {
-        type: 'item',
+      cut: {
         id: 'cut',
         label: 'Cut',
+        title: 'Cut Selected (Ctrl+X)',
         shortcut: 'Ctrl X',
-        icon: <Scissors className="w-3.5 h-3.5" />,
+        icon: Scissors,
+        iconClassName: '',
         disabled: !hasSelection || !canWrite,
-        onSelect: handleCutSelected,
+        handler: handleCutSelected,
       },
-      {
-        type: 'item',
+      paste: {
         id: 'paste',
         label: 'Paste',
+        title: 'Paste (Ctrl+V)',
         shortcut: 'Ctrl V',
-        icon: <ClipboardPaste className="w-3.5 h-3.5" />,
+        icon: ClipboardPaste,
+        iconClassName: '',
         disabled: !clipboardReady || !canWrite,
-        onSelect: handlePaste,
+        handler: handlePaste,
       },
-      { type: 'separator' },
-      {
-        type: 'item',
+      duplicate: {
         id: 'duplicate',
         label: 'Duplicate',
+        title: 'Duplicate Selected (Ctrl+D)',
         shortcut: 'Ctrl D',
-        icon: <Copy className="w-3.5 h-3.5" />,
+        icon: Copy,
+        iconClassName: 'text-emerald-500',
         disabled: !hasSelection || !canWrite,
-        onSelect: handleDuplicateSelected,
+        handler: handleDuplicateSelected,
       },
-      {
-        type: 'item',
+      lockToggle: {
         id: allSelectedLocked ? 'unlock-selection' : 'lock-selection',
         label: allSelectedLocked ? 'Unlock selection' : 'Lock selection',
-        icon: allSelectedLocked ? (
-          <Unlock className="w-3.5 h-3.5" />
-        ) : (
-          <Lock className="w-3.5 h-3.5" />
-        ),
+        shortLabel: allSelectedLocked ? 'Unlock' : 'Lock',
+        title: allSelectedLocked ? 'Unlock selected objects' : 'Lock selected objects',
+        icon: allSelectedLocked ? Unlock : Lock,
+        iconClassName: 'text-amber-500',
         disabled: !hasSelection || !canWrite,
-        onSelect: () => handleSetSelectionLock(!allSelectedLocked),
+        handler: () => handleSetSelectionLock(!allSelectedLocked),
       },
-      {
-        type: 'item',
+      delete: {
         id: 'delete',
         label: 'Delete',
+        title: 'Delete Selected (Del / Backspace)',
         shortcut: 'Del',
+        icon: Trash2,
+        iconClassName: '',
         danger: true,
-        icon: <Trash2 className="w-3.5 h-3.5" />,
         disabled: !hasSelection || !canWrite,
-        onSelect: handleDeleteSelected,
+        handler: handleDeleteSelected,
       },
+    };
+  }, [
+    actions.actions.selectAll,
+    allSelectedLocked,
+    canWrite,
+    contextMenu,
+    handleCopySelected,
+    handleCutSelected,
+    handleDeleteSelected,
+    handleDuplicateSelected,
+    handlePaste,
+    handleSelectAll,
+    handleSetSelectionLock,
+    selectedElementIds.size,
+  ]);
+
+  const contextMenuItems = useMemo<ContextMenuEntry[]>(() => {
+    const shortcutsAction = actions.actions.shortcuts;
+    const ShortcutsIcon = shortcutsAction.icon;
+    const toMenuEntry = (def: {
+      id: string;
+      label: string;
+      shortcut?: string;
+      icon: React.ComponentType<{ className?: string }>;
+      disabled: boolean;
+      danger?: boolean;
+      handler: () => void;
+    }): ContextMenuEntry => {
+      const Icon = def.icon;
+      return {
+        type: 'item',
+        id: def.id,
+        label: def.label,
+        shortcut: def.shortcut,
+        danger: def.danger,
+        icon: <Icon className="w-3.5 h-3.5" />,
+        disabled: def.disabled,
+        onSelect: def.handler,
+      };
+    };
+
+    return [
+      toMenuEntry(selectionActionDefs.copy),
+      toMenuEntry(selectionActionDefs.cut),
+      toMenuEntry(selectionActionDefs.paste),
+      { type: 'separator' },
+      toMenuEntry(selectionActionDefs.duplicate),
+      toMenuEntry(selectionActionDefs.lockToggle),
+      toMenuEntry(selectionActionDefs.delete),
       { type: 'separator' },
       {
         type: 'item',
@@ -704,26 +751,18 @@ export const Canvas: React.FC<CanvasProps> = ({
       {
         type: 'item',
         id: 'shortcuts',
-        label: 'Keyboard shortcuts',
-        shortcut: '?',
-        icon: <Keyboard className="w-3.5 h-3.5" />,
-        onSelect: () => onOpenShortcuts?.(),
+        label: shortcutsAction.label,
+        shortcut: shortcutsAction.shortcut,
+        icon: <ShortcutsIcon className="w-3.5 h-3.5" />,
+        onSelect: shortcutsAction.handler,
       },
     ];
   }, [
-    contextMenu,
-    selectedElementIds,
-    selectedHasStackable,
-    allSelectedLocked,
+    actions.actions.shortcuts,
     canWrite,
-    handleCopySelected,
-    handleCutSelected,
-    handlePaste,
-    handleDuplicateSelected,
-    handleSetSelectionLock,
-    handleDeleteSelected,
     handleZOrder,
-    onOpenShortcuts,
+    selectedHasStackable,
+    selectionActionDefs,
   ]);
 
   // When user picks a color in Toolbar while elements are selected, apply to them immediately
@@ -942,7 +981,7 @@ export const Canvas: React.FC<CanvasProps> = ({
       // Shortcut cheat sheet
       if (e.key === '?' || (e.shiftKey && e.key === '/')) {
         e.preventDefault();
-        onOpenShortcuts?.();
+        actions.actions.shortcuts.handler();
         return;
       }
 
@@ -1063,7 +1102,7 @@ export const Canvas: React.FC<CanvasProps> = ({
       // Single-key tool switching (V, H, P, Y, E, S, T, R, I, W)
       const tool = TOOL_KEY_MAP[key];
       if (tool && !e.altKey) {
-        onSelectTool?.(tool);
+        actions.selectTool(tool);
       }
     };
 
@@ -1097,14 +1136,13 @@ export const Canvas: React.FC<CanvasProps> = ({
     handlePaste,
     handleNudgeSelected,
     selectedElementIds,
-    onSelectTool,
+    actions,
     onUndo,
     onRedo,
     zoomIn,
     zoomOut,
     resetView,
     isShortcutsOpen,
-    onOpenShortcuts,
     onCloseShortcuts,
     shortcutsBlocked,
     contextMenu,
@@ -2351,19 +2389,18 @@ export const Canvas: React.FC<CanvasProps> = ({
         onZoomIn={zoomIn}
         onZoomOut={zoomOut}
         onResetZoom={resetView}
-        isHandTool={currentTool === 'hand'}
-        canWrite={canWrite}
-        onToggleHand={
-          onSelectTool
-            ? () => onSelectTool(currentTool === 'hand' ? getHandFallbackTool(canWrite) : 'hand')
-            : undefined
-        }
+        handToggle={actions.handToggle}
       />
 
       {/* Shortcut cheat-sheet launcher */}
       <ShortcutsLauncherButton
         id="shortcuts-btn"
-        onOpen={() => onOpenShortcuts?.()}
+        onOpen={actions.actions.shortcuts.handler}
+        label={actions.actions.shortcuts.shortLabel}
+        shortcut={actions.actions.shortcuts.shortcut}
+        title={actions.actions.shortcuts.title}
+        ariaLabel={actions.actions.shortcuts.ariaLabel}
+        icon={actions.actions.shortcuts.icon}
       />
 
       {/* Floating Selection Action Bar (single and multi-selection) */}
@@ -2376,65 +2413,36 @@ export const Canvas: React.FC<CanvasProps> = ({
 
           <div className="h-4 w-px bg-slate-200 dark:bg-slate-700 mx-0.5 shrink-0" />
 
-          {/* Select All */}
-          <button
-            onClick={handleSelectAll}
-            title="Select All Elements (Ctrl+A)"
-            className="px-2 sm:px-2.5 py-1.5 rounded-xl text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100/80 dark:hover:bg-slate-800/80 flex items-center gap-1.5 transition-colors cursor-pointer shrink-0 btn-press"
-          >
-            <CheckSquare className="w-3.5 h-3.5 text-blue-500" />
-            <span className="hidden sm:inline">Select All</span>
-          </button>
-
-          {/* Copy */}
-          <button
-            onClick={handleCopySelected}
-            title="Copy Selected (Ctrl+C)"
-            className="px-2 sm:px-2.5 py-1.5 rounded-xl text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100/80 dark:hover:bg-slate-800/80 flex items-center gap-1.5 transition-colors cursor-pointer shrink-0 btn-press"
-          >
-            <Copy className="w-3.5 h-3.5 text-sky-500" />
-            <span className="hidden sm:inline">Copy</span>
-          </button>
-
-          {/* Duplicate */}
-          {canWrite && (
-            <button
-              onClick={handleDuplicateSelected}
-              title="Duplicate Selected (Ctrl+D)"
-              className="px-2 sm:px-2.5 py-1.5 rounded-xl text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100/80 dark:hover:bg-slate-800/80 flex items-center gap-1.5 transition-colors cursor-pointer shrink-0 btn-press"
-            >
-              <Copy className="w-3.5 h-3.5 text-emerald-500" />
-              <span className="hidden sm:inline">Duplicate</span>
-            </button>
-          )}
-
-          {/* Lock / Unlock */}
-          {canWrite && (
-            <button
-              onClick={() => handleSetSelectionLock(!allSelectedLocked)}
-              title={allSelectedLocked ? 'Unlock selected objects' : 'Lock selected objects'}
-              className="px-2 sm:px-2.5 py-1.5 rounded-xl text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100/80 dark:hover:bg-slate-800/80 flex items-center gap-1.5 transition-colors cursor-pointer shrink-0 btn-press"
-            >
-              {allSelectedLocked ? (
-                <Unlock className="w-3.5 h-3.5 text-amber-500" />
-              ) : (
-                <Lock className="w-3.5 h-3.5 text-amber-500" />
-              )}
-              <span className="hidden sm:inline">{allSelectedLocked ? 'Unlock' : 'Lock'}</span>
-            </button>
-          )}
-
-          {/* Delete */}
-          {canWrite && (
-            <button
-              onClick={handleDeleteSelected}
-              title="Delete Selected (Del / Backspace)"
-              className="px-2 sm:px-2.5 py-1.5 rounded-xl text-xs font-medium text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 flex items-center gap-1.5 transition-colors cursor-pointer shrink-0 btn-press"
-            >
-              <Trash2 className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Delete</span>
-            </button>
-          )}
+          {[
+            selectionActionDefs.selectAll,
+            selectionActionDefs.copy,
+            ...(canWrite
+              ? [
+                  selectionActionDefs.duplicate,
+                  selectionActionDefs.lockToggle,
+                  selectionActionDefs.delete,
+                ]
+              : []),
+          ].map((def) => {
+            const Icon = def.icon;
+            const isDanger = 'danger' in def && def.danger;
+            const labelText = 'shortLabel' in def && def.shortLabel ? def.shortLabel : def.label;
+            return (
+              <button
+                key={def.id}
+                onClick={def.handler}
+                title={def.title}
+                className={`px-2 sm:px-2.5 py-1.5 rounded-xl text-xs font-medium flex items-center gap-1.5 transition-colors cursor-pointer shrink-0 btn-press ${
+                  isDanger
+                    ? 'text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40'
+                    : 'text-slate-700 dark:text-slate-200 hover:bg-slate-100/80 dark:hover:bg-slate-800/80'
+                }`}
+              >
+                <Icon className={`w-3.5 h-3.5 ${def.iconClassName}`.trim()} />
+                <span className="hidden sm:inline">{labelText}</span>
+              </button>
+            );
+          })}
 
           {/* Clear / Deselect */}
           <button
