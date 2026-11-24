@@ -20,7 +20,6 @@ import {
   Star,
   ArrowRight,
   Smile,
-  Hand,
   Undo2,
   Redo2,
   Trash2,
@@ -331,25 +330,6 @@ export const Toolbar: React.FC<ToolbarProps> = ({
               <span className="hidden sm:inline">Select All</span>
             </button>
           )}
-
-          <button
-            id="tool-hand"
-            onClick={() => {
-              onSelectTool('hand');
-              setShowShapePicker(false);
-              setShowIconPicker(false);
-              setShowWirePicker(false);
-            }}
-            title="Hand / Pan tool (H) — Or use Middle Mouse Button / hold Space"
-            className={`min-h-[40px] min-w-[40px] p-2 sm:p-2.5 rounded-xl flex items-center justify-center gap-1.5 text-xs font-medium transition-colors cursor-pointer btn-press ${
-              currentTool === 'hand'
-                ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400 font-semibold ring-1.5 ring-blue-500 shadow-xs'
-                : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800'
-            }`}
-          >
-            <Hand className="w-4 h-4" />
-            <span className="hidden md:inline">Hand</span>
-          </button>
 
           <button
             id="tool-pen"

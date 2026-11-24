@@ -80,4 +80,10 @@ test('desktop sidebar docks the canvas and floating chrome (#147)', () => {
   const canvas = source('components/Canvas.tsx');
   assert.match(canvas, /id="shortcuts-btn"/);
   assert.match(canvas, /wb-sidebar-centered/);
+
+  const zoomControls = source('components/ZoomControls.tsx');
+  const resetMatches = zoomControls.match(/onClick=\{onResetZoom\}/g) ?? [];
+  assert.equal(resetMatches.length, 1, 'ZoomControls should expose exactly one reset control');
+  assert.match(zoomControls, /getHandToggleMeta/);
+  assert.doesNotMatch(source('components/Toolbar.tsx'), /id="tool-hand"/);
 });
