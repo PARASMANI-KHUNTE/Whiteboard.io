@@ -37,7 +37,7 @@ test('callGemini sends apiKey via x-goog-api-key header and never in URL query s
   }) as typeof fetch;
 
   const result = await callAiModel(
-    { name: 'gemini', model: 'gemini-2.5-flash', label: 'Gemini' },
+    { name: 'gemini', model: 'gemini-3.8-flash', label: 'Gemini' },
     'generate a simple flowchart',
     0.3
   );
@@ -48,7 +48,7 @@ test('callGemini sends apiKey via x-goog-api-key header and never in URL query s
   assert.ok(!capturedUrl.includes('secret-gemini-test-key-12345'));
   assert.equal(
     capturedUrl,
-    'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent'
+    'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent'
   );
   // Gemini key MUST appear in x-goog-api-key header
   assert.equal(capturedHeaders['x-goog-api-key'], 'secret-gemini-test-key-12345');

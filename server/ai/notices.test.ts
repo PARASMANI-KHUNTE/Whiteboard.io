@@ -11,8 +11,8 @@ import type { AiProviderInfo } from './providers';
 
 const GEMINI: AiProviderInfo = {
   name: 'gemini',
-  model: 'gemini-2.5-flash',
-  label: 'Gemini 2.5 Flash',
+  model: 'gemini-3.8-flash',
+  label: 'Gemini 3.8 Flash',
 };
 const OLLAMA: AiProviderInfo = {
   name: 'ollama',
@@ -50,12 +50,12 @@ test('failover and quality notices are both present (#84)', () => {
 
   assert.equal(
     notice,
-    'Gemini 2.5 Flash unavailable — Ollama · llama3.2 produced this diagram. ' +
+    'Gemini 3.8 Flash unavailable — Ollama · llama3.2 produced this diagram. ' +
       'Quality checks reported: Only 10 nodes were produced; at least 12 are required.'
   );
   assert.equal(
     composeGenerationNotice([], [GEMINI], OLLAMA),
-    'Gemini 2.5 Flash unavailable — Ollama · llama3.2 produced this diagram.'
+    'Gemini 3.8 Flash unavailable — Ollama · llama3.2 produced this diagram.'
   );
   assert.equal(composeGenerationNotice([], [], OLLAMA), undefined);
 });

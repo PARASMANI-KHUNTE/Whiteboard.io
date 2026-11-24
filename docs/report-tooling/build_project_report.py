@@ -931,7 +931,7 @@ def build_report(output_filename=None):
         ["Security / Crypto", "Node.js Crypto", "Built-in native", "PBKDF2-SHA512 password hashing, salt generation, and secure UUID generation."],
         ["Voice Media", "WebRTC 1.0", "W3C Standard", "Decentralized peer-to-peer audio streaming mesh directly between browsers."],
         ["Audio Processing", "Web Audio API", "W3C Standard", "AnalyserNode frequency analysis, volume RMS calculation, speaking halos."],
-        ["Generative AI", "Gemini & Ollama", "gemini-2.5 / llama3.2", "Multi-engine diagram generation with model failover chain and JSON schema output."],
+        ["Generative AI", "Gemini & Ollama", "gemini-3.8 / llama3.2", "Multi-engine diagram generation with model failover chain and JSON schema output."],
         ["Bundler / Server", "esbuild & tsx", f"{esbuild_ver} / {tsx_ver}", "High-speed TypeScript transpilation and server production bundling."]
     ]
     
