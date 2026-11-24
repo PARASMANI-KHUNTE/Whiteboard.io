@@ -46,6 +46,7 @@ import {
 } from '../utils/elementMutations';
 import { getElementBounds, getElementAnchors, routeDraftWire } from '../utils/wireGeometry';
 import { reorderZIndex, getElementZ } from '../utils/zOrder';
+import { isStrokeHit, computeStrokeHitTolerance } from '../utils/hitTesting';
 import { SpatialIndex, IndexedElement } from '../utils/spatialIndex';
 import { writeClipboard, readClipboard, cloneElementsForPaste, hasClipboardContent } from '../utils/clipboard';
 import {
@@ -274,19 +275,24 @@ export const Canvas: React.FC<CanvasProps> = ({
     [getSpatialIndex]
   );
 
-  // Topmost element under the cursor (strokes use a widened proximity test).
+  // Topmost element under the cursor (strokes use zoom-normalized proximity test).
   const findElementsAtCoords = useCallback(
     (pt: Point): CanvasElement | null => {
-      const candidates = getSpatialIndex().queryPoint(pt);
+      const currentZoom = zoomRef.current || 1;
+      const hitTolerance = computeStrokeHitTolerance(12, currentZoom);
+      const candidates = getSpatialIndex().queryRect({
+        x: pt.x - hitTolerance,
+        y: pt.y - hitTolerance,
+        width: hitTolerance * 2,
+        height: hitTolerance * 2,
+      });
       let best: IndexedElement | null = null;
       for (const item of candidates) {
         const el = item.element;
         if (el.type === 'wire') continue;
         if (el.type === 'stroke') {
           const stroke = el as DrawingStroke;
-          if (!stroke.points || stroke.points.length === 0) continue;
-          const hitRadius = Math.max(12, (stroke.size || 3) * 2);
-          if (!stroke.points.some((p) => Math.hypot(p.x - pt.x, p.y - pt.y) <= hitRadius)) {
+          if (!isStrokeHit(stroke, pt, currentZoom)) {
             continue;
           }
         } else {

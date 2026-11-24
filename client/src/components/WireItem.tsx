@@ -3,6 +3,7 @@ import { usePopoverDismiss } from '../hooks/usePopoverDismiss';
 import { WireElement, CanvasElement, WireStyle } from '../types';
 import { routeWire } from '../utils/wireGeometry';
 import { getAdaptiveDisplayColor } from '../utils/themeColors';
+import { computeWireHitStrokeWidth } from '../utils/hitTesting';
 import {
   Spline,
   Minus,
@@ -52,6 +53,7 @@ export const WireItem: React.FC<WireItemProps> = ({
   wire,
   sourceEl,
   targetEl,
+  zoom = 1,
   theme = 'light',
   isSelected = false,
   onSelect,
@@ -153,7 +155,7 @@ export const WireItem: React.FC<WireItemProps> = ({
         d={route.svgPath}
         fill="none"
         stroke="transparent"
-        strokeWidth={Math.max(22, strokeWidth * 4)}
+        strokeWidth={computeWireHitStrokeWidth(strokeWidth, zoom)}
         strokeLinecap="round"
         strokeLinejoin="round"
         style={{ pointerEvents: 'stroke', cursor: 'pointer' }}
