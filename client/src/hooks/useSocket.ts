@@ -9,6 +9,7 @@ import {
 } from '../utils/guestIdentity';
 import { loadSoloBoard, saveSoloBoard } from '../utils/soloStorage';
 import { notifySessionExpired } from '../utils/authSession';
+import { shouldKeepSoloMigrationAfterConnectError } from '../utils/soloMigration';
 
 function getInitialUser() {
   if (typeof window === 'undefined') {
@@ -373,9 +374,11 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
 
     socket.on('connect_error', (err) => {
       console.warn('Realtime connection issue (reconnecting):', err.message);
-      // A failed handshake must not leave a solo board queued for a later,
-      // unrelated room.
-      soloMigrationRef.current = null;
+      // Socket.IO retries and re-joins this same room, so keep a migration that
+      // targets the active room. Only a migration for another room is stale.
+      if (!shouldKeepSoloMigrationAfterConnectError(soloMigrationRef.current, roomId)) {
+        soloMigrationRef.current = null;
+      }
       if (!connectErrorNotifiedRef.current) {
         connectErrorNotifiedRef.current = true;
         addNotification('Realtime connection lost — reconnecting...', 'warning');
