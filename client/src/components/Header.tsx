@@ -60,8 +60,7 @@ interface HeaderProps {
   onClearError: () => void;
   isIframeRestricted: boolean;
   activeSpeakers?: string[];
-  onJoinVoice: () => void;
-  onLeaveVoice: () => void;
+  onToggleVoice: () => void;
   onToggleMute: () => void;
   onToggleDeafen: () => void;
   onToggleSimulated: () => void;
@@ -106,8 +105,7 @@ export const Header: React.FC<HeaderProps> = ({
   onClearError,
   isIframeRestricted,
   activeSpeakers = [],
-  onJoinVoice,
-  onLeaveVoice,
+  onToggleVoice,
   onToggleMute,
   onToggleDeafen,
   onToggleSimulated,
@@ -224,8 +222,7 @@ export const Header: React.FC<HeaderProps> = ({
           onClearError={onClearError}
           isIframeRestricted={isIframeRestricted}
           activeSpeakers={activeSpeakers}
-          onJoinVoice={onJoinVoice}
-          onLeaveVoice={onLeaveVoice}
+          onToggleVoice={onToggleVoice}
           onToggleMute={onToggleMute}
           onToggleDeafen={onToggleDeafen}
           onToggleSimulated={onToggleSimulated}

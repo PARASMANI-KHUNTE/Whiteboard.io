@@ -523,6 +523,14 @@ export default function App() {
     startVoiceChat();
   }, [isSoloMode, roomId, convertToMultiplayerRoom, addNotification, startVoiceChat]);
 
+  const handleToggleVoice = useCallback(() => {
+    if (isVoiceConnected) {
+      leaveVoiceChat();
+    } else {
+      handleJoinVoiceWithSoloCheck();
+    }
+  }, [isVoiceConnected, leaveVoiceChat, handleJoinVoiceWithSoloCheck]);
+
   const [cursorCoords, setCursorCoords] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
 
   // Handle local element creation & record it for undo
@@ -1450,8 +1458,7 @@ export default function App() {
         onClearError={clearVoiceError}
         isIframeRestricted={isIframeRestricted}
         activeSpeakers={activeSpeakers}
-        onJoinVoice={handleJoinVoiceWithSoloCheck}
-        onLeaveVoice={leaveVoiceChat}
+        onToggleVoice={handleToggleVoice}
         onToggleMute={toggleMute}
         onToggleDeafen={toggleDeafen}
         onToggleSimulated={toggleSimulated}
@@ -1484,9 +1491,7 @@ export default function App() {
         onOpenAdmin={() => setShowAdminModal(true)}
         onOpenAi={() => setShowAiModal(true)}
         onToggleAiChat={() => setIsAiChatOpen((open) => !open)}
-        onToggleVoice={() =>
-          isVoiceConnected ? leaveVoiceChat() : handleJoinVoiceWithSoloCheck()
-        }
+        onToggleVoice={handleToggleVoice}
         onToggleMute={toggleMute}
         onOpenShortcuts={() => setShowShortcutsModal(true)}
         onOpenProfile={() => setShowProfileModal(true)}

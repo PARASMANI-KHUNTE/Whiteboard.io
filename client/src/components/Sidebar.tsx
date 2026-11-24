@@ -14,8 +14,6 @@ import {
   ListChecks,
   LogIn,
   MessageSquare,
-  Mic,
-  MicOff,
   MousePointer,
   PanelLeftClose,
   PanelLeftOpen,
@@ -40,6 +38,7 @@ import {
 import type { ThemeMode } from '../hooks/useTheme';
 import type { ToolType } from '../types';
 import { getThemeToggleMeta } from './ui/ThemeToggle';
+import { getVoiceConnectionMeta, getVoiceMuteMeta } from './ui/voiceActions';
 
 type IconComponent = LucideIcon;
 
@@ -78,6 +77,8 @@ interface SidebarButtonProps {
   id?: string;
   icon: IconComponent;
   label: string;
+  title?: string;
+  ariaLabel?: string;
   expanded: boolean;
   active?: boolean;
   disabled?: boolean;
@@ -89,6 +90,8 @@ function SidebarButton({
   id,
   icon: Icon,
   label,
+  title,
+  ariaLabel,
   expanded,
   active = false,
   disabled = false,
@@ -101,8 +104,8 @@ function SidebarButton({
       type="button"
       onClick={onClick}
       disabled={disabled}
-      title={label}
-      aria-label={label}
+      title={title ?? label}
+      aria-label={ariaLabel ?? label}
       aria-pressed={pressed}
       className={`flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-35 ${
         expanded ? 'justify-start' : 'justify-center px-2'
@@ -406,24 +409,38 @@ export default function Sidebar({
               pressed={isAiChatOpen}
               onClick={() => runAction(onToggleAiChat)}
             />
-            <SidebarButton
-              icon={isVoiceConnected ? MicOff : Mic}
-              label={isVoiceConnected ? 'Leave voice' : 'Join voice'}
-              expanded={isOpen}
-              active={isVoiceConnected}
-              pressed={isVoiceConnected}
-              onClick={() => runAction(onToggleVoice)}
-            />
-            {isVoiceConnected && (
-              <SidebarButton
-                icon={isMuted ? MicOff : Mic}
-                label={isMuted ? 'Unmute' : 'Mute'}
-                expanded={isOpen}
-                active={isMuted}
-                pressed={isMuted}
-                onClick={() => runAction(onToggleMute)}
-              />
-            )}
+            {(() => {
+              const voiceConnectionMeta = getVoiceConnectionMeta(isVoiceConnected);
+              const voiceMuteMeta = getVoiceMuteMeta(isMuted);
+              return (
+                <>
+                  <SidebarButton
+                    icon={voiceConnectionMeta.Icon}
+                    label={voiceConnectionMeta.label}
+                    title={voiceConnectionMeta.title}
+                    ariaLabel={voiceConnectionMeta.ariaLabel}
+                    disabled={voiceConnectionMeta.disabled}
+                    expanded={isOpen}
+                    active={isVoiceConnected}
+                    pressed={isVoiceConnected}
+                    onClick={() => runAction(onToggleVoice)}
+                  />
+                  {isVoiceConnected && (
+                    <SidebarButton
+                      icon={voiceMuteMeta.Icon}
+                      label={voiceMuteMeta.label}
+                      title={voiceMuteMeta.title}
+                      ariaLabel={voiceMuteMeta.ariaLabel}
+                      disabled={voiceMuteMeta.disabled}
+                      expanded={isOpen}
+                      active={isMuted}
+                      pressed={isMuted}
+                      onClick={() => runAction(onToggleMute)}
+                    />
+                  )}
+                </>
+              );
+            })()}
           </SidebarSection>
 
           <SidebarSection title="View" expanded={isOpen}>
