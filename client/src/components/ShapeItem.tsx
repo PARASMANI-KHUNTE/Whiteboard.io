@@ -16,6 +16,8 @@ import { getAdaptiveDisplayColor } from '../utils/themeColors';
 import { computeRotatedResize, getRotatedResizeCursor } from '../utils/shapeResize';
 import { shouldBailOutItemMouseDown } from '../utils/canvasPan';
 import { hasMultiSelectModifier } from '../utils/selection';
+import { CORE_PALETTE } from '../constants/palettes';
+import { ColorSwatches } from './ui/ColorSwatches';
 
 interface ShapeItemProps {
   element: ShapeElement;
@@ -33,18 +35,6 @@ interface ShapeItemProps {
   onMoveSelection?: (deltaX: number, deltaY: number) => void;
   onMoveSelectionEnd?: () => void;
 }
-
-const PALETTE_COLORS = [
-  '#0f172a',
-  '#ffffff',
-  '#ef4444',
-  '#3b82f6',
-  '#10b981',
-  '#f59e0b',
-  '#8b5cf6',
-  '#ec4899',
-  '#06b6d4',
-];
 
 const STROKE_WIDTHS = [
   { label: 'Thin', val: 2 },
@@ -898,21 +888,15 @@ export const ShapeItem: React.FC<ShapeItemProps> = ({
               {showColorPicker && (
                 <div
                   onMouseDown={(e) => e.stopPropagation()}
-                  className="absolute left-1/2 -translate-x-1/2 top-8 bg-white dark:bg-slate-900 rounded-xl shadow-xl border border-slate-200 dark:border-slate-800 p-2 flex gap-1 z-50"
+                  className="absolute left-1/2 -translate-x-1/2 top-8 bg-white dark:bg-slate-900 rounded-xl shadow-xl border border-slate-200 dark:border-slate-800 p-2 z-50"
                 >
-                  {PALETTE_COLORS.map((c) => (
-                    <button
-                      key={c}
-                      type="button"
-                      aria-label={`Use ${c} color`}
-                      aria-pressed={element.color === c}
-                      onClick={() => handleColorChange(c)}
-                      style={{ backgroundColor: c }}
-                      className={`w-7 h-7 rounded-full border border-slate-300 dark:border-slate-700 hover:scale-110 transition-transform cursor-pointer ${
-                        element.color === c ? 'ring-2 ring-blue-500' : ''
-                      }`}
-                    />
-                  ))}
+                  <ColorSwatches
+                    colors={CORE_PALETTE}
+                    selectedColor={element.color}
+                    onSelect={handleColorChange}
+                    size="md"
+                    className="gap-1"
+                  />
                 </div>
               )}
             </div>

@@ -3,6 +3,8 @@ import { StickyNote } from '../types';
 import { Trash2, Move, Palette, Lock } from 'lucide-react';
 import { shouldBailOutItemMouseDown } from '../utils/canvasPan';
 import { hasMultiSelectModifier } from '../utils/selection';
+import { STICKY_PALETTE } from '../constants/palettes';
+import { ColorSwatches } from './ui/ColorSwatches';
 
 interface StickyNoteItemProps {
   note: StickyNote;
@@ -20,13 +22,6 @@ interface StickyNoteItemProps {
   onMoveSelection?: (deltaX: number, deltaY: number) => void;
   onMoveSelectionEnd?: () => void;
 }
-
-const STICKY_COLORS = [
-  { name: 'Yellow', bg: '#fef9c3', topBorder: '#fde047', text: '#334155' },
-  { name: 'Blue', bg: '#eff6ff', topBorder: '#bfdbfe', text: '#334155' },
-  { name: 'Green', bg: '#ecfdf5', topBorder: '#a7f3d0', text: '#334155' },
-  { name: 'Pink', bg: '#fff1f2', topBorder: '#fecdd3', text: '#334155' },
-];
 
 export const StickyNoteItem: React.FC<StickyNoteItemProps> = ({
   note,
@@ -207,7 +202,7 @@ export const StickyNoteItem: React.FC<StickyNoteItemProps> = ({
     });
   };
 
-  const currentColorConfig = STICKY_COLORS.find((c) => c.bg === note.color) || STICKY_COLORS[0];
+  const currentColorConfig = STICKY_PALETTE.find((c) => c.bg === note.color) || STICKY_PALETTE[0];
 
   return (
     <div
@@ -272,17 +267,15 @@ export const StickyNoteItem: React.FC<StickyNoteItemProps> = ({
               {showColorPicker && (
                 <div
                   onClick={(e) => e.stopPropagation()}
-                  className="absolute right-0 top-6 wb-card-glass rounded-xl shadow-xl border border-slate-200/80 dark:border-slate-700 p-1.5 flex gap-1.5 z-30"
+                  className="absolute right-0 top-6 wb-card-glass rounded-xl shadow-xl border border-slate-200/80 dark:border-slate-700 p-1.5 z-30"
                 >
-                  {STICKY_COLORS.map((c) => (
-                    <button
-                      key={c.name}
-                      onClick={() => handleColorSelect(c.bg)}
-                      style={{ backgroundColor: c.bg }}
-                      className="w-5 h-5 rounded-full border border-slate-300 dark:border-slate-600 hover:scale-110 transition-transform cursor-pointer btn-press"
-                      title={c.name}
-                    />
-                  ))}
+                  <ColorSwatches
+                    colors={STICKY_PALETTE.map((c) => ({ hex: c.bg, label: c.name }))}
+                    selectedColor={note.color || currentColorConfig.bg}
+                    onSelect={handleColorSelect}
+                    size="xs"
+                    ariaLabelSuffix=" note color"
+                  />
                 </div>
               )}
             </div>

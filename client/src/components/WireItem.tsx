@@ -15,19 +15,10 @@ import {
   Sliders,
   Type,
 } from 'lucide-react';
+import { WIRE_PALETTE } from '../constants/palettes';
+import { ColorSwatches } from './ui/ColorSwatches';
 
-export const WIRE_COLORS = [
-  '#0f172a',
-  '#ffffff',
-  '#ef4444',
-  '#f97316',
-  '#eab308',
-  '#10b981',
-  '#06b6d4',
-  '#3b82f6',
-  '#8b5cf6',
-  '#ec4899',
-];
+export const WIRE_COLORS = WIRE_PALETTE.map((c) => c.hex);
 
 export const WIRE_WIDTHS = [
   { label: 'Thin', val: 2 },
@@ -454,33 +445,17 @@ export const WireOverlay: React.FC<WireOverlayProps> = ({
                   onMouseDown={(e) => e.stopPropagation()}
                   onPointerDown={(e) => e.stopPropagation()}
                   onClick={(e) => e.stopPropagation()}
-                  className="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 p-2 bg-white dark:bg-slate-900 rounded-xl shadow-2xl border border-slate-200 dark:border-slate-800 flex items-center gap-1.5 z-50 animate-in fade-in zoom-in-95 duration-100"
+                  className="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 p-2 bg-white dark:bg-slate-900 rounded-xl shadow-2xl border border-slate-200 dark:border-slate-800 z-50 animate-in fade-in zoom-in-95 duration-100"
                 >
-                  {WIRE_COLORS.map((c) => {
-                    const isCurrent = wire.color === c || (!wire.color && c === '#3b82f6');
-                    return (
-                      <button
-                        key={c}
-                        type="button"
-                        id={`wire-color-swatch-${c.replace('#', '')}`}
-                        aria-label={`Use ${c} wire color`}
-                        aria-pressed={isCurrent}
-                        onMouseDown={(e) => {
-                          e.stopPropagation();
-                          handleColorChange(c);
-                        }}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleColorChange(c);
-                        }}
-                        title={c}
-                        className={`w-6 h-6 rounded-full border border-slate-300 dark:border-slate-600 transition-transform cursor-pointer ${
-                          isCurrent ? 'scale-115 ring-2 ring-blue-500 ring-offset-2' : 'hover:scale-110'
-                        }`}
-                        style={{ backgroundColor: c }}
-                      />
-                    );
-                  })}
+                  <ColorSwatches
+                    colors={WIRE_PALETTE}
+                    selectedColor={wire.color || '#3b82f6'}
+                    onSelect={handleColorChange}
+                    size="sm"
+                    idPrefix="wire-color-swatch-"
+                    ariaLabelSuffix=" wire color"
+                    stopMouseDown
+                  />
                 </div>
               )}
             </div>

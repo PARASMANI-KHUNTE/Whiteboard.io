@@ -2,6 +2,8 @@ import React, { useState, useMemo, useCallback, useRef } from 'react';
 import { ToolType, ShapeType, WireStyle } from '../types';
 import { usePopoverDismiss } from '../hooks/usePopoverDismiss';
 import { AVAILABLE_ICONS } from '../constants/icons';
+import { TOOLBAR_COLORS } from '../constants/palettes';
+import { ColorSwatches } from './ui/ColorSwatches';
 import {
   MousePointer,
   Pencil,
@@ -30,7 +32,6 @@ import {
   CheckSquare,
   Spline,
   Minus,
-  Palette,
 } from 'lucide-react';
 
 interface ToolbarProps {
@@ -56,17 +57,6 @@ interface ToolbarProps {
   onSelectAll?: () => void;
   isMultiplayer: boolean;
 }
-
-const COLORS = [
-  { label: 'Charcoal Black', hex: '#0f172a' },
-  { label: 'Snow White', hex: '#ffffff' },
-  { label: 'Vibrant Coral', hex: '#ef4444' },
-  { label: 'Ocean Blue', hex: '#3b82f6' },
-  { label: 'Forest Green', hex: '#10b981' },
-  { label: 'Amber Sun', hex: '#f59e0b' },
-  { label: 'Royal Violet', hex: '#8b5cf6' },
-  { label: 'Electric Cyan', hex: '#06b6d4' },
-];
 
 const SIZES = [
   { label: 'Fine', value: 3, dotSize: 4 },
@@ -642,43 +632,18 @@ export const Toolbar: React.FC<ToolbarProps> = ({
             <div className="h-6 w-[1px] bg-slate-200 dark:bg-slate-800 mx-0.5 shrink-0" />
 
             {/* Color Options */}
-            <div className="flex items-center gap-1.5 sm:gap-2 px-1 shrink-0">
-              {COLORS.map((c) => {
-                const isSelected = currentColor === c.hex;
-                return (
-                  <button
-                    key={c.hex}
-                    id={`color-${c.hex.replace('#', '')}`}
-                    disabled={!canWrite}
-                    onClick={() => onSelectColor(c.hex)}
-                    title={c.label}
-                    style={{ backgroundColor: c.hex }}
-                    className={`w-6 h-6 sm:w-6.5 sm:h-6.5 rounded-full cursor-pointer border border-slate-300 dark:border-slate-600 transition-all shrink-0 disabled:opacity-30 disabled:cursor-not-allowed btn-press ${
-                      isSelected
-                        ? 'ring-2 ring-blue-500 scale-110 shadow-xs opacity-100'
-                        : 'opacity-70 hover:opacity-100 hover:scale-105'
-                    }`}
-                  />
-                );
-              })}
-
-              {/* Custom native color picker button */}
-              <label
-                title="Choose custom color"
-                className={`relative w-6 h-6 sm:w-6.5 sm:h-6.5 rounded-full cursor-pointer border border-slate-300 dark:border-slate-600 flex items-center justify-center bg-gradient-to-tr from-pink-500 via-amber-400 to-indigo-500 hover:scale-110 transition-transform shrink-0 btn-press ${
-                  !canWrite ? 'opacity-30 pointer-events-none' : ''
-                }`}
-              >
-                <Palette className="w-3.5 h-3.5 text-white drop-shadow" />
-                <input
-                  type="color"
-                  value={currentColor}
-                  disabled={!canWrite}
-                  onChange={(e) => onSelectColor(e.target.value)}
-                  className="sr-only"
-                />
-              </label>
-            </div>
+            <ColorSwatches
+              colors={TOOLBAR_COLORS}
+              selectedColor={currentColor}
+              onSelect={onSelectColor}
+              disabled={!canWrite}
+              size="sm"
+              showCustomPicker
+              idPrefix="color-"
+              ariaLabelPrefix="Select "
+              ariaLabelSuffix=" color"
+              className="sm:gap-2 px-1 shrink-0"
+            />
 
             <div className="h-6 w-[1px] bg-slate-200 dark:bg-slate-800 mx-0.5 sm:mx-1 shrink-0" />
 
