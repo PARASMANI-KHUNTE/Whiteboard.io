@@ -47,6 +47,7 @@ import {
 import { getElementBounds, getElementAnchors, routeDraftWire } from '../utils/wireGeometry';
 import { reorderZIndex, getElementZ } from '../utils/zOrder';
 import { isStrokeHit, computeStrokeHitTolerance } from '../utils/hitTesting';
+import { getTouchClientPoint, isScrollableTextInput } from '../utils/touchInteractions';
 import { SpatialIndex, IndexedElement } from '../utils/spatialIndex';
 import { writeClipboard, readClipboard, cloneElementsForPaste, hasClipboardContent } from '../utils/clipboard';
 import {
@@ -240,6 +241,7 @@ export const Canvas: React.FC<CanvasProps> = ({
   // Spatial index cache: rebuilt only when the elements map identity changes,
   // so repeated pointer events between renders reuse the same grid.
   const spatialIndexRef = useRef<{ elements: Record<string, CanvasElement>; index: SpatialIndex } | null>(null);
+  const newlyCreatedElementIdsRef = useRef<Set<string>>(new Set());
   const getSpatialIndex = useCallback((): SpatialIndex => {
     const currentElements = elementsRef.current;
     const cached = spatialIndexRef.current;
@@ -1159,12 +1161,15 @@ export const Canvas: React.FC<CanvasProps> = ({
 
     const onNativeTouchStart = (e: TouchEvent) => {
       cancelNavAnimation();
+      if (isScrollableTextInput(e.target)) return;
       if (e.touches.length >= 2 || currentTool === 'hand') {
         e.preventDefault();
       }
     };
 
     const onNativeTouchMove = (e: TouchEvent) => {
+      // Allow touch scrolling inside text inputs/textareas (e.g. sticky notes, text elements)
+      if (isScrollableTextInput(e.target)) return;
       // Always prevent page-level scroll when interacting with whiteboard canvas
       e.preventDefault();
     };
@@ -1410,13 +1415,12 @@ export const Canvas: React.FC<CanvasProps> = ({
     let clientX = 0;
     let clientY = 0;
 
-    if ('touches' in e) {
-      if (e.touches.length === 0) return null;
-      clientX = e.touches[0].clientX;
-      clientY = e.touches[0].clientY;
+    const pt = getTouchClientPoint(e as unknown as { touches?: TouchList; changedTouches?: TouchList; clientX?: number; clientY?: number });
+    if (pt) {
+      clientX = pt.clientX;
+      clientY = pt.clientY;
     } else {
-      clientX = e.clientX;
-      clientY = e.clientY;
+      return null;
     }
 
     const screenX = clientX - rect.left;
@@ -1587,6 +1591,7 @@ export const Canvas: React.FC<CanvasProps> = ({
         updatedAt: Date.now(),
         zIndex: Date.now(),
       };
+      newlyCreatedElementIdsRef.current.add(newSticky.id);
       onElementCreate(newSticky);
       setSelectedElementIds(new Set([newSticky.id]));
       onSelectTool?.('select'); // Switch to select tool
@@ -1614,6 +1619,7 @@ export const Canvas: React.FC<CanvasProps> = ({
         updatedAt: Date.now(),
         zIndex: Date.now(),
       };
+      newlyCreatedElementIdsRef.current.add(newText.id);
       onElementCreate(newText);
       setSelectedElementIds(new Set([newText.id]));
       onSelectTool?.('select'); // Switch to select tool so user can type immediately
@@ -2167,6 +2173,7 @@ export const Canvas: React.FC<CanvasProps> = ({
                 zoom={zoom}
                 isSelected={selectedElementIds.has(el.id)}
                 isMultiSelection={selectedElementIds.size > 1}
+                autoFocus={newlyCreatedElementIdsRef.current.has(el.id)}
                 onSelect={(isMulti) => handleSelectElement(el.id, isMulti)}
                 onUpdate={onElementUpdate}
                 onDelete={handleElementDelete}
@@ -2188,6 +2195,7 @@ export const Canvas: React.FC<CanvasProps> = ({
                 theme={theme}
                 isSelected={selectedElementIds.has(el.id)}
                 isMultiSelection={selectedElementIds.size > 1}
+                autoFocus={newlyCreatedElementIdsRef.current.has(el.id)}
                 onSelect={(isMulti) => handleSelectElement(el.id, isMulti)}
                 onUpdate={onElementUpdate}
                 onDelete={handleElementDelete}
