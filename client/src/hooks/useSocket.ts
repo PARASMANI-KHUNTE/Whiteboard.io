@@ -7,7 +7,14 @@ import {
   saveGuestIdentityColor,
   saveGuestIdentityName,
 } from '../utils/guestIdentity';
-import { loadSoloBoard, saveSoloBoard } from '../utils/soloStorage';
+import { loadSoloBoard, saveSoloBoard, soloBoardKey } from '../utils/soloStorage';
+import {
+  boardSignature,
+  createSoloBoardSync,
+  createSoloSourceId,
+  mergeSoloBoards,
+  type SoloBoardSync,
+} from '../utils/soloSync';
 import { notifySessionExpired } from '../utils/authSession';
 import { shouldKeepSoloMigrationAfterConnectError } from '../utils/soloMigration';
 
@@ -133,6 +140,8 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
   const [boardClearCount, setBoardClearCount] = useState(0);
 
   const socketRef = useRef<Socket | null>(null);
+  const roomIdRef = useRef(roomId);
+  roomIdRef.current = roomId;
   // Bumping this forces the socket effect below to create a fresh connection,
   // e.g. when rejoining the same room after a kick disconnected the old one.
   const [connectionEpoch, setConnectionEpoch] = useState(0);
@@ -146,6 +155,12 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
   const soloHydratedRef = useRef<boolean>(false);
   const soloIdentityRef = useRef<string | null>(null);
   const soloNoticeShownRef = useRef<boolean>(false);
+  const soloSourceIdRef = useRef(createSoloSourceId());
+  const soloSyncRef = useRef<SoloBoardSync | null>(null);
+  const soloLastSavedSignatureRef = useRef<string>('');
+  const soloSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const soloSaveQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const soloSaveGenerationRef = useRef(0);
 
   // Sync currentUser with the authenticated account (or fall back to the tab
   // guest identity on logout) and re-announce the new identity to the server.
@@ -217,6 +232,31 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
 
   const currentUserId = currentUser.id;
 
+  const cancelPendingSoloSave = useCallback(() => {
+    if (soloSaveTimerRef.current !== null) {
+      clearTimeout(soloSaveTimerRef.current);
+      soloSaveTimerRef.current = null;
+    }
+  }, []);
+
+  // Serialize whole-board writes so an older debounce flush cannot finish
+  // after a newer merge and resurrect a stale snapshot.
+  const persistSoloBoard = useCallback((
+    identityId: string,
+    board: Record<string, CanvasElement>,
+    options: { broadcast?: boolean } = {}
+  ) => {
+    const generation = ++soloSaveGenerationRef.current;
+    const task = soloSaveQueueRef.current.then(async () => {
+      await saveSoloBoard(identityId, board);
+      if (generation !== soloSaveGenerationRef.current) return;
+      soloLastSavedSignatureRef.current = boardSignature(board);
+      if (options.broadcast !== false) soloSyncRef.current?.publish();
+    });
+    soloSaveQueueRef.current = task.catch(() => {});
+    return task;
+  }, []);
+
   // Solo canvas restore: runs when entering solo mode and when the identity
   // changes (guest -> account). StrictMode-safe because the load is idempotent
   // and stale async results are discarded.
@@ -240,12 +280,14 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
         const previousBoard = await loadSoloBoard(previousIdentity);
         if (previousBoard && Object.keys(previousBoard).length > 0) {
           board = previousBoard;
-          await saveSoloBoard(identityId, previousBoard);
+          await persistSoloBoard(identityId, previousBoard);
         }
       }
 
       if (cancelled) return;
       soloIdentityRef.current = identityId;
+      const restored = board && Object.keys(board).length > 0 ? board : {};
+      soloLastSavedSignatureRef.current = boardSignature(restored);
       if (board && Object.keys(board).length > 0) {
         setElements(board);
         elementsRef.current = board;
@@ -258,31 +300,89 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
     })().catch(() => {
       if (cancelled) return;
       soloIdentityRef.current = identityId;
+      soloLastSavedSignatureRef.current = boardSignature({});
       soloHydratedRef.current = true;
     });
 
     return () => {
       cancelled = true;
     };
-  }, [roomId, currentUserId, addNotification]);
+  }, [roomId, currentUserId, addNotification, persistSoloBoard]);
 
   // Debounced solo autosave. Skips the initial snapshot until restore finished
   // so an empty first render cannot erase the stored board.
   useEffect(() => {
     if (roomId || !soloHydratedRef.current) return;
-    const identityId = currentUserId;
-    const timer = setTimeout(() => {
-      void saveSoloBoard(identityId, elements);
+    if (boardSignature(elements) === soloLastSavedSignatureRef.current) return;
+    cancelPendingSoloSave();
+    soloSaveTimerRef.current = setTimeout(() => {
+      soloSaveTimerRef.current = null;
+      void persistSoloBoard(currentUserId, elements);
     }, 450);
-    return () => clearTimeout(timer);
-  }, [elements, roomId, currentUserId]);
+    return cancelPendingSoloSave;
+  }, [elements, roomId, currentUserId, persistSoloBoard, cancelPendingSoloSave]);
+
+  // Cross-tab coordination. A clean tab adopts the remote board; a tab with
+  // unsaved work merges both snapshots so neither tab silently clobbers the
+  // other. Any pending debounce is cancelled before reading the remote board.
+  useEffect(() => {
+    if (roomId) return;
+    const key = soloBoardKey(currentUserId);
+    let cancelled = false;
+
+    const handleUpdate = () => {
+      if (cancelled || !soloHydratedRef.current) return;
+      cancelPendingSoloSave();
+
+      void (async () => {
+        const remote = await loadSoloBoard(currentUserId);
+        if (cancelled || roomIdRef.current) return;
+        const local = elementsRef.current;
+        const localSignature = boardSignature(local);
+        const { board, conflictedIds, changed } = mergeSoloBoards(local, remote ?? {});
+        const mergedSignature = boardSignature(board);
+
+        soloLastSavedSignatureRef.current = mergedSignature;
+        elementsRef.current = board;
+        setElements(board);
+
+        if (changed) await persistSoloBoard(currentUserId, board);
+        if (cancelled) return;
+
+        if (conflictedIds.length > 0) {
+          addNotification(
+            `Solo board merged with another tab; ${conflictedIds.length} conflicting element(s) kept the newest edit.`,
+            'warning'
+          );
+        } else if (localSignature !== mergedSignature) {
+          addNotification('Solo board updated from another tab.', 'info');
+        }
+      })().catch(() => {
+        // A failed merge must not cancel pending local work.
+        if (!cancelled) addNotification('Could not sync solo board from another tab.', 'warning');
+      });
+    };
+
+    const sync = createSoloBoardSync({
+      key,
+      sourceId: soloSourceIdRef.current,
+      onUpdate: handleUpdate,
+    });
+    soloSyncRef.current = sync;
+
+    return () => {
+      cancelled = true;
+      sync.close();
+      if (soloSyncRef.current === sync) soloSyncRef.current = null;
+    };
+  }, [roomId, currentUserId, addNotification, persistSoloBoard, cancelPendingSoloSave]);
 
   // Flush a final snapshot when the tab is hidden or closed.
   useEffect(() => {
     if (roomId) return;
     const flush = () => {
       if (soloHydratedRef.current) {
-        void saveSoloBoard(currentUserId, elementsRef.current);
+        void persistSoloBoard(currentUserId, elementsRef.current);
       }
     };
     const onVisibilityChange = () => {
@@ -294,7 +394,7 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
       window.removeEventListener('beforeunload', flush);
       document.removeEventListener('visibilitychange', onVisibilityChange);
     };
-  }, [roomId, currentUserId]);
+  }, [roomId, currentUserId, persistSoloBoard]);
 
   // Coalesce high-frequency element updates (drag / resize / rotate) into at
   // most one socket message per element per ~50ms window.
