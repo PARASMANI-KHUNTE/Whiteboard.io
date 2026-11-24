@@ -97,7 +97,7 @@ export function useVoiceChat({
   const voiceSocketRef = useRef<Socket | null>(socket);
   const voiceEpochRef = useRef(0);
   /** Sockets we intentionally left; their `disconnect` event needs no cleanup. */
-  const expectedDisconnectsRef = useRef<Set<Socket>>(new Set());
+  const expectedDisconnectsRef = useRef<WeakSet<Socket>>(new WeakSet());
 
   // Notify peers on the socket we are leaving before switching/reconnecting.
   const announceVoiceLeft = useCallback((target: Socket | null) => {
@@ -124,14 +124,14 @@ export function useVoiceChat({
 
   // Update volume on master gain and remote elements
   useEffect(() => {
-    const effectiveVol = isDeafened ? 0 : volume;
+    const effectiveVol = isDeafened ? 0 : (isSimulated ? volume * 0.15 : volume);
     if (masterGainRef.current) {
       masterGainRef.current.gain.value = effectiveVol;
     }
     Object.values(remoteAudioElementsRef.current).forEach((el) => {
       el.volume = effectiveVol;
     });
-  }, [volume, isDeafened]);
+  }, [volume, isDeafened, isSimulated]);
 
   // Clean up all voice resources
   const cleanupAll = useCallback(() => {
