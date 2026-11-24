@@ -149,7 +149,7 @@ html[data-ai-chat-open='true'] .wb-bottom-chat-aware {
 
 @media (min-width: 1024px) {
   :root {
-    --wb-sidebar-width: 4rem;
+    --wb-sidebar-width: 0rem;
   }
 
   html[data-sidebar-open='true'] {
@@ -169,6 +169,21 @@ html[data-ai-chat-open='true'] .wb-bottom-chat-aware {
   #whiteboard-zoom-controls {
     left: calc(1rem + var(--wb-sidebar-width));
   }
+}
+
+/* Adaptive Toolbar: smoothly hide the floating toolbar when sidebar is open to eliminate duplicate controls */
+html[data-sidebar-open='true'] #whiteboard-floating-toolbar {
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-50%, 28px) scale(0.95);
+  visibility: hidden;
+}
+
+#whiteboard-floating-toolbar {
+  transition: opacity 0.22s cubic-bezier(0.16, 1, 0.3, 1),
+              transform 0.22s cubic-bezier(0.16, 1, 0.3, 1),
+              visibility 0.22s cubic-bezier(0.16, 1, 0.3, 1),
+              left 0.2s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .kbd-chip {

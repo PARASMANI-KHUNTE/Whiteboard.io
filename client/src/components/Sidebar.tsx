@@ -164,9 +164,7 @@ export default function Sidebar({
   onToggleVoice,
   onToggleMute,
 }: SidebarProps) {
-  const [isOpen, setIsOpen] = useState(
-    () => typeof window !== 'undefined' && window.matchMedia('(min-width: 1024px)').matches
-  );
+  const [isOpen, setIsOpen] = useState(false);
   const sidebarRef = useRef<HTMLElement>(null);
   const toggleRef = useRef<HTMLButtonElement>(null);
   const openButtonRef = useRef<HTMLButtonElement>(null);
@@ -214,7 +212,6 @@ export default function Sidebar({
     if (!isOpen) return;
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
-      if (window.innerWidth >= 1024) return;
       if (document.querySelector('[aria-modal="true"]')) return;
       setIsOpen(false);
     };
@@ -271,7 +268,7 @@ export default function Sidebar({
           aria-controls="whiteboard-sidebar"
           aria-expanded={false}
           title="Open sidebar"
-          className="fixed left-3 top-16 z-40 flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white/95 text-slate-600 shadow-lg backdrop-blur-md lg:hidden dark:border-slate-800 dark:bg-slate-900/95 dark:text-slate-300"
+          className="fixed left-3 top-16 z-40 flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200/80 bg-white/95 text-slate-600 shadow-md backdrop-blur-md dark:border-slate-800 dark:bg-slate-900/95 dark:text-slate-300 btn-press cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
         >
           <Menu className="h-5 w-5" aria-hidden />
         </button>
@@ -282,7 +279,7 @@ export default function Sidebar({
         id="whiteboard-sidebar"
         aria-label="Whiteboard controls"
         className={`fixed bottom-0 left-0 top-14 z-40 flex flex-col overflow-hidden border-r border-slate-200 bg-white/95 shadow-xl backdrop-blur-md transition-all duration-200 ease-out sm:top-16 dark:border-slate-800 dark:bg-slate-900/95 ${
-          isOpen ? 'w-64 translate-x-0' : 'w-16 -translate-x-full lg:translate-x-0'
+          isOpen ? 'w-64 translate-x-0' : 'w-16 -translate-x-full'
         }`}
       >
         <div
