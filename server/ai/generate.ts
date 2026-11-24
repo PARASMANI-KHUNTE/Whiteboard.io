@@ -138,10 +138,19 @@ function callModelOnce(
   );
 }
 
-async function callModelChain(
+/** Injectable so overload behavior can be tested without a live provider chain. */
+export type ModelCall = (
+  provider: AiProviderInfo,
+  message: string,
+  temperature: number,
+  maxRetries: number
+) => Promise<unknown>;
+
+export async function callModelChain(
   chain: AiProviderInfo[],
   message: string,
-  temperature: number
+  temperature: number,
+  call: ModelCall = callModelOnce
 ): Promise<ChainResult> {
   const failed: AiProviderInfo[] = [];
   const errors: string[] = [];
@@ -151,7 +160,7 @@ async function callModelChain(
 
   for (const provider of chain) {
     try {
-      const raw = await callModelOnce(provider, message, temperature, maxRetries);
+      const raw = await call(provider, message, temperature, maxRetries);
       if (failed.length > 0) {
         console.warn(
           `[AI Failover]: ${provider.label} (${provider.model}) answered after skipping ${failed.map((p) => p.model).join(", ")}.`
@@ -159,6 +168,10 @@ async function callModelChain(
       }
       return { raw, provider, failed };
     } catch (error: unknown) {
+      // Every provider shares the same queue. Trying the next one cannot help,
+      // and converting this into AiFailoverError hides overload as a 200
+      // fallback instead of the documented 429 (#65).
+      if (error instanceof QueueFullError) throw error;
       const reason = `${provider.label} (${provider.model}): ${(error as Error).message}`;
       failed.push(provider);
       errors.push(reason);
@@ -370,6 +383,7 @@ export async function generateDiagram(params: GenerateDiagramParams): Promise<Di
         const secondRaw = await callModelOnce(chosen, retryMessage, 0.3, 2);
         best = pickBetter(best, normalizeGraph(secondRaw, options));
       } catch (retryError: unknown) {
+        if (retryError instanceof QueueFullError) throw retryError;
         console.warn(
           `[AI Quality Gate]: Retry failed: ${(retryError as Error).message}. Keeping the first result.`
         );
@@ -511,6 +525,7 @@ export async function reviseDiagram(params: ReviseDiagramParams): Promise<Diagra
         if (pickBetter(best, second) === second) bestRaw = secondRaw;
         best = pickBetter(best, second);
       } catch (retryError: unknown) {
+        if (retryError instanceof QueueFullError) throw retryError;
         console.warn(
           `[AI Quality Gate]: Revision retry failed: ${(retryError as Error).message}. Keeping the first result.`
         );
