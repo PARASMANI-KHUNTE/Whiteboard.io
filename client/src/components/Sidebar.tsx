@@ -16,7 +16,6 @@ import {
   MessageSquare,
   Mic,
   MicOff,
-  Moon,
   MousePointer,
   PanelLeftClose,
   PanelLeftOpen,
@@ -28,7 +27,6 @@ import {
   Sparkles,
   Spline,
   StickyNote,
-  Sun,
   Trash2,
   Type,
   Undo2,
@@ -41,6 +39,7 @@ import {
 } from 'lucide-react';
 import type { ThemeMode } from '../hooks/useTheme';
 import type { ToolType } from '../types';
+import { getThemeToggleMeta } from './ui/ThemeToggle';
 
 type IconComponent = LucideIcon;
 
@@ -429,12 +428,17 @@ export default function Sidebar({
               expanded={isOpen}
               onClick={() => clickHeaderControl('shortcuts-btn')}
             />
-            <SidebarButton
-              icon={theme === 'dark' ? Sun : Moon}
-              label={theme === 'dark' ? 'Light mode' : 'Dark mode'}
-              expanded={isOpen}
-              onClick={() => runAction(onToggleTheme)}
-            />
+            {(() => {
+              const themeMeta = getThemeToggleMeta(theme);
+              return (
+                <SidebarButton
+                  icon={themeMeta.Icon}
+                  label={themeMeta.label}
+                  expanded={isOpen}
+                  onClick={() => runAction(onToggleTheme)}
+                />
+              );
+            })()}
           </SidebarSection>
 
           <SidebarSection title="Account" expanded={isOpen}>

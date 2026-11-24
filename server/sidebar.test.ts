@@ -37,7 +37,7 @@ test('sidebar actions reuse existing controls instead of duplicating logic (#147
   assert.match(sidebar, /onSelectTool\(tool\)/);
   assert.match(sidebar, /disabled=\{needsWrite && !canWrite\}/);
   assert.match(sidebar, /isVoiceConnected \? 'Leave voice' : 'Join voice'/);
-  assert.match(sidebar, /theme === 'dark' \? Sun : Moon/);
+  assert.match(sidebar, /getThemeToggleMeta\(theme\)/);
 });
 
 test('App mounts the sidebar with all grouped actions wired (#147)', () => {

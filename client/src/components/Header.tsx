@@ -7,6 +7,7 @@ import { AboutModal } from './AboutModal';
 import { ModalShell } from './ui/ModalShell';
 import { USER_PROFILE_PALETTE } from '../constants/palettes';
 import { ColorSwatches } from './ui/ColorSwatches';
+import { ThemeToggle } from './ui/ThemeToggle';
 import {
   Share2,
   Radio,
@@ -17,8 +18,6 @@ import {
   LogIn,
   LogOut,
   MicOff,
-  Sun,
-  Moon,
   Sparkles,
   Info,
   MessageSquare,
@@ -275,20 +274,12 @@ export const Header: React.FC<HeaderProps> = ({
         </button>
 
         {/* Dark / Light Theme Toggle */}
-        <button
+        <ThemeToggle
           id="theme-toggle-btn"
-          type="button"
-          aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
-          onClick={onToggleTheme}
-          title={theme === 'dark' ? 'Switch to Light Theme' : 'Switch to Dark Theme'}
-          className="hidden sm:inline-flex items-center justify-center p-2 min-w-[44px] min-h-[44px] text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-colors cursor-pointer btn-press"
-        >
-          {theme === 'dark' ? (
-            <Sun className="w-4 h-4 text-amber-400" />
-          ) : (
-            <Moon className="w-4 h-4 text-slate-600" />
-          )}
-        </button>
+          theme={theme}
+          onToggle={onToggleTheme}
+          hideOnMobile
+        />
 
         {/* Active Collaborators Avatars */}
         {activeUserList.length > 0 && (
@@ -471,19 +462,11 @@ export const Header: React.FC<HeaderProps> = ({
                 <Info className="w-4 h-4 text-slate-400" />
                 About Whiteboard.io
               </button>
-              <button
-                type="button"
-                role="menuitem"
-                onClick={() => runMobileAction(onToggleTheme)}
-                className="w-full min-h-[44px] px-3 py-2 flex items-center gap-2.5 text-left text-sm font-medium hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
-              >
-                {theme === 'dark' ? (
-                  <Sun className="w-4 h-4 text-amber-400" />
-                ) : (
-                  <Moon className="w-4 h-4 text-slate-500" />
-                )}
-                {theme === 'dark' ? 'Light theme' : 'Dark theme'}
-              </button>
+              <ThemeToggle
+                variant="menu-item"
+                theme={theme}
+                onToggle={() => runMobileAction(onToggleTheme)}
+              />
               <button
                 type="button"
                 role="menuitem"
@@ -553,27 +536,11 @@ export const Header: React.FC<HeaderProps> = ({
                     Profile & Identity
                   </h3>
                 </div>
-                {theme === 'dark' ? (
-                  <button
-                    type="button"
-                    aria-label="Switch to light theme"
-                    onClick={onToggleTheme}
-                    className="p-1.5 rounded-lg text-amber-400 hover:bg-slate-800 transition-colors"
-                    title="Switch to Light mode"
-                  >
-                    <Sun className="w-4 h-4" />
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    aria-label="Switch to dark theme"
-                    onClick={onToggleTheme}
-                    className="p-1.5 rounded-lg text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-                    title="Switch to Dark mode"
-                  >
-                    <Moon className="w-4 h-4" />
-                  </button>
-                )}
+                <ThemeToggle
+                  variant="compact-icon"
+                  theme={theme}
+                  onToggle={onToggleTheme}
+                />
               </div>
 
               {/* Account Status Card */}
