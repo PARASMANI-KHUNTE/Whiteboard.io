@@ -41,7 +41,8 @@ test('chrome surfaces consume shared whiteboard action registry without DOM shim
   assert.match(app, /useWhiteboardActions\(/);
   assert.match(app, /<AboutModal/);
   assert.match(header, /actions\.actions/);
-  assert.match(toolbar, /actions\.actions/);
+  assert.match(toolbar, /actions:\s*actionMap.*= actions/);
+  assert.match(toolbar, /actionMap\.undo/);
   assert.match(canvas, /actions\.actions\.shortcuts/);
   assert.match(canvas, /actions\.handToggle/);
 });
