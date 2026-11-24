@@ -243,9 +243,14 @@ attempt fails in milliseconds, so it costs nothing. Disable it with
 `AI_ALLOW_OLLAMA_FALLBACK=false`.
 
 When a failover happens the generated diagram reports the engine that actually
-answered, and the chat shows a notice such as:
+answered. Notices are composed, so a failover and a quality-gate finding are
+both shown when they apply:
 
-> Gemini 3.8 Flash unavailable — Ollama · llama3.2 produced this diagram.
+> Gemini 3.8 Flash unavailable — Ollama · llama3.2 produced this diagram. Quality checks reported: Only 10 nodes were produced; at least 12 are required.
+
+A provider that answers with an empty graph is reported as such, while a total
+provider outage is reported as “No AI model responded”. Both cases fall back to
+the local procedural engine and say so in the notice.
 
 The active engine is shown in the generation dialog badge and exposed at
 `GET /api/ai/config`.

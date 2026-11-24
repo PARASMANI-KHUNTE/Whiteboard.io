@@ -55,6 +55,7 @@ import {
   computeNavigationStep,
   scheduleNavigationFrame,
 } from '../utils/canvasNavigation';
+import { dprMediaQuery, resizeCanvasBackingStore } from '../utils/canvasSizing';
 import {
   distanceToSegment,
   segmentDistance,
@@ -1298,32 +1299,50 @@ export const Canvas: React.FC<CanvasProps> = ({
     ctx.restore();
   }, [elements, liveStrokes, currentStroke, drawSingleStroke, pan, zoom, selectedElementIds, theme, getSpatialIndex]);
 
-  // Handle canvas sizing and DPI scaling
+  // The sizing effect runs once, so it reads the latest draw function through a ref.
+  const renderCanvasRef = useRef(renderCanvas);
+  useEffect(() => {
+    renderCanvasRef.current = renderCanvas;
+  }, [renderCanvas]);
+
+  // Handle canvas sizing and DPI scaling once per mount. Width/height writes
+  // reallocate the backing store, so they happen only when pixel size changes;
+  // redraws for pan/zoom/selection are driven by the effect below.
   useEffect(() => {
     const container = containerRef.current;
     const canvas = canvasRef.current;
     if (!container || !canvas) return;
 
+    let mediaQuery: MediaQueryList | null = null;
+
     const updateSize = () => {
-      const rect = container.getBoundingClientRect();
       const dpr = window.devicePixelRatio || 1;
-
-      canvas.width = rect.width * dpr;
-      canvas.height = rect.height * dpr;
-      canvas.style.width = `${rect.width}px`;
-      canvas.style.height = `${rect.height}px`;
-
-      renderCanvas();
+      const resized = resizeCanvasBackingStore(canvas, container, dpr);
+      if (resized) renderCanvasRef.current();
     };
+
+    function watchDpr() {
+      mediaQuery?.removeEventListener('change', onDprChange);
+      const dpr = window.devicePixelRatio || 1;
+      mediaQuery = window.matchMedia(dprMediaQuery(dpr));
+      mediaQuery.addEventListener('change', onDprChange);
+    }
+
+    function onDprChange() {
+      watchDpr();
+      updateSize();
+    }
 
     updateSize();
     const observer = new ResizeObserver(updateSize);
     observer.observe(container);
+    if (typeof window.matchMedia === 'function') watchDpr();
 
     return () => {
       observer.disconnect();
+      mediaQuery?.removeEventListener('change', onDprChange);
     };
-  }, [renderCanvas]);
+  }, []);
 
   // Re-render whenever strokes, pan, zoom, or theme change
   useEffect(() => {
