@@ -22,6 +22,7 @@ import {
   claimRoomCreator,
   transferRoomOwnership,
   deleteRoom,
+  finalizeRoomDeletion,
   flushAllPendingSaves,
   type RoomPermission,
 } from "./auth";
@@ -387,6 +388,33 @@ async function startServer() {
     },
     maxHttpBufferSize: 5e6, // 5MB for dense drawing batches
   });
+
+  /**
+   * Finish a successful deletion only after every socket has left. The element
+   * save guard stays active until this point so late emits cannot recreate the
+   * room in MongoDB (#72).
+   */
+  const completeRoomDeletion = async (roomId: string, deletedBy: string) => {
+    io.to(roomId).emit("room-deleted", {
+      roomId,
+      deletedBy,
+      message: "This room has been permanently deleted by the host.",
+    });
+
+    const socketIds = io.sockets.adapter.rooms.get(roomId);
+    if (socketIds) {
+      for (const socketId of socketIds) {
+        const socket = io.sockets.sockets.get(socketId);
+        const clear = socket?.data.clearRoomState;
+        if (typeof clear === "function") clear();
+      }
+    }
+
+    await io.in(roomId).socketsLeave(roomId);
+    roomLifecycle.cancelCleanup(roomId);
+    rooms.delete(roomId);
+    finalizeRoomDeletion(roomId);
+  };
 
   // Cross-Origin Resource Sharing (CORS) Middleware for API routes
   app.use((req, res, next) => {
@@ -972,17 +1000,8 @@ async function startServer() {
         return;
       }
 
-      // Notify and clean up active socket room
-      if (rooms.has(roomId)) {
-        roomLifecycle.cancelCleanup(roomId);
-        io.to(roomId).emit("room-deleted", {
-          roomId,
-          deletedBy: requesterId,
-          message: "This room has been permanently deleted by the host.",
-        });
-        io.in(roomId).socketsLeave(roomId);
-        rooms.delete(roomId);
-      }
+      // Detach sockets and release the save guard only after cleanup finishes.
+      await completeRoomDeletion(roomId, requesterId);
 
       res.json({ success: true, roomId });
     } catch (err: any) {
@@ -994,6 +1013,12 @@ async function startServer() {
   io.on("connection", (socket: Socket) => {
     let currentRoomId: string | null = null;
     let currentUser: UserSession | null = null;
+    // Lets the room-deletion handler clear this socket's stale room state before
+    // detaching it, so no later emit can write to the deleted room (#72).
+    socket.data.clearRoomState = () => {
+      currentRoomId = null;
+      currentUser = null;
+    };
 
     // Per-socket live-stroke accounting. Without a cap, one writer could stream
     // unlimited points into every participant's in-memory liveStrokes map.
@@ -1398,14 +1423,7 @@ async function startServer() {
         return;
       }
 
-      io.to(targetRoomId).emit("room-deleted", {
-        roomId: targetRoomId,
-        deletedBy: currentUser.id,
-        message: "This room has been permanently deleted by the host.",
-      });
-      io.in(targetRoomId).socketsLeave(targetRoomId);
-      roomLifecycle.cancelCleanup(targetRoomId);
-      rooms.delete(targetRoomId);
+      await completeRoomDeletion(targetRoomId, currentUser.id);
     });
 
     // Real-time live stroke streaming (Guarded)
