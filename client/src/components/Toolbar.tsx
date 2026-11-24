@@ -4,6 +4,7 @@ import { usePopoverDismiss } from '../hooks/usePopoverDismiss';
 import { AVAILABLE_ICONS } from '../constants/icons';
 import { TOOLBAR_COLORS } from '../constants/palettes';
 import { ColorSwatches } from './ui/ColorSwatches';
+import { SearchablePickerPopover } from './ui/SearchablePickerPopover';
 import {
   MousePointer,
   Pencil,
@@ -27,8 +28,6 @@ import {
   Lock,
   SlidersHorizontal,
   ChevronRight,
-  Search,
-  X,
   CheckSquare,
   Spline,
   Minus,
@@ -167,208 +166,130 @@ export const Toolbar: React.FC<ToolbarProps> = ({
 
       {/* Floating Popover for Shapes with Search */}
       {showShapePicker && canWrite && (
-        <div className="wb-card-glass rounded-2xl p-3 flex flex-col gap-2.5 animate-in fade-in zoom-in-95 duration-150 mb-1 z-50 w-72 sm:w-80 shadow-2xl">
-          <div className="flex items-center justify-between px-0.5">
-            <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-              Shapes ({filteredShapes.length})
-            </span>
-            <button
-              type="button"
-              aria-label="Close shape picker"
-              onClick={() => {
-                setShowShapePicker(false);
-                setShapeSearchQuery('');
-              }}
-              className="text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-200 p-1.5 min-w-[36px] min-h-[36px] rounded-lg cursor-pointer flex items-center justify-center btn-press"
-            >
-              <X className="w-3.5 h-3.5" />
-            </button>
-          </div>
-
-          {/* Search Input for Shapes */}
-          <div className="relative flex items-center">
-            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 pointer-events-none" />
-            <input
-              type="text"
-              value={shapeSearchQuery}
-              onChange={(e) => setShapeSearchQuery(e.target.value)}
-              placeholder="Search shapes (box, circle, diamond)..."
-              className="w-full pl-8 pr-7 py-1.5 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/50"
-              autoFocus
-            />
-            {shapeSearchQuery && (
+        <SearchablePickerPopover
+          title={`Shapes (${filteredShapes.length})`}
+          onClose={() => {
+            setShowShapePicker(false);
+            setShapeSearchQuery('');
+          }}
+          closeAriaLabel="Close shape picker"
+          searchQuery={shapeSearchQuery}
+          onSearchChange={setShapeSearchQuery}
+          searchPlaceholder="Search shapes (box, circle, diamond)..."
+          clearAriaLabel="Clear shape search"
+          isEmpty={filteredShapes.length === 0}
+          emptyMessage={<>No shapes matching &ldquo;{shapeSearchQuery}&rdquo;</>}
+          widthClassName="w-72 sm:w-80 mb-1"
+          gridClassName="grid-cols-3 gap-1.5 max-h-52"
+        >
+          {filteredShapes.map((s) => {
+            const IconComp = s.icon;
+            const isCurrent = currentTool === 'shape' && selectedShapeType === s.type;
+            return (
               <button
-                type="button"
-                aria-label="Clear shape search"
-                onClick={() => setShapeSearchQuery('')}
-                className="absolute right-1.5 text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-200 p-1.5 min-w-[36px] min-h-[36px] flex items-center justify-center rounded-lg cursor-pointer"
+                key={s.type}
+                onClick={() => handleShapeSelect(s.type)}
+                className={`p-2.5 rounded-xl border flex flex-col items-center gap-1.5 transition-all cursor-pointer btn-press ${
+                  isCurrent
+                    ? 'bg-blue-50 dark:bg-blue-950/70 border-blue-500 text-blue-600 dark:text-blue-400 font-bold shadow-xs ring-1 ring-blue-400/40'
+                    : 'bg-white/80 dark:bg-slate-800/80 hover:bg-slate-50 dark:hover:bg-slate-700/80 border-slate-200/80 dark:border-slate-700 text-slate-700 dark:text-slate-200'
+                }`}
+                title={`${s.label} (${s.keywords.slice(0, 3).join(', ')})`}
               >
-                <X className="w-3 h-3" />
+                <IconComp className="w-5 h-5" />
+                <span className="text-[10px] whitespace-nowrap">{s.label}</span>
               </button>
-            )}
-          </div>
-
-          {/* Filtered Shapes Grid */}
-          {filteredShapes.length > 0 ? (
-            <div className="grid grid-cols-3 gap-1.5 max-h-52 overflow-y-auto pr-0.5">
-              {filteredShapes.map((s) => {
-                const IconComp = s.icon;
-                const isCurrent = currentTool === 'shape' && selectedShapeType === s.type;
-                return (
-                  <button
-                    key={s.type}
-                    onClick={() => handleShapeSelect(s.type)}
-                    className={`p-2.5 rounded-xl border flex flex-col items-center gap-1.5 transition-all cursor-pointer btn-press ${
-                      isCurrent
-                        ? 'bg-blue-50 dark:bg-blue-950/70 border-blue-500 text-blue-600 dark:text-blue-400 font-bold shadow-xs ring-1 ring-blue-400/40'
-                        : 'bg-white/80 dark:bg-slate-800/80 hover:bg-slate-50 dark:hover:bg-slate-700/80 border-slate-200/80 dark:border-slate-700 text-slate-700 dark:text-slate-200'
-                    }`}
-                    title={`${s.label} (${s.keywords.slice(0, 3).join(', ')})`}
-                  >
-                    <IconComp className="w-5 h-5" />
-                    <span className="text-[10px] whitespace-nowrap">{s.label}</span>
-                  </button>
-                );
-              })}
-            </div>
-          ) : (
-            <div className="py-4 text-center text-xs text-slate-400">
-              No shapes matching &ldquo;{shapeSearchQuery}&rdquo;
-            </div>
-          )}
-        </div>
+            );
+          })}
+        </SearchablePickerPopover>
       )}
 
       {/* Floating Popover for Icons with Search */}
       {showIconPicker && canWrite && (
-        <div className="wb-card-glass rounded-2xl p-3 flex flex-col gap-2.5 animate-in fade-in zoom-in-95 duration-150 mb-1 z-50 w-80 sm:w-96 shadow-2xl">
-          <div className="flex items-center justify-between px-0.5">
-            <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-              Icons &amp; Stickers ({filteredIcons.length})
-            </span>
-            <button
-              type="button"
-              aria-label="Close icon picker"
-              onClick={() => {
-                setShowIconPicker(false);
-                setIconSearchQuery('');
-              }}
-              className="text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-200 p-1.5 min-w-[36px] min-h-[36px] rounded-lg cursor-pointer flex items-center justify-center btn-press"
-            >
-              <X className="w-3.5 h-3.5" />
-            </button>
-          </div>
-
-          {/* Search Input for Icons */}
-          <div className="relative flex items-center">
-            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 pointer-events-none" />
-            <input
-              type="text"
-              value={iconSearchQuery}
-              onChange={(e) => setIconSearchQuery(e.target.value)}
-              placeholder="Search icons (star, fire, code, love, music)..."
-              className="w-full pl-8 pr-7 py-1.5 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/50"
-              autoFocus
-            />
-            {iconSearchQuery && (
+        <SearchablePickerPopover
+          title={<>Icons &amp; Stickers ({filteredIcons.length})</>}
+          onClose={() => {
+            setShowIconPicker(false);
+            setIconSearchQuery('');
+          }}
+          closeAriaLabel="Close icon picker"
+          searchQuery={iconSearchQuery}
+          onSearchChange={setIconSearchQuery}
+          searchPlaceholder="Search icons (star, fire, code, love, music)..."
+          clearAriaLabel="Clear icon search"
+          isEmpty={filteredIcons.length === 0}
+          emptyMessage={<>No icons matching &ldquo;{iconSearchQuery}&rdquo;</>}
+          widthClassName="w-80 sm:w-96 mb-1"
+          gridClassName="grid-cols-6 sm:grid-cols-7 gap-1.5 max-h-56 p-1"
+        >
+          {filteredIcons.map(([key, config]) => {
+            const IconComp = config.component;
+            const isCurrent = currentTool === 'icon' && selectedIconName === key;
+            return (
               <button
-                type="button"
-                aria-label="Clear icon search"
-                onClick={() => setIconSearchQuery('')}
-                className="absolute right-1.5 text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-200 p-1.5 min-w-[36px] min-h-[36px] flex items-center justify-center rounded-lg cursor-pointer"
+                key={key}
+                onClick={() => handleIconSelect(key)}
+                className={`p-2 rounded-xl border flex flex-col items-center justify-center transition-all cursor-pointer btn-press ${
+                  isCurrent
+                    ? 'bg-blue-50 dark:bg-blue-950/70 border-blue-500 text-blue-600 dark:text-blue-400 ring-2 ring-blue-500/30 shadow-xs'
+                    : 'bg-white/80 dark:bg-slate-800/80 hover:bg-slate-50 dark:hover:bg-slate-700/80 border-slate-200/80 dark:border-slate-700 text-slate-700 dark:text-slate-200'
+                }`}
+                title={`${config.label} (${config.keywords?.slice(0, 3).join(', ')})`}
               >
-                <X className="w-3 h-3" />
+                <IconComp size={20} />
               </button>
-            )}
-          </div>
-
-          {/* Filtered Icons Grid */}
-          {filteredIcons.length > 0 ? (
-            <div className="grid grid-cols-6 sm:grid-cols-7 gap-1.5 max-h-56 overflow-y-auto p-1">
-              {filteredIcons.map(([key, config]) => {
-                const IconComp = config.component;
-                const isCurrent = currentTool === 'icon' && selectedIconName === key;
-                return (
-                  <button
-                    key={key}
-                    onClick={() => handleIconSelect(key)}
-                    className={`p-2 rounded-xl border flex flex-col items-center justify-center transition-all cursor-pointer btn-press ${
-                      isCurrent
-                        ? 'bg-blue-50 dark:bg-blue-950/70 border-blue-500 text-blue-600 dark:text-blue-400 ring-2 ring-blue-500/30 shadow-xs'
-                        : 'bg-white/80 dark:bg-slate-800/80 hover:bg-slate-50 dark:hover:bg-slate-700/80 border-slate-200/80 dark:border-slate-700 text-slate-700 dark:text-slate-200'
-                    }`}
-                    title={`${config.label} (${config.keywords?.slice(0, 3).join(', ')})`}
-                  >
-                    <IconComp size={20} />
-                  </button>
-                );
-              })}
-            </div>
-          ) : (
-            <div className="py-6 text-center text-xs text-slate-400">
-              No icons matching &ldquo;{iconSearchQuery}&rdquo;
-            </div>
-          )}
-        </div>
+            );
+          })}
+        </SearchablePickerPopover>
       )}
 
       {/* Floating Popover for Wire / Connector Type */}
       {showWirePicker && canWrite && (
-        <div className="wb-card-glass rounded-2xl p-3 flex flex-col gap-2.5 animate-in fade-in zoom-in-95 duration-150 mb-1 z-50 w-64 shadow-2xl">
-          <div className="flex items-center justify-between px-0.5">
-            <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-              Wire Connector Type
-            </span>
-            <button
-              type="button"
-              aria-label="Close wire picker"
-              onClick={() => setShowWirePicker(false)}
-              className="text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-200 p-1.5 min-w-[36px] min-h-[36px] rounded-lg cursor-pointer flex items-center justify-center btn-press"
-            >
-              <X className="w-3.5 h-3.5" />
-            </button>
-          </div>
+        <SearchablePickerPopover
+          title="Wire Connector Type"
+          onClose={() => setShowWirePicker(false)}
+          closeAriaLabel="Close wire picker"
+          widthClassName="w-64 mb-1"
+          gridClassName="grid-cols-2 gap-2"
+        >
+          <button
+            onClick={() => {
+              onSelectWireStyle?.('curve');
+              onSelectTool('wire');
+              setShowWirePicker(false);
+            }}
+            className={`p-3 rounded-xl border flex flex-col items-center gap-2 transition-all cursor-pointer btn-press ${
+              selectedWireStyle === 'curve' && currentTool === 'wire'
+                ? 'bg-blue-50 dark:bg-blue-950/70 border-blue-500 text-blue-600 dark:text-blue-400 font-bold shadow-xs ring-1 ring-blue-400'
+                : 'bg-white/80 dark:bg-slate-800/80 hover:bg-slate-50 dark:hover:bg-slate-700 border-slate-200/80 dark:border-slate-700 text-slate-700 dark:text-slate-200'
+            }`}
+          >
+            <Spline className="w-5 h-5 text-blue-500" />
+            <div className="text-center">
+              <div className="text-xs font-semibold">Smooth Curve</div>
+              <div className="text-[10px] text-slate-400">Organic wire</div>
+            </div>
+          </button>
 
-          <div className="grid grid-cols-2 gap-2">
-            <button
-              onClick={() => {
-                onSelectWireStyle?.('curve');
-                onSelectTool('wire');
-                setShowWirePicker(false);
-              }}
-              className={`p-3 rounded-xl border flex flex-col items-center gap-2 transition-all cursor-pointer btn-press ${
-                selectedWireStyle === 'curve' && currentTool === 'wire'
-                  ? 'bg-blue-50 dark:bg-blue-950/70 border-blue-500 text-blue-600 dark:text-blue-400 font-bold shadow-xs ring-1 ring-blue-400'
-                  : 'bg-white/80 dark:bg-slate-800/80 hover:bg-slate-50 dark:hover:bg-slate-700 border-slate-200/80 dark:border-slate-700 text-slate-700 dark:text-slate-200'
-              }`}
-            >
-              <Spline className="w-5 h-5 text-blue-500" />
-              <div className="text-center">
-                <div className="text-xs font-semibold">Smooth Curve</div>
-                <div className="text-[10px] text-slate-400">Organic wire</div>
-              </div>
-            </button>
-
-            <button
-              onClick={() => {
-                onSelectWireStyle?.('line');
-                onSelectTool('wire');
-                setShowWirePicker(false);
-              }}
-              className={`p-3 rounded-xl border flex flex-col items-center gap-2 transition-all cursor-pointer btn-press ${
-                selectedWireStyle === 'line' && currentTool === 'wire'
-                  ? 'bg-blue-50 dark:bg-blue-950/70 border-blue-500 text-blue-600 dark:text-blue-400 font-bold shadow-xs ring-1 ring-blue-400'
-                  : 'bg-white/80 dark:bg-slate-800/80 hover:bg-slate-50 dark:hover:bg-slate-700 border-slate-200/80 dark:border-slate-700 text-slate-700 dark:text-slate-200'
-              }`}
-            >
-              <Minus className="w-5 h-5 text-blue-500" />
-              <div className="text-center">
-                <div className="text-xs font-semibold">Straight Line</div>
-                <div className="text-[10px] text-slate-400">Direct wire</div>
-              </div>
-            </button>
-          </div>
-        </div>
+          <button
+            onClick={() => {
+              onSelectWireStyle?.('line');
+              onSelectTool('wire');
+              setShowWirePicker(false);
+            }}
+            className={`p-3 rounded-xl border flex flex-col items-center gap-2 transition-all cursor-pointer btn-press ${
+              selectedWireStyle === 'line' && currentTool === 'wire'
+                ? 'bg-blue-50 dark:bg-blue-950/70 border-blue-500 text-blue-600 dark:text-blue-400 font-bold shadow-xs ring-1 ring-blue-400'
+                : 'bg-white/80 dark:bg-slate-800/80 hover:bg-slate-50 dark:hover:bg-slate-700 border-slate-200/80 dark:border-slate-700 text-slate-700 dark:text-slate-200'
+            }`}
+          >
+            <Minus className="w-5 h-5 text-blue-500" />
+            <div className="text-center">
+              <div className="text-xs font-semibold">Straight Line</div>
+              <div className="text-[10px] text-slate-400">Direct wire</div>
+            </div>
+          </button>
+        </SearchablePickerPopover>
       )}
 
       {/* Main Floating Toolbar */}
