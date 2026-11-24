@@ -1,11 +1,16 @@
+import os
+
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
+
+TOOLING_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # Set global styles
 plt.rcParams['font.sans-serif'] = 'DejaVu Sans'
 plt.rcParams['font.family'] = 'sans-serif'
 
-def create_system_architecture_diagram(output_path="diagram_architecture.png"):
+def create_system_architecture_diagram(output_path=None):
+    output_path = output_path or os.path.join(TOOLING_DIR, "diagram_architecture.png")
     fig, ax = plt.subplots(figsize=(10, 7.5), dpi=300)
     ax.set_xlim(0, 10)
     ax.set_ylim(0, 8.8)
@@ -116,7 +121,8 @@ def create_system_architecture_diagram(output_path="diagram_architecture.png"):
     plt.close()
     print(f"Generated {output_path}")
 
-def create_drawing_dataflow_diagram(output_path="diagram_dataflow.png"):
+def create_drawing_dataflow_diagram(output_path=None):
+    output_path = output_path or os.path.join(TOOLING_DIR, "diagram_dataflow.png")
     fig, ax = plt.subplots(figsize=(10, 5.5), dpi=300)
     ax.set_xlim(0, 10)
     ax.set_ylim(0, 6)
@@ -156,7 +162,8 @@ def create_drawing_dataflow_diagram(output_path="diagram_dataflow.png"):
     plt.close()
     print(f"Generated {output_path}")
 
-def create_ai_pipeline_diagram(output_path="diagram_ai_pipeline.png"):
+def create_ai_pipeline_diagram(output_path=None):
+    output_path = output_path or os.path.join(TOOLING_DIR, "diagram_ai_pipeline.png")
     fig, ax = plt.subplots(figsize=(10, 6.8), dpi=300)
     ax.set_xlim(0, 10)
     ax.set_ylim(0, 8.8)
@@ -208,7 +215,8 @@ def create_ai_pipeline_diagram(output_path="diagram_ai_pipeline.png"):
     plt.close()
     print(f"Generated {output_path}")
 
-def create_database_schema_diagram(output_path="diagram_database_schema.png"):
+def create_database_schema_diagram(output_path=None):
+    output_path = output_path or os.path.join(TOOLING_DIR, "diagram_database_schema.png")
     fig, ax = plt.subplots(figsize=(10, 7.2), dpi=300)
     ax.set_xlim(0, 10)
     ax.set_ylim(0, 8.6)

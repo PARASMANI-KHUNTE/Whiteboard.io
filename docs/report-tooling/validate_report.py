@@ -5,8 +5,10 @@ import sys
 import tempfile
 import build_project_report
 
+TOOLING_DIR = os.path.dirname(os.path.abspath(__file__))
+
 def validate(check_freshness=False):
-    filename = "Generated_Project_Report.docx"
+    filename = os.path.join(TOOLING_DIR, "Generated_Project_Report.docx")
     assert os.path.exists(filename), f"File {filename} does not exist!"
     doc = docx.Document(filename)
     
@@ -41,13 +43,6 @@ def validate(check_freshness=False):
     assert "v20.19.0" in full_text, "Node.js v20.19.0 must be cited in software prerequisites"
     assert "v18.0.0" not in full_text, "Found stale reference to Node.js v18.0.0"
     
-    # Check docs/ copy matches root copy
-    docs_copy = os.path.join("docs", "Generated_Project_Report.docx")
-    assert os.path.exists(docs_copy), f"File {docs_copy} does not exist!"
-    docs_doc = docx.Document(docs_copy)
-    docs_full_text = "\n".join([p.text for p in docs_doc.paragraphs])
-    assert docs_full_text == full_text, "docs/Generated_Project_Report.docx differs from root Generated_Project_Report.docx!"
-
     # Check diagrams exist and have non-trivial size
     diagrams = [
         "diagram_architecture.png",
@@ -55,9 +50,10 @@ def validate(check_freshness=False):
         "diagram_ai_pipeline.png",
         "diagram_database_schema.png",
     ]
-    for d in diagrams:
-        assert os.path.exists(d), f"Diagram {d} is missing!"
-        assert os.path.getsize(d) > 10_000, f"Diagram {d} is empty or corrupted!"
+    for name in diagrams:
+        path = os.path.join(TOOLING_DIR, name)
+        assert os.path.exists(path), f"Diagram {path} is missing!"
+        assert os.path.getsize(path) > 10_000, f"Diagram {path} is empty or corrupted!"
 
     # Check Abstract word count
     abstract_match = re.search(r"ABSTRACT\s+―+\s+(.*?)\s+Keywords:", full_text, re.DOTALL)
@@ -90,7 +86,7 @@ def validate(check_freshness=False):
             fresh_text = "\n".join([p.text for p in fresh_doc.paragraphs])
             assert fresh_text == full_text, (
                 "Committed Generated_Project_Report.docx is stale relative to build_project_report.py! "
-                "Run 'python build_project_report.py' to regenerate."
+                "Run 'python docs/report-tooling/build_project_report.py' to regenerate."
             )
         print("Freshness check passed: committed report matches generator output.")
         

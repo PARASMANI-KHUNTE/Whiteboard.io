@@ -12,8 +12,11 @@
     "build:server": "npm run build --prefix server",
     "typecheck": "npm run typecheck --prefix client && npm run typecheck --prefix server",
     "test": "npm test --prefix server",
-    "docs:validate": "python validate_report.py --check-freshness",
-    "secret:scan": "python scripts/scan_secrets.py",
+    "docs:validate": "python docs/report-tooling/validate_report.py --check-freshness",
+    "docs:report": "python docs/report-tooling/build_project_report.py",
+    "docs:diagrams": "python docs/report-tooling/generate_diagrams.py",
+    "docs:presentation": "python docs/report-tooling/generate_pptx.py",
+    "secret:scan": "python docs/report-tooling/scan_secrets.py",
     "start": "node server/dist/server.js"
   }
 }

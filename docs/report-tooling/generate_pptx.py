@@ -12,8 +12,9 @@ from pptx.enum.text import PP_ALIGN, MSO_ANCHOR
 from pptx.enum.shapes import MSO_SHAPE
 from pptx.dml.color import RGBColor
 
-REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
-OUTPUT_PPTX = os.path.join(REPO_ROOT, "Whiteboard_io_Presentation.pptx")
+TOOLING_DIR = os.path.dirname(os.path.abspath(__file__))
+REPO_ROOT = os.path.dirname(os.path.dirname(TOOLING_DIR))
+OUTPUT_PPTX = os.path.join(TOOLING_DIR, "Whiteboard_io_Presentation.pptx")
 
 # ==============================================================================
 # COLOR PALETTE SPECIFICATION
@@ -646,7 +647,7 @@ def build_slide_5_system_architecture(prs):
         add_bullet_point(tf_l, b_bold, b_text, font_size=9.2, dark_mode=False, space_after=5)
 
     # Right Column: Embed diagram_architecture.png
-    diagram_path = os.path.join(REPO_ROOT, "diagram_architecture.png")
+    diagram_path = os.path.join(TOOLING_DIR, "diagram_architecture.png")
     if os.path.exists(diagram_path):
         card_img = add_card(slide, Inches(5.7), Inches(1.95), Inches(6.833), Inches(4.7), bg_color=CARD_LIGHT, border_color=BORDER_LIGHT)
         slide.shapes.add_picture(diagram_path, Inches(5.8), Inches(2.05), width=Inches(6.633), height=Inches(4.5))
@@ -860,7 +861,7 @@ def build_slide_8_dataflow_pipeline(prs):
 
     # Left Column: Embed diagram_dataflow.png (Width: 6.833 inches)
     # Right Column: Dataflow stages (Width: 4.7 inches)
-    diagram_path = os.path.join(REPO_ROOT, "diagram_dataflow.png")
+    diagram_path = os.path.join(TOOLING_DIR, "diagram_dataflow.png")
     if os.path.exists(diagram_path):
         card_img = add_card(slide, Inches(0.8), Inches(1.95), Inches(6.833), Inches(4.7), bg_color=CARD_LIGHT, border_color=BORDER_LIGHT)
         slide.shapes.add_picture(diagram_path, Inches(0.9), Inches(2.05), width=Inches(6.633), height=Inches(4.5))
@@ -1031,7 +1032,7 @@ def build_slide_10_ai_resilience(prs):
         add_bullet_point(tf_l, b_bold, b_text, font_size=8.8, dark_mode=False, space_after=4)
 
     # Right Column: Embed diagram_ai_pipeline.png
-    diagram_path = os.path.join(REPO_ROOT, "diagram_ai_pipeline.png")
+    diagram_path = os.path.join(TOOLING_DIR, "diagram_ai_pipeline.png")
     if os.path.exists(diagram_path):
         card_img = add_card(slide, Inches(5.7), Inches(1.95), Inches(6.833), Inches(4.7), bg_color=CARD_LIGHT, border_color=BORDER_LIGHT)
         slide.shapes.add_picture(diagram_path, Inches(5.8), Inches(2.05), width=Inches(6.633), height=Inches(4.5))
@@ -1058,7 +1059,7 @@ def build_slide_11_database_schemas(prs):
 
     # Left Column: Embed diagram_database_schema.png (Width: 6.833 inches)
     # Right Column: Collection details (Width: 4.7 inches)
-    diagram_path = os.path.join(REPO_ROOT, "diagram_database_schema.png")
+    diagram_path = os.path.join(TOOLING_DIR, "diagram_database_schema.png")
     if os.path.exists(diagram_path):
         card_img = add_card(slide, Inches(0.8), Inches(1.95), Inches(6.833), Inches(4.7), bg_color=CARD_LIGHT, border_color=BORDER_LIGHT)
         slide.shapes.add_picture(diagram_path, Inches(0.9), Inches(2.05), width=Inches(6.633), height=Inches(4.5))
@@ -1628,33 +1629,9 @@ def main():
     print("Building Slide 16: Project Conclusion & Defense Q&A (Dark)...")
     build_slide_16_conclusion(prs)
 
-    docs_pptx = os.path.join(REPO_ROOT, "docs", "Whiteboard_io_Presentation.pptx")
-    saved_paths = []
-
-    # Try saving to root OUTPUT_PPTX
-    try:
-        prs.save(OUTPUT_PPTX)
-        saved_paths.append(OUTPUT_PPTX)
-    except PermissionError:
-        alt_root = os.path.join(REPO_ROOT, "Whiteboard_io_Presentation_New.pptx")
-        print(f"Warning: '{OUTPUT_PPTX}' is currently open in PowerPoint.")
-        print(f"Saving root copy to alternate destination: {alt_root}")
-        prs.save(alt_root)
-        saved_paths.append(alt_root)
-
-    # Save to docs/ copy
-    try:
-        prs.save(docs_pptx)
-        saved_paths.append(docs_pptx)
-    except PermissionError:
-        alt_docs = os.path.join(REPO_ROOT, "docs", "Whiteboard_io_Presentation_New.pptx")
-        print(f"Warning: '{docs_pptx}' is currently locked. Saving to: {alt_docs}")
-        prs.save(alt_docs)
-        saved_paths.append(alt_docs)
-
-    for p in saved_paths:
-        file_size = os.path.getsize(p) / 1024
-        print(f"Successfully saved {p} (Total Slides: {len(prs.slides)}, File Size: {file_size:.2f} KB)")
+    prs.save(OUTPUT_PPTX)
+    file_size = os.path.getsize(OUTPUT_PPTX) / 1024
+    print(f"Successfully saved {OUTPUT_PPTX} (Total Slides: {len(prs.slides)}, File Size: {file_size:.2f} KB)")
 
 
 if __name__ == "__main__":

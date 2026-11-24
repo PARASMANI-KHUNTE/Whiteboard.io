@@ -25,9 +25,6 @@ server/data/
 *.pptx
 *.xlsx
 
-# Allow project report and presentation deck
-!Generated_Project_Report.docx
-!docs/Generated_Project_Report.docx
-!Whiteboard_io_Presentation.pptx
-!docs/Whiteboard_io_Presentation.pptx
-!Whiteboard_io_Presentation_New.pptx
+# Allow artifacts under the consolidated report tooling folder
+!docs/report-tooling/*.docx
+!docs/report-tooling/*.pptx
