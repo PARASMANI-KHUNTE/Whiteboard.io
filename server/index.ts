@@ -40,6 +40,7 @@ import {
 import { getOrCreateCached } from "./roomCreation";
 import { SlidingWindowRateLimiter } from "./joinRateLimiter";
 import { parseTrustProxy } from "./trustProxy";
+import { readIceCandidate, readSessionDescription } from "./voiceSignaling";
 import {
   canUpdateElement,
   filterDeletableIds,
@@ -195,6 +196,8 @@ const joinSocketLimiter = new SlidingWindowRateLimiter(JOIN_RATE_LIMIT, JOIN_RAT
 const joinIpLimiter = new SlidingWindowRateLimiter(JOIN_IP_RATE_LIMIT, JOIN_RATE_WINDOW_MS);
 const ROOM_JOIN_RATE_ERROR = "Too many room join attempts. Please wait a moment and try again.";
 const ROOM_CAPACITY_ERROR = "The server is at room capacity. Please try again shortly.";
+/** ICE trickle can be chatty, but 60 signals per 10s is ample for voice chat. */
+const signalingLimiter = new SlidingWindowRateLimiter(60, 10_000);
 
 /** Never reclaim a room whose element changes are still waiting to be saved. */
 function canEvictCachedRoom(roomId: string): boolean {
@@ -377,6 +380,7 @@ setInterval(() => {
   }
   joinSocketLimiter.prune();
   joinIpLimiter.prune();
+  signalingLimiter.prune();
 }, 10 * 60 * 1000);
 
 function authRateLimiter(maxRequests = 30, windowMs = 60000, bucket = "default") {
@@ -1123,6 +1127,15 @@ async function startServer() {
       );
     };
 
+    /** Bound WebRTC signaling frequency so one peer cannot flood another. */
+    const allowVoiceSignal = (): boolean => {
+      if (signalingLimiter.check(socket.id).allowed) return true;
+      socket.emit("room-error", {
+        message: "Too many voice signaling messages. Please slow down.",
+      });
+      return false;
+    };
+
     // Join room
     safeOn("join-room", async (rawData: { roomId: string; user: { id: string; name: string; color: string; username?: string }; token?: string }) => {
       const data = rawData || ({} as any);
@@ -1715,50 +1728,53 @@ async function startServer() {
     });
 
     // WebRTC Voice Signaling Mesh
-    safeOn("voice-offer", (payload: { toUserId: string; offer: any }) => {
-      if (!currentRoomId || !currentUser) return;
+    safeOn("voice-offer", (payload: { toUserId: string; offer: unknown }) => {
+      if (!currentRoomId || !currentUser || !allowVoiceSignal()) return;
       if (!isRecord(payload)) return;
       const toUserId = readId(payload.toUserId);
-      if (!toUserId || !isRecord(payload.offer)) return;
+      const offer = readSessionDescription(payload.offer, "offer");
+      if (!toUserId || !offer) return;
       const room = rooms.get(currentRoomId);
       if (!room) return;
       const targetUser = room.users[toUserId];
       if (targetUser && targetUser.socketId) {
         io.to(targetUser.socketId).emit("voice-offer", {
           fromUserId: currentUser.id,
-          offer: payload.offer,
+          offer,
         });
       }
     });
 
-    safeOn("voice-answer", (payload: { toUserId: string; answer: any }) => {
-      if (!currentRoomId || !currentUser) return;
+    safeOn("voice-answer", (payload: { toUserId: string; answer: unknown }) => {
+      if (!currentRoomId || !currentUser || !allowVoiceSignal()) return;
       if (!isRecord(payload)) return;
       const toUserId = readId(payload.toUserId);
-      if (!toUserId || !isRecord(payload.answer)) return;
+      const answer = readSessionDescription(payload.answer, "answer");
+      if (!toUserId || !answer) return;
       const room = rooms.get(currentRoomId);
       if (!room) return;
       const targetUser = room.users[toUserId];
       if (targetUser && targetUser.socketId) {
         io.to(targetUser.socketId).emit("voice-answer", {
           fromUserId: currentUser.id,
-          answer: payload.answer,
+          answer,
         });
       }
     });
 
-    safeOn("voice-ice-candidate", (payload: { toUserId: string; candidate: any }) => {
-      if (!currentRoomId || !currentUser) return;
+    safeOn("voice-ice-candidate", (payload: { toUserId: string; candidate: unknown }) => {
+      if (!currentRoomId || !currentUser || !allowVoiceSignal()) return;
       if (!isRecord(payload)) return;
       const toUserId = readId(payload.toUserId);
-      if (!toUserId || !isRecord(payload.candidate)) return;
+      const candidate = readIceCandidate(payload.candidate);
+      if (!toUserId || !candidate) return;
       const room = rooms.get(currentRoomId);
       if (!room) return;
       const targetUser = room.users[toUserId];
       if (targetUser && targetUser.socketId) {
         io.to(targetUser.socketId).emit("voice-ice-candidate", {
           fromUserId: currentUser.id,
-          candidate: payload.candidate,
+          candidate,
         });
       }
     });
@@ -1957,6 +1973,7 @@ async function startServer() {
     safeOn("disconnect", () => {
       clearLiveStrokes();
       joinSocketLimiter.clear(socket.id);
+      signalingLimiter.clear(socket.id);
       if (!currentRoomId || !currentUser) return;
       const room = rooms.get(currentRoomId);
       if (!room) return;
