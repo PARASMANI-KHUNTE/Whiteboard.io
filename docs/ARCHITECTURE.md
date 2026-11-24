@@ -4,7 +4,7 @@ This document details the architectural design, communication protocols, data mo
 
 > [!TIP]
 > **Live Production Deployment**: [https://whiteboard-io-1.onrender.com/](https://whiteboard-io-1.onrender.com/)
-> **Formal Project Report**: The comprehensive Master's project report is available in [docs/Generated_Project_Report.docx](Generated_Project_Report.docx).
+> **Formal Project Report**: The comprehensive Master's project report is available in [docs/report-tooling/Generated_Project_Report.docx](report-tooling/Generated_Project_Report.docx).
 
 ---
 

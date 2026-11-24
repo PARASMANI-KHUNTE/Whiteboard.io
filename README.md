@@ -14,7 +14,7 @@
 
 **An enterprise-grade, real-time collaborative digital whiteboard with infinite canvas, WebRTC spatial voice chat, and Gemini & Ollama AI diagram synthesis.**
 
-[🌐 Explore the Live Application](https://whiteboard-io-1.onrender.com/) · [📖 Documentation](docs/ARCHITECTURE.md) · [📊 Presentation Deck](docs/Whiteboard_io_Presentation.pptx) · [🐛 Report Issue](https://github.com/PARASMANI-KHUNTE/Whiteboard.io/issues)
+[🌐 Explore the Live Application](https://whiteboard-io-1.onrender.com/) · [📖 Documentation](docs/ARCHITECTURE.md) · [📊 Presentation Deck](docs/report-tooling/Whiteboard_io_Presentation.pptx) · [🐛 Report Issue](https://github.com/PARASMANI-KHUNTE/Whiteboard.io/issues)
 
 </div>
 

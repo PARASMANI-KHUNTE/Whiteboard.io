@@ -1,6 +1,5 @@
 import os
 import json
-import shutil
 import docx
 from docx import Document
 from docx.shared import Inches, Pt, RGBColor
@@ -10,7 +9,8 @@ from docx.oxml import OxmlElement, parse_xml
 from docx.oxml.ns import nsdecls, qn
 
 
-REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
+TOOLING_DIR = os.path.dirname(os.path.abspath(__file__))
+REPO_ROOT = os.path.dirname(os.path.dirname(TOOLING_DIR))
 
 def load_pkg_versions():
     client_pkg_path = os.path.join(REPO_ROOT, "client", "package.json")
@@ -1008,7 +1008,7 @@ def build_report(output_filename=None):
     add_body_p(doc, 
                "Whiteboard.io is structured as a client-server distributed system organized into three distinct tiers: the React Client Tier, the Node.js/Express Backend Tier, and the Persistence / External Services Tier.")
     
-    add_figure(doc, "diagram_architecture.png", "Figure 1: High-Level System Architecture of Whiteboard.io")
+    add_figure(doc, os.path.join(TOOLING_DIR, "diagram_architecture.png"), "Figure 1: High-Level System Architecture of Whiteboard.io")
     
     add_body_p(doc, 
                "As illustrated in Figure 1, the React Client Tier communicates with the backend server across two separate communication channels. RESTful JSON APIs manage authentication, user profile validation, Google OAuth redirects, room creation, and AI diagram prompts. Concurrently, a persistent Socket.io WebSocket gateway manages real-time drawing synchronization, live cursor coordinates, admin privilege commands, consensus votes, and WebRTC audio signaling.")
@@ -1020,7 +1020,7 @@ def build_report(output_filename=None):
     add_body_p(doc, 
                "The collaborative drawing engine implements an optimistic local rendering pipeline combined with live WebSocket point streaming to achieve real-time responsiveness without synchronization artifacts:")
     
-    add_figure(doc, "diagram_dataflow.png", "Figure 2: Real-Time Collaborative Drawing & Persistence Pipeline")
+    add_figure(doc, os.path.join(TOOLING_DIR, "diagram_dataflow.png"), "Figure 2: Real-Time Collaborative Drawing & Persistence Pipeline")
     
     add_body_p(doc, 
                "1. Pointer Capture: When the user touches or drags the mouse, pointerdown and pointermove events generate raw 2D world coordinates.")
@@ -1042,7 +1042,7 @@ def build_report(output_filename=None):
     add_body_p(doc, 
                "Whiteboard.io uses MongoDB as its document-oriented database. Unlike relational schemas that require strict table joins, MongoDB stores collaborative canvas documents as flexible BSON objects. The application utilizes five distinct collections initialized with compound and TTL indexes (`server/db.ts`):")
     
-    add_figure(doc, "diagram_database_schema.png", "Figure 3: MongoDB Document Schemas and Inter-Collection Relationships")
+    add_figure(doc, os.path.join(TOOLING_DIR, "diagram_database_schema.png"), "Figure 3: MongoDB Document Schemas and Inter-Collection Relationships")
     
     # Table 2.1: users schema
     add_styled_heading(doc, "Table 2.1: Collection Schema: users", 3)
@@ -1188,7 +1188,7 @@ def build_report(output_filename=None):
     add_body_p(doc, 
                "The diagram generation pipeline (`server/ai/`) transforms natural language prompts into styled, interactive canvas diagrams using a multi-engine failover chain: Google Gemini 3.8 Flash (primary cloud), Gemini 3.6 Flash (cloud fallback), and local Ollama llama3.2 (offline local engine). To guarantee 100% operational availability under heavy traffic or upstream outages, the backend introduces a 5-layer defensive shield with automated model failover:")
     
-    add_figure(doc, "diagram_ai_pipeline.png", "Figure 4: Multi-Engine AI Diagram Generation Pipeline & Failover Shield")
+    add_figure(doc, os.path.join(TOOLING_DIR, "diagram_ai_pipeline.png"), "Figure 4: Multi-Engine AI Diagram Generation Pipeline & Failover Shield")
     
     add_bullet_p(doc, "Layer 1 (IP Rate Limiting): Express in-memory token limiter caps calls at 10 requests / min / IP.", bold_prefix="Layer 1: ")
     add_bullet_p(doc, "Layer 2 (In-Memory Response Cache): 2-hour TTL cache indexed by `type:prompt`. Repeated requests return in <1ms with 0 Gemini quota consumed.", bold_prefix="Layer 2: ")
@@ -1424,11 +1424,9 @@ def build_report(output_filename=None):
         r.font.color.rgb = RGBColor(30, 41, 59)
 
     if output_filename is None:
-        target_file = "Generated_Project_Report.docx"
+        target_file = os.path.join(TOOLING_DIR, "Generated_Project_Report.docx")
         doc.save(target_file)
-        docs_copy = os.path.join(REPO_ROOT, "docs", "Generated_Project_Report.docx")
-        shutil.copyfile(target_file, docs_copy)
-        print(f"Successfully generated {target_file} and {docs_copy} ({os.path.getsize(target_file)} bytes)")
+        print(f"Successfully generated {target_file} ({os.path.getsize(target_file)} bytes)")
     else:
         doc.save(output_filename)
         print(f"Successfully generated {output_filename} ({os.path.getsize(output_filename)} bytes)")
