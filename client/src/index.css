@@ -234,3 +234,77 @@ html[data-ai-chat-open='true'] .wb-bottom-chat-aware {
   }
 }
 
+/* ---------------------------------------------------------------------------
+   Pro UI/UX Overhaul Tokens & Utilities (Issue #154)
+   --------------------------------------------------------------------------- */
+
+.wb-surface-glass {
+  background: rgba(255, 255, 255, 0.88);
+  backdrop-filter: blur(16px) saturate(180%);
+  -webkit-backdrop-filter: blur(16px) saturate(180%);
+  border: 1px solid rgba(226, 232, 240, 0.8);
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05),
+              0 10px 25px -5px rgba(0, 0, 0, 0.08),
+              0 0 0 1px rgba(255, 255, 255, 0.6) inset;
+}
+
+.dark .wb-surface-glass {
+  background: rgba(15, 23, 42, 0.85);
+  backdrop-filter: blur(16px) saturate(180%);
+  -webkit-backdrop-filter: blur(16px) saturate(180%);
+  border: 1px solid rgba(51, 65, 85, 0.6);
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3),
+              0 10px 25px -5px rgba(0, 0, 0, 0.4),
+              0 0 0 1px rgba(255, 255, 255, 0.05) inset;
+}
+
+.wb-card-glass {
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(226, 232, 240, 0.9);
+  box-shadow: 0 10px 30px -5px rgba(0, 0, 0, 0.12),
+              0 4px 8px -2px rgba(0, 0, 0, 0.06);
+}
+
+.dark .wb-card-glass {
+  background: rgba(15, 23, 42, 0.95);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(51, 65, 85, 0.8);
+  box-shadow: 0 10px 30px -5px rgba(0, 0, 0, 0.5),
+              0 4px 8px -2px rgba(0, 0, 0, 0.3);
+}
+
+.btn-press {
+  transition: transform 0.1s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.15s ease;
+}
+
+.btn-press:active {
+  transform: scale(0.94);
+}
+
+.dimension-badge {
+  position: absolute;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.68rem;
+  font-weight: 600;
+  padding: 0.18rem 0.5rem;
+  border-radius: 9999px;
+  letter-spacing: 0.02em;
+  pointer-events: none;
+  white-space: nowrap;
+  background: rgba(15, 23, 42, 0.85);
+  color: #ffffff;
+  backdrop-filter: blur(8px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  z-index: 50;
+}
+
+.dark .dimension-badge {
+  background: rgba(30, 41, 59, 0.9);
+  color: #f8fafc;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+

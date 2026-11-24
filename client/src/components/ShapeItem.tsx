@@ -1032,6 +1032,22 @@ export const ShapeItem: React.FC<ShapeItemProps> = ({
         )}
       </div>
 
+      {/* Live Dimension Badge while resizing or rotating */}
+      {(isResizing || isRotating) && (
+        <div
+          className="dimension-badge"
+          style={{
+            bottom: '-28px',
+            left: '50%',
+            transform: 'translateX(-50%)',
+          }}
+        >
+          {isRotating
+            ? `${Math.round(((rotation % 360) + 360) % 360)}°`
+            : `${Math.round(localSize.width)} × ${Math.round(localSize.height)} px`}
+        </div>
+      )}
+
       {/* 4 Corner Resize Handles (NW, NE, SW, SE) */}
       {canWrite && !isLocked && isSelected && !isMultiSelection && (
         <>
@@ -1040,28 +1056,28 @@ export const ShapeItem: React.FC<ShapeItemProps> = ({
             onMouseDown={(e) => handleMouseDownResize(e, 'nw')}
             title="Resize shape"
             style={{ cursor: getRotatedResizeCursor('nw', rotation) }}
-            className="absolute -top-1.5 -left-1.5 w-3.5 h-3.5 bg-white dark:bg-slate-800 border-2 border-blue-500 rounded-full shadow-sm z-30 hover:scale-125 transition-transform"
+            className="absolute -top-1.5 -left-1.5 w-3.5 h-3.5 bg-white dark:bg-slate-800 border-2 border-blue-500 rounded-full shadow-md z-30 hover:scale-125 transition-transform ring-2 ring-blue-500/20"
           />
           {/* NE - Top Right */}
           <div
             onMouseDown={(e) => handleMouseDownResize(e, 'ne')}
             title="Resize shape"
             style={{ cursor: getRotatedResizeCursor('ne', rotation) }}
-            className="absolute -top-1.5 -right-1.5 w-3.5 h-3.5 bg-white dark:bg-slate-800 border-2 border-blue-500 rounded-full shadow-sm z-30 hover:scale-125 transition-transform"
+            className="absolute -top-1.5 -right-1.5 w-3.5 h-3.5 bg-white dark:bg-slate-800 border-2 border-blue-500 rounded-full shadow-md z-30 hover:scale-125 transition-transform ring-2 ring-blue-500/20"
           />
           {/* SW - Bottom Left */}
           <div
             onMouseDown={(e) => handleMouseDownResize(e, 'sw')}
             title="Resize shape"
             style={{ cursor: getRotatedResizeCursor('sw', rotation) }}
-            className="absolute -bottom-1.5 -left-1.5 w-3.5 h-3.5 bg-white dark:bg-slate-800 border-2 border-blue-500 rounded-full shadow-sm z-30 hover:scale-125 transition-transform"
+            className="absolute -bottom-1.5 -left-1.5 w-3.5 h-3.5 bg-white dark:bg-slate-800 border-2 border-blue-500 rounded-full shadow-md z-30 hover:scale-125 transition-transform ring-2 ring-blue-500/20"
           />
           {/* SE - Bottom Right */}
           <div
             onMouseDown={(e) => handleMouseDownResize(e, 'se')}
             title="Resize shape"
             style={{ cursor: getRotatedResizeCursor('se', rotation) }}
-            className="absolute -bottom-1.5 -right-1.5 w-3.5 h-3.5 bg-white dark:bg-slate-800 border-2 border-blue-500 rounded-full shadow-sm z-30 hover:scale-125 transition-transform"
+            className="absolute -bottom-1.5 -right-1.5 w-3.5 h-3.5 bg-white dark:bg-slate-800 border-2 border-blue-500 rounded-full shadow-md z-30 hover:scale-125 transition-transform ring-2 ring-blue-500/20"
           />
         </>
       )}
