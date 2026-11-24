@@ -1,5 +1,6 @@
 import { GRAPH_RESPONSE_SCHEMA, SYSTEM_INSTRUCTION } from "./prompt";
 import type { DiagramAuthor } from "./types";
+import { combineWithTimeout, delay, throwIfAborted } from "./abort";
 
 export type AiProviderName = "gemini" | "ollama";
 
@@ -256,7 +257,8 @@ async function callGemini(
   userMessage: string,
   temperature: number,
   maxRetries = 3,
-  timeoutMs = 45_000
+  timeoutMs = 45_000,
+  signal?: AbortSignal
 ): Promise<unknown> {
   const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
 
@@ -279,6 +281,8 @@ async function callGemini(
   };
 
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    throwIfAborted(signal);
+    const requestSignal = combineWithTimeout(timeoutMs, signal);
     try {
       const response = await fetch(endpoint, {
         method: "POST",
@@ -287,8 +291,9 @@ async function callGemini(
           "x-goog-api-key": apiKey,
         },
         body: JSON.stringify(requestBody),
-        signal: AbortSignal.timeout(timeoutMs),
+        signal: requestSignal.signal,
       });
+      throwIfAborted(signal);
 
       if (response.status === 429 || response.status === 503) {
         if (attempt === maxRetries) {
@@ -302,7 +307,7 @@ async function callGemini(
           `[AI Retry]: HTTP ${response.status}. Retrying in ${delayMs}ms (attempt ${attempt + 1}/${maxRetries})...`
         );
         await response.body?.cancel().catch(() => {});
-        await new Promise((resolve) => setTimeout(resolve, delayMs));
+        await delay(delayMs, signal);
         continue;
       }
 
@@ -322,6 +327,7 @@ async function callGemini(
 
       return extractJson(text);
     } catch (err: unknown) {
+      throwIfAborted(signal);
       const error = err as Error & { fatal?: boolean };
       if (error.name === "TimeoutError" || error.name === "AbortError") {
         const timeoutError = new Error(
@@ -340,7 +346,9 @@ async function callGemini(
       console.warn(
         `[AI Retry]: ${error.message}. Retrying in ${delayMs}ms (attempt ${attempt + 1}/${maxRetries})...`
       );
-      await new Promise((resolve) => setTimeout(resolve, delayMs));
+      await delay(delayMs, signal);
+    } finally {
+      requestSignal.dispose();
     }
   }
 
@@ -389,7 +397,8 @@ async function callOllama(
   userMessage: string,
   temperature: number,
   maxRetries = 3,
-  timeoutMs?: number
+  timeoutMs?: number,
+  signal?: AbortSignal
 ): Promise<unknown> {
   const endpoint = `${ollamaBaseUrl()}/api/chat`;
   const effectiveTimeoutMs = timeoutMs ?? numberFromEnv("OLLAMA_TIMEOUT_MS", 180_000, 10_000, 900_000);
@@ -415,6 +424,8 @@ async function callOllama(
   };
 
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    throwIfAborted(signal);
+    const requestSignal = combineWithTimeout(effectiveTimeoutMs, signal);
     try {
       const response = await fetch(endpoint, {
         method: "POST",
@@ -423,8 +434,9 @@ async function callOllama(
           ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
         },
         body: JSON.stringify(requestBody),
-        signal: AbortSignal.timeout(effectiveTimeoutMs),
+        signal: requestSignal.signal,
       });
+      throwIfAborted(signal);
 
       if (response.status === 429 || (response.status >= 500 && response.status <= 599)) {
         if (attempt === maxRetries) {
@@ -439,7 +451,7 @@ async function callOllama(
           `[AI Retry]: Ollama HTTP ${response.status}. Retrying in ${delayMs}ms (attempt ${attempt + 1}/${maxRetries})...`
         );
         await response.body?.cancel().catch(() => {});
-        await new Promise((resolve) => setTimeout(resolve, delayMs));
+        await delay(delayMs, signal);
         continue;
       }
 
@@ -481,6 +493,7 @@ async function callOllama(
         throw parseError;
       }
     } catch (err: unknown) {
+      throwIfAborted(signal);
       const error = err as Error & { fatal?: boolean };
 
       if (error.name === "TimeoutError" || error.name === "AbortError") {
@@ -515,7 +528,9 @@ async function callOllama(
       console.warn(
         `[AI Retry]: ${error.message}. Retrying in ${delayMs}ms (attempt ${attempt + 1}/${maxRetries})...`
       );
-      await new Promise((resolve) => setTimeout(resolve, delayMs));
+      await delay(delayMs, signal);
+    } finally {
+      requestSignal.dispose();
     }
   }
 
@@ -531,6 +546,8 @@ export interface AiCallOptions {
   maxRetries?: number;
   /** Per-attempt timeout for model requests. */
   timeoutMs?: number;
+  /** Client disconnect signal; cancels in-flight provider work. */
+  signal?: AbortSignal;
 }
 
 export async function callAiModel(
@@ -539,13 +556,15 @@ export async function callAiModel(
   temperature: number,
   options: AiCallOptions = {}
 ): Promise<unknown> {
+  throwIfAborted(options.signal);
   if (provider.name === "ollama") {
     return callOllama(
       provider.model,
       userMessage,
       temperature,
       Math.max(1, options.maxRetries ?? 3),
-      options.timeoutMs
+      options.timeoutMs,
+      options.signal
     );
   }
 
@@ -559,6 +578,7 @@ export async function callAiModel(
     userMessage,
     temperature,
     Math.max(1, options.maxRetries ?? 3),
-    options.timeoutMs ?? numberFromEnv("GEMINI_TIMEOUT_MS", 45_000, 10_000, 180_000)
+    options.timeoutMs ?? numberFromEnv("GEMINI_TIMEOUT_MS", 45_000, 10_000, 180_000),
+    options.signal
   );
 }
