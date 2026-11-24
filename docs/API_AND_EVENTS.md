@@ -260,12 +260,12 @@ Retrieves the active server AI backend configuration for client badges and model
   {
     "success": true,
     "provider": "gemini",
-    "model": "gemini-2.5-flash",
-    "label": "Gemini 2.5 Flash"
+    "model": "gemini-3.8-flash",
+    "label": "Gemini 3.8 Flash"
   }
   ```
   * `provider`: `"gemini"` | `"ollama"` | `"fallback"`
-  * `model`: Model name (e.g. `"gemini-2.5-flash"`, `"llama3.2"`, `"procedural"`)
+  * `model`: Model name (e.g. `"gemini-3.8-flash"`, `"llama3.2"`, `"procedural"`)
   * `label`: Human-readable display label
 
 ---
@@ -340,7 +340,7 @@ Generates structured canvas elements from natural language prompts using Gemini 
       }
     ],
     "provider": "gemini",
-    "model": "gemini-2.5-flash",
+    "model": "gemini-3.8-flash",
     "isFallback": false,
     "fromCache": false,
     "notice": null
@@ -388,7 +388,7 @@ Stateless endpoint for iteratively revising an existing diagram from follow-up u
       "Rerouted query edge through cache layer"
     ],
     "provider": "gemini",
-    "model": "gemini-2.5-flash",
+    "model": "gemini-3.8-flash",
     "notice": null
   }
   ```
