@@ -35,6 +35,7 @@ import {
   effectivePermission,
   setExplicitPermission,
 } from "./roomPermissions";
+import { getOrCreateCached } from "./roomCreation";
 import {
   isRecord,
   readBoolean,
@@ -171,29 +172,37 @@ function positiveEnvInt(name: string, fallback: number): number {
   return Number.isFinite(value) && value > 0 ? Math.floor(value) : fallback;
 }
 const rooms = new Map<string, RoomData>();
+const roomCreations = new Map<string, Promise<RoomData>>();
 
+async function buildRoom(roomId: string): Promise<RoomData> {
+  const meta = await getRoomMeta(roomId);
+  // Another join may have populated the cache while the metadata read ran.
+  const cachedAfterMeta = rooms.get(roomId);
+  if (cachedAfterMeta) return cachedAfterMeta;
+
+  const persistedElements = await loadRoomElements(roomId);
+  const cachedAfterElements = rooms.get(roomId);
+  if (cachedAfterElements) return cachedAfterElements;
+
+  return {
+    id: roomId,
+    name: meta?.name || `Room ${roomId}`,
+    creatorId: meta?.creatorId || '',
+    creatorName: meta?.creatorName || '',
+    createdAt: meta?.createdAt || Date.now(),
+    isLocked: meta?.isLocked || false,
+    kickedUserIds: new Set<string>(meta?.kickedUserIds || []),
+    userPermissions: meta?.userPermissions || {},
+    elements: persistedElements || {},
+    users: {},
+    voteToClear: null,
+    voteTimer: null,
+  };
+}
+
+/** All callers share one in-flight creation, so no RoomData is orphaned (#71). */
 async function getOrCreateRoom(roomId: string): Promise<RoomData> {
-  let room = rooms.get(roomId);
-  if (!room) {
-    const meta = await getRoomMeta(roomId);
-    const persistedElements = await loadRoomElements(roomId);
-    room = {
-      id: roomId,
-      name: meta?.name || `Room ${roomId}`,
-      creatorId: meta?.creatorId || '',
-      creatorName: meta?.creatorName || '',
-      createdAt: meta?.createdAt || Date.now(),
-      isLocked: meta?.isLocked || false,
-      kickedUserIds: new Set<string>(meta?.kickedUserIds || []),
-      userPermissions: meta?.userPermissions || {},
-      elements: persistedElements || {},
-      users: {},
-      voteToClear: null,
-      voteTimer: null,
-    };
-    rooms.set(roomId, room);
-  }
-  return room;
+  return getOrCreateCached(roomId, rooms, roomCreations, () => buildRoom(roomId));
 }
 
 /** Fire-and-forget persistence of a room's moderation state. */
