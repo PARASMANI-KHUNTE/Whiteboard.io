@@ -32,6 +32,7 @@ import { ShortcutsModal } from './components/ShortcutsModal';
 import { ConfirmModal } from './components/ConfirmModal';
 import { AiGenerateModal } from './components/AiGenerateModal';
 import { AiChatPanel } from './components/AiChatPanel';
+import { getAiChatActionMeta } from './components/ui/aiActions';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { Info, Sparkles, AlertCircle, CheckCircle2, UserX, X } from 'lucide-react';
 import { isColorBlack, isColorWhite } from './utils/themeColors';
@@ -530,6 +531,11 @@ export default function App() {
       handleJoinVoiceWithSoloCheck();
     }
   }, [isVoiceConnected, leaveVoiceChat, handleJoinVoiceWithSoloCheck]);
+
+  const openAiDiagram = useCallback(() => setShowAiModal(true), []);
+  const toggleAiChat = useCallback(() => setIsAiChatOpen((open) => !open), []);
+  const closeAiChat = useCallback(() => setIsAiChatOpen(false), []);
+  const reopenAiChat = useCallback(() => setIsAiChatOpen(true), []);
 
   const [cursorCoords, setCursorCoords] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
 
@@ -1439,8 +1445,8 @@ export default function App() {
         onOpenShareModal={() => setShowShareModal(true)}
         onShareAndGoLive={handleShareAndGoLive}
         onOpenAdminModal={() => setShowAdminModal(true)}
-        onOpenAiModal={() => setShowAiModal(true)}
-        onToggleAiChat={() => setIsAiChatOpen((open) => !open)}
+        onOpenAiModal={openAiDiagram}
+        onToggleAiChat={toggleAiChat}
         isAiChatOpen={isAiChatOpen}
         onSwitchRoom={switchRoom}
         theme={theme}
@@ -1489,8 +1495,8 @@ export default function App() {
         onOpenRooms={() => setShowCreateRoomModal(true)}
         onOpenShare={() => setShowShareModal(true)}
         onOpenAdmin={() => setShowAdminModal(true)}
-        onOpenAi={() => setShowAiModal(true)}
-        onToggleAiChat={() => setIsAiChatOpen((open) => !open)}
+        onOpenAi={openAiDiagram}
+        onToggleAiChat={toggleAiChat}
         onToggleVoice={handleToggleVoice}
         onToggleMute={toggleMute}
         onOpenShortcuts={() => setShowShortcutsModal(true)}
@@ -1725,24 +1731,29 @@ export default function App() {
         isOpen={isAiChatOpen}
         boardKey={aiBoardKey}
         session={aiSession}
-        onClose={() => setIsAiChatOpen(false)}
-        onNewDiagram={() => setShowAiModal(true)}
+        onClose={closeAiChat}
+        onNewDiagram={openAiDiagram}
         onApplyTurn={handleAiApplyTurn}
         authToken={token}
       />
 
       {/* Reopen the AI chat after it has been minimized */}
-      {aiSession && !isAiChatOpen && !(voteToClear && voteToClear.active) && (
-        <button
-          type="button"
-          onClick={() => setIsAiChatOpen(true)}
-          title="Open AI diagram chat"
-          className="fixed bottom-[calc(env(safe-area-inset-bottom,0px)+5.5rem)] sm:bottom-5 right-5 z-30 inline-flex items-center gap-2 rounded-full bg-gradient-to-tr from-indigo-600 to-violet-600 px-4 py-3 text-xs font-semibold text-white shadow-xl shadow-indigo-500/30 hover:from-indigo-500 hover:to-violet-500 active:scale-95 transition-all cursor-pointer"
-        >
-          <Sparkles className="w-4 h-4" />
-          AI chat
-        </button>
-      )}
+      {aiSession && !isAiChatOpen && !(voteToClear && voteToClear.active) && (() => {
+        const reopenMeta = getAiChatActionMeta(false);
+        const ReopenIcon = reopenMeta.Icon;
+        return (
+          <button
+            type="button"
+            onClick={reopenAiChat}
+            title={reopenMeta.title}
+            aria-label={reopenMeta.ariaLabel}
+            className="fixed bottom-[calc(env(safe-area-inset-bottom,0px)+5.5rem)] sm:bottom-5 right-5 z-30 inline-flex items-center gap-2 rounded-full bg-gradient-to-tr from-indigo-600 to-violet-600 px-4 py-3 text-xs font-semibold text-white shadow-xl shadow-indigo-500/30 hover:from-indigo-500 hover:to-violet-500 active:scale-95 transition-all cursor-pointer"
+          >
+            <ReopenIcon className="w-4 h-4" />
+            {reopenMeta.compactLabel}
+          </button>
+        );
+      })()}
 
       {/* Kicked from Room Dialog */}
       {isKicked && (

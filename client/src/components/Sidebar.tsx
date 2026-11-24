@@ -13,7 +13,6 @@ import {
   Keyboard,
   ListChecks,
   LogIn,
-  MessageSquare,
   MousePointer,
   PanelLeftClose,
   PanelLeftOpen,
@@ -22,7 +21,6 @@ import {
   Share2,
   Shield,
   Smile,
-  Sparkles,
   Spline,
   StickyNote,
   Trash2,
@@ -39,6 +37,7 @@ import type { ThemeMode } from '../hooks/useTheme';
 import type { ToolType } from '../types';
 import { getThemeToggleMeta } from './ui/ThemeToggle';
 import { getVoiceConnectionMeta, getVoiceMuteMeta } from './ui/voiceActions';
+import { getAiChatActionMeta, getAiDiagramActionMeta } from './ui/aiActions';
 
 type IconComponent = LucideIcon;
 
@@ -394,21 +393,33 @@ export default function Sidebar({
               disabled={!isHost}
               onClick={() => runAction(onOpenAdmin)}
             />
-            <SidebarButton
-              icon={Sparkles}
-              label="Generate diagram"
-              expanded={isOpen}
-              disabled={!canWrite}
-              onClick={() => runAction(onOpenAi)}
-            />
-            <SidebarButton
-              icon={MessageSquare}
-              label="AI chat"
-              expanded={isOpen}
-              active={isAiChatOpen}
-              pressed={isAiChatOpen}
-              onClick={() => runAction(onToggleAiChat)}
-            />
+            {(() => {
+              const aiDiagramMeta = getAiDiagramActionMeta(canWrite);
+              const aiChatMeta = getAiChatActionMeta(isAiChatOpen);
+              return (
+                <>
+                  <SidebarButton
+                    icon={aiDiagramMeta.Icon}
+                    label={aiDiagramMeta.label}
+                    title={aiDiagramMeta.title}
+                    ariaLabel={aiDiagramMeta.ariaLabel}
+                    expanded={isOpen}
+                    disabled={aiDiagramMeta.disabled}
+                    onClick={() => runAction(onOpenAi)}
+                  />
+                  <SidebarButton
+                    icon={aiChatMeta.Icon}
+                    label={aiChatMeta.label}
+                    title={aiChatMeta.title}
+                    ariaLabel={aiChatMeta.ariaLabel}
+                    expanded={isOpen}
+                    active={isAiChatOpen}
+                    pressed={isAiChatOpen}
+                    onClick={() => runAction(onToggleAiChat)}
+                  />
+                </>
+              );
+            })()}
             {(() => {
               const voiceConnectionMeta = getVoiceConnectionMeta(isVoiceConnected);
               const voiceMuteMeta = getVoiceMuteMeta(isMuted);
