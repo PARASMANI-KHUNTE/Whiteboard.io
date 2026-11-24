@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { StickyNote } from '../types';
 import { Trash2, Move, Palette, Lock } from 'lucide-react';
+import { hasMultiSelectModifier } from '../utils/selection';
 
 interface StickyNoteItemProps {
   note: StickyNote;
@@ -218,15 +219,14 @@ export const StickyNoteItem: React.FC<StickyNoteItemProps> = ({
       }}
       onMouseDown={(e) => {
         e.stopPropagation();
-        onSelect?.(e.shiftKey || e.ctrlKey || e.metaKey);
+        onSelect?.(hasMultiSelectModifier(e));
       }}
       onClick={(e) => {
         e.stopPropagation();
-        onSelect?.(e.shiftKey || e.ctrlKey || e.metaKey);
       }}
       onTouchStart={(e) => {
         e.stopPropagation();
-        onSelect?.(e.shiftKey || e.ctrlKey || e.metaKey);
+        onSelect?.(hasMultiSelectModifier(e));
       }}
       className={`absolute top-0 left-0 w-56 rounded-xl border border-slate-200/90 border-t-4 shadow-md flex flex-col transition-all z-20 pointer-events-auto ${
         isDragging

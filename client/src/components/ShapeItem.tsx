@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { getAdaptiveDisplayColor } from '../utils/themeColors';
 import { computeRotatedResize, getRotatedResizeCursor } from '../utils/shapeResize';
+import { hasMultiSelectModifier } from '../utils/selection';
 
 interface ShapeItemProps {
   element: ShapeElement;
@@ -678,15 +679,14 @@ export const ShapeItem: React.FC<ShapeItemProps> = ({
       onMouseLeave={() => setIsHovered(false)}
       onMouseDown={(e) => {
         e.stopPropagation();
-        onSelect?.(e.shiftKey || e.ctrlKey || e.metaKey);
+        onSelect?.(hasMultiSelectModifier(e));
       }}
       onClick={(e) => {
         e.stopPropagation();
-        onSelect?.(e.shiftKey || e.ctrlKey || e.metaKey);
       }}
       onTouchStart={(e) => {
         e.stopPropagation();
-        onSelect?.(e.shiftKey || e.ctrlKey || e.metaKey);
+        onSelect?.(hasMultiSelectModifier(e));
       }}
       onDoubleClick={(e) => {
         if (!canWrite || isLocked) return;

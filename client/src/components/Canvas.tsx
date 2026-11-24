@@ -46,6 +46,7 @@ import {
 } from '../utils/elementMutations';
 import { getElementBounds, getElementAnchors, routeDraftWire } from '../utils/wireGeometry';
 import { reorderZIndex, getElementZ } from '../utils/zOrder';
+import { toggleSelection } from '../utils/selection';
 import { isStrokeHit, computeStrokeHitTolerance } from '../utils/hitTesting';
 import { getTouchClientPoint, isScrollableTextInput } from '../utils/touchInteractions';
 import { SpatialIndex, IndexedElement } from '../utils/spatialIndex';
@@ -318,22 +319,8 @@ export const Canvas: React.FC<CanvasProps> = ({
 
   // Selection management helpers
   const handleSelectElement = useCallback((id: string, isMulti = false) => {
-    setSelectedElementIds((prev) => {
-      if (isMulti) {
-        const next = new Set(prev);
-        if (next.has(id)) {
-          next.delete(id);
-        } else {
-          next.add(id);
-        }
-        return next;
-      }
-
-      // Keep an existing multi-selection intact. This is what lets a user grab
-      // any selected object and drag the whole group; clicking empty canvas or
-      // an unselected object still collapses the selection.
-      return prev.has(id) ? prev : new Set([id]);
-    });
+    // Interactive items call this once per gesture; click handlers only focus/edit.
+    setSelectedElementIds((prev) => toggleSelection(prev, id, isMulti));
   }, []);
 
   const handleSelectAll = useCallback(() => {
@@ -2126,7 +2113,7 @@ export const Canvas: React.FC<CanvasProps> = ({
               theme={theme}
               canWrite={canWrite}
               isSelected={selectedElementIds.has(wire.id)}
-              onSelect={() => handleSelectElement(wire.id, false)}
+              onSelect={(isMulti) => handleSelectElement(wire.id, isMulti)}
               onUpdate={onElementUpdate}
               onDelete={handleElementDelete}
             />
