@@ -1,6 +1,13 @@
 import { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
 import { Socket } from 'socket.io-client';
 import { RemoteUser } from '../types';
+import {
+  PEER_RECOVERY_TIMEOUT_MS,
+  isCurrentPeerConnection,
+  shouldStartPeerRecovery,
+  shouldTearDownPeer,
+  shouldTearDownPeerAfterRecovery,
+} from './voicePeerLifecycle';
 
 interface UseVoiceChatProps {
   socket: Socket | null;
@@ -90,6 +97,55 @@ export function useVoiceChat({
   const remoteAudioElementsRef = useRef<Record<string, HTMLAudioElement>>({});
   // ICE candidate queue to prevent "remote description was null" race condition
   const pendingCandidatesRef = useRef<Record<string, RTCIceCandidateInit[]>>({});
+  // Pending ICE-restart grace periods for transiently disconnected peers.
+  const peerRecoveryTimersRef = useRef<Record<string, number>>({});
+
+  const clearPeerRecoveryTimer = useCallback((targetUserId: string) => {
+    const timer = peerRecoveryTimersRef.current[targetUserId];
+    if (timer !== undefined) {
+      window.clearTimeout(timer);
+      delete peerRecoveryTimersRef.current[targetUserId];
+    }
+  }, []);
+
+  // Remove a connection from the registry before closing it so any synchronous
+  // or late `closed` callback sees that it is no longer the active peer.
+  const discardPeer = useCallback(
+    (targetUserId: string, pc: RTCPeerConnection) => {
+      if (!isCurrentPeerConnection(peerConnectionsRef.current, targetUserId, pc)) return false;
+      clearPeerRecoveryTimer(targetUserId);
+      delete peerConnectionsRef.current[targetUserId];
+      delete pendingCandidatesRef.current[targetUserId];
+      try {
+        pc.close();
+      } catch (_) {}
+      return true;
+    },
+    [clearPeerRecoveryTimer]
+  );
+
+  const removePeerAudio = useCallback((targetUserId: string) => {
+    setActiveSpeakers((prev) => prev.filter((id) => id !== targetUserId));
+    const el = remoteAudioElementsRef.current[targetUserId];
+    if (el) {
+      try {
+        el.pause();
+        el.srcObject = null;
+        el.remove();
+      } catch (_) {}
+      delete remoteAudioElementsRef.current[targetUserId];
+    }
+  }, []);
+
+  const teardownPeer = useCallback(
+    (targetUserId: string, pc?: RTCPeerConnection) => {
+      if (pc && !isCurrentPeerConnection(peerConnectionsRef.current, targetUserId, pc)) return;
+      if (pc) discardPeer(targetUserId, pc);
+      else clearPeerRecoveryTimer(targetUserId);
+      removePeerAudio(targetUserId);
+    },
+    [discardPeer, clearPeerRecoveryTimer, removePeerAudio]
+  );
 
   // Voice belongs to one room/socket. Track the active pair so a room switch
   // tears it down and an in-flight getUserMedia cannot resurrect it later.
@@ -153,11 +209,14 @@ export function useVoiceChat({
       simOscillatorRef.current = null;
     }
 
-    // Stop and close all peer connections
+    // Stop and close all peer connections. Discard them first so their late
+    // `closed` callbacks cannot touch this room's replacement peers.
     Object.keys(peerConnectionsRef.current).forEach((userId) => {
-      try {
-        peerConnectionsRef.current[userId].close();
-      } catch (_) {}
+      const pc = peerConnectionsRef.current[userId];
+      if (pc) discardPeer(userId, pc);
+    });
+    Object.keys(peerRecoveryTimersRef.current).forEach((userId) => {
+      clearPeerRecoveryTimer(userId);
     });
     peerConnectionsRef.current = {};
     pendingCandidatesRef.current = {};
@@ -205,7 +264,7 @@ export function useVoiceChat({
     setAudioLevel(0);
     setIsSpeaking(false);
     setActiveSpeakers([]);
-  }, []);
+  }, [discardPeer, clearPeerRecoveryTimer]);
 
   // A room change (or socket reconnect) invalidates every voice resource: the
   // mic, peers and "connected" UI state must never leak into the new room.
@@ -288,13 +347,9 @@ export function useVoiceChat({
       }
 
       if (existing) {
-        try {
-          existing.close();
-        } catch (_) {}
-        delete peerConnectionsRef.current[targetUserId];
-        // Candidates buffered for the old connection must not be applied to
-        // this replacement peer.
-        delete pendingCandidatesRef.current[targetUserId];
+        // Discard the old peer before closing it. Its late `closed` callback
+        // must not delete the replacement installed below.
+        discardPeer(targetUserId, existing);
       }
 
       const pc = new RTCPeerConnection(ICE_SERVERS);
@@ -313,6 +368,7 @@ export function useVoiceChat({
 
       // Handle ICE Candidates
       pc.onicecandidate = (event) => {
+        if (!isCurrentPeerConnection(peerConnectionsRef.current, targetUserId, pc)) return;
         if (event.candidate && socket) {
           socket.emit('voice-ice-candidate', {
             toUserId: targetUserId,
@@ -323,6 +379,7 @@ export function useVoiceChat({
 
       // Handle remote incoming audio track
       pc.ontrack = (event) => {
+        if (!isCurrentPeerConnection(peerConnectionsRef.current, targetUserId, pc)) return;
         const stream =
           event.streams && event.streams[0] ? event.streams[0] : new MediaStream([event.track]);
 
@@ -346,30 +403,45 @@ export function useVoiceChat({
       };
 
       pc.onconnectionstatechange = () => {
-        if (pc.connectionState === 'connected') {
+        // A replacement peer owns the shared state from now on.
+        if (!isCurrentPeerConnection(peerConnectionsRef.current, targetUserId, pc)) return;
+
+        const state = pc.connectionState;
+        if (state === 'connected') {
+          clearPeerRecoveryTimer(targetUserId);
           setActiveSpeakers((prev) => (prev.includes(targetUserId) ? prev : [...prev, targetUserId]));
-        } else if (
-          pc.connectionState === 'disconnected' ||
-          pc.connectionState === 'failed' ||
-          pc.connectionState === 'closed'
-        ) {
-          delete peerConnectionsRef.current[targetUserId];
+          return;
+        }
+
+        if (shouldStartPeerRecovery(state)) {
           setActiveSpeakers((prev) => prev.filter((id) => id !== targetUserId));
-          const el = remoteAudioElementsRef.current[targetUserId];
-          if (el) {
-            try {
-              el.pause();
-              el.srcObject = null;
-              el.remove();
-            } catch (_) {}
-            delete remoteAudioElementsRef.current[targetUserId];
+          if (peerRecoveryTimersRef.current[targetUserId] !== undefined) return;
+
+          try {
+            const restartable = pc as RTCPeerConnection & { restartIce?: () => void };
+            restartable.restartIce?.();
+          } catch (e) {
+            console.warn('ICE restart failed for voice peer:', targetUserId, e);
           }
+
+          const timer = window.setTimeout(() => {
+            delete peerRecoveryTimersRef.current[targetUserId];
+            if (!isCurrentPeerConnection(peerConnectionsRef.current, targetUserId, pc)) return;
+            if (!shouldTearDownPeerAfterRecovery(pc.connectionState)) return;
+            teardownPeer(targetUserId, pc);
+          }, PEER_RECOVERY_TIMEOUT_MS);
+          peerRecoveryTimersRef.current[targetUserId] = timer;
+          return;
+        }
+
+        if (shouldTearDownPeer(state, peerRecoveryTimersRef.current[targetUserId] !== undefined)) {
+          teardownPeer(targetUserId, pc);
         }
       };
 
       return pc;
     },
-    [socket, isDeafened, volume]
+    [socket, isDeafened, volume, discardPeer, clearPeerRecoveryTimer, teardownPeer]
   );
 
   // Send an SDP offer to a specific target user
@@ -804,47 +876,13 @@ export function useVoiceChat({
           }
         }
       } else if (data.voiceConnected === false) {
-        const pc = peerConnectionsRef.current[data.userId];
-        if (pc) {
-          try {
-            pc.close();
-          } catch (_) {}
-          delete peerConnectionsRef.current[data.userId];
-        }
-        delete pendingCandidatesRef.current[data.userId];
-        setActiveSpeakers((prev) => prev.filter((id) => id !== data.userId));
-        const el = remoteAudioElementsRef.current[data.userId];
-        if (el) {
-          try {
-            el.pause();
-            el.srcObject = null;
-            el.remove();
-          } catch (_) {}
-          delete remoteAudioElementsRef.current[data.userId];
-        }
+        teardownPeer(data.userId, peerConnectionsRef.current[data.userId]);
       }
     };
 
     const handleUserLeft = (data: { userId: string }) => {
       if (!data || !data.userId) return;
-      const pc = peerConnectionsRef.current[data.userId];
-      if (pc) {
-        try {
-          pc.close();
-        } catch (_) {}
-        delete peerConnectionsRef.current[data.userId];
-      }
-      delete pendingCandidatesRef.current[data.userId];
-      setActiveSpeakers((prev) => prev.filter((id) => id !== data.userId));
-      const el = remoteAudioElementsRef.current[data.userId];
-      if (el) {
-        try {
-          el.pause();
-          el.srcObject = null;
-          el.remove();
-        } catch (_) {}
-        delete remoteAudioElementsRef.current[data.userId];
-      }
+      teardownPeer(data.userId, peerConnectionsRef.current[data.userId]);
     };
 
     socket.on('voice-offer', handleVoiceOffer);
@@ -860,7 +898,14 @@ export function useVoiceChat({
       socket.off('voice-status-updated', handleVoiceStatusUpdated);
       socket.off('user-left', handleUserLeft);
     };
-  }, [socket, currentUser.id, createPeerConnection, flushPendingCandidates, initiateOfferToUser]);
+  }, [
+    socket,
+    currentUser.id,
+    createPeerConnection,
+    flushPendingCandidates,
+    initiateOfferToUser,
+    teardownPeer,
+  ]);
 
   // Browser Autoplay Policy Unlocker: Resume AudioContext and trigger play() on user interaction
   useEffect(() => {
