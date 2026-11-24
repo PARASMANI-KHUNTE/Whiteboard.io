@@ -2350,6 +2350,7 @@ export const Canvas: React.FC<CanvasProps> = ({
 
       {/* Shortcut cheat-sheet launcher */}
       <button
+        id="shortcuts-btn"
         type="button"
         onClick={() => setShortcutsOpen(true)}
         title="Keyboard shortcuts (?)"
@@ -2363,7 +2364,7 @@ export const Canvas: React.FC<CanvasProps> = ({
 
       {/* Floating Selection Action Bar (single and multi-selection) */}
       {selectedElementIds.size > 0 && (
-        <div className="fixed top-16 sm:top-20 left-1/2 -translate-x-1/2 z-40 flex items-center gap-1 sm:gap-2 px-2 sm:px-3.5 py-1.5 sm:py-2 max-w-[96vw] overflow-x-auto bg-white/95 dark:bg-slate-900/95 backdrop-blur-md rounded-2xl shadow-xl border border-slate-200/80 dark:border-slate-800 animate-pop-in pointer-events-auto">
+        <div className="fixed top-16 sm:top-20 left-1/2 -translate-x-1/2 z-40 flex items-center gap-1 sm:gap-2 px-2 sm:px-3.5 py-1.5 sm:py-2 max-w-[96vw] overflow-x-auto bg-white/95 dark:bg-slate-900/95 backdrop-blur-md rounded-2xl shadow-xl border border-slate-200/80 dark:border-slate-800 animate-pop-in pointer-events-auto wb-sidebar-centered">
           <div className="flex items-center gap-1.5 px-2 sm:px-2.5 py-1 bg-blue-50 dark:bg-blue-950/60 rounded-lg text-blue-600 dark:text-blue-400 font-semibold text-xs border border-blue-200/80 dark:border-blue-900/50 shrink-0">
             <MousePointer className="w-3.5 h-3.5" />
             <span>{selectedElementIds.size} selected</span>
