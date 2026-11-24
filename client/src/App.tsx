@@ -32,6 +32,7 @@ import { AiChatPanel } from './components/AiChatPanel';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { Info, Sparkles, AlertCircle, CheckCircle2, UserX, X } from 'lucide-react';
 import { isColorBlack, isColorWhite } from './utils/themeColors';
+import { shouldRecolorBoardOnThemeToggle } from './utils/themeBoardEdit';
 import { routeWire } from './utils/wireGeometry';
 import { loadAiSession, saveAiSession, clearAiSession } from './utils/aiSessionStorage';
 import { forgetRecentRoom, rememberRecentRoom } from './utils/recentRooms';
@@ -391,85 +392,89 @@ export default function App() {
       }
     }
 
-    // 2. Convert all existing board elements for theme consistency
-    const updatedElements: CanvasElement[] = [];
-    Object.values(elements).forEach((el) => {
-      let updated: CanvasElement | null = null;
+    // 2. Convert all existing board elements for theme consistency. Viewers
+    // only get the display theme; mutating elements would be rejected by the
+    // server and desync the local canvas.
+    if (shouldRecolorBoardOnThemeToggle(canWrite)) {
+      const updatedElements: CanvasElement[] = [];
+      Object.values(elements).forEach((el) => {
+        let updated: CanvasElement | null = null;
 
-      if (nextTheme === 'dark') {
-        // Switching to dark theme: convert black strokes/text/shapes to white
-        if (el.type === 'stroke') {
-          const s = el as DrawingStroke;
-          if (isColorBlack(s.color)) {
-            updated = { ...s, color: '#ffffff' };
+        if (nextTheme === 'dark') {
+          // Switching to dark theme: convert black strokes/text/shapes to white
+          if (el.type === 'stroke') {
+            const s = el as DrawingStroke;
+            if (isColorBlack(s.color)) {
+              updated = { ...s, color: '#ffffff' };
+            }
+          } else if (el.type === 'text') {
+            const t = el as TextElement;
+            if (!t.color || isColorBlack(t.color)) {
+              updated = { ...t, color: '#ffffff' };
+            }
+          } else if (el.type === 'shape') {
+            const sh = el as ShapeElement;
+            const isBlackStroke = isColorBlack(sh.color);
+            const isBlackText = isColorBlack(sh.textColor);
+            if (isBlackStroke || isBlackText) {
+              updated = {
+                ...sh,
+                color: isBlackStroke ? '#ffffff' : sh.color,
+                textColor: isBlackText ? '#ffffff' : sh.textColor,
+                fillColor: sh.fillColor && sh.fillColor.includes('#0f172a') ? '#ffffff15' : sh.fillColor,
+              };
+            }
+          } else if (el.type === 'wire') {
+            const w = el as WireElement;
+            if (isColorBlack(w.color)) {
+              updated = { ...w, color: '#ffffff' };
+            }
           }
-        } else if (el.type === 'text') {
-          const t = el as TextElement;
-          if (!t.color || isColorBlack(t.color)) {
-            updated = { ...t, color: '#ffffff' };
-          }
-        } else if (el.type === 'shape') {
-          const sh = el as ShapeElement;
-          const isBlackStroke = isColorBlack(sh.color);
-          const isBlackText = isColorBlack(sh.textColor);
-          if (isBlackStroke || isBlackText) {
-            updated = {
-              ...sh,
-              color: isBlackStroke ? '#ffffff' : sh.color,
-              textColor: isBlackText ? '#ffffff' : sh.textColor,
-              fillColor: sh.fillColor && sh.fillColor.includes('#0f172a') ? '#ffffff15' : sh.fillColor,
-            };
-          }
-        } else if (el.type === 'wire') {
-          const w = el as WireElement;
-          if (isColorBlack(w.color)) {
-            updated = { ...w, color: '#ffffff' };
+        } else {
+          // Switching to light theme: convert white strokes/text/shapes/wires to charcoal black
+          if (el.type === 'stroke') {
+            const s = el as DrawingStroke;
+            if (isColorWhite(s.color)) {
+              updated = { ...s, color: '#0f172a' };
+            }
+          } else if (el.type === 'text') {
+            const t = el as TextElement;
+            if (isColorWhite(t.color)) {
+              updated = { ...t, color: '#0f172a' };
+            }
+          } else if (el.type === 'shape') {
+            const sh = el as ShapeElement;
+            const isWhiteStroke = isColorWhite(sh.color);
+            const isWhiteText = isColorWhite(sh.textColor);
+            if (isWhiteStroke || isWhiteText) {
+              updated = {
+                ...sh,
+                color: isWhiteStroke ? '#0f172a' : sh.color,
+                textColor: isWhiteText ? '#0f172a' : sh.textColor,
+                fillColor: sh.fillColor && sh.fillColor.includes('#ffffff') ? '#0f172a15' : sh.fillColor,
+              };
+            }
+          } else if (el.type === 'wire') {
+            const w = el as WireElement;
+            if (isColorWhite(w.color)) {
+              updated = { ...w, color: '#0f172a' };
+            }
           }
         }
-      } else {
-        // Switching to light theme: convert white strokes/text/shapes/wires to charcoal black
-        if (el.type === 'stroke') {
-          const s = el as DrawingStroke;
-          if (isColorWhite(s.color)) {
-            updated = { ...s, color: '#0f172a' };
-          }
-        } else if (el.type === 'text') {
-          const t = el as TextElement;
-          if (isColorWhite(t.color)) {
-            updated = { ...t, color: '#0f172a' };
-          }
-        } else if (el.type === 'shape') {
-          const sh = el as ShapeElement;
-          const isWhiteStroke = isColorWhite(sh.color);
-          const isWhiteText = isColorWhite(sh.textColor);
-          if (isWhiteStroke || isWhiteText) {
-            updated = {
-              ...sh,
-              color: isWhiteStroke ? '#0f172a' : sh.color,
-              textColor: isWhiteText ? '#0f172a' : sh.textColor,
-              fillColor: sh.fillColor && sh.fillColor.includes('#ffffff') ? '#0f172a15' : sh.fillColor,
-            };
-          }
-        } else if (el.type === 'wire') {
-          const w = el as WireElement;
-          if (isColorWhite(w.color)) {
-            updated = { ...w, color: '#0f172a' };
-          }
+
+        if (updated) {
+          updatedElements.push(updated);
         }
-      }
+      });
 
-      if (updated) {
-        updatedElements.push(updated);
+      if (updatedElements.length > 0) {
+        emitElementsBatchCreate(updatedElements);
       }
-    });
-
-    if (updatedElements.length > 0) {
-      emitElementsBatchCreate(updatedElements);
     }
 
     // 3. Toggle theme state
     toggleTheme();
-  }, [theme, currentColor, elements, emitElementsBatchCreate, toggleTheme]);
+  }, [theme, currentColor, elements, canWrite, emitElementsBatchCreate, toggleTheme]);
 
   // Real-time Collaborative Voice Chat Engine
   const {
