@@ -4,8 +4,6 @@ import { usePopoverDismiss } from '../hooks/usePopoverDismiss';
 import {
   Trash2,
   Move,
-  Copy,
-  Palette,
   Type,
   Bold,
   Italic,
@@ -19,7 +17,8 @@ import { getAdaptiveDisplayColor } from '../utils/themeColors';
 import { shouldBailOutItemMouseDown } from '../utils/canvasPan';
 import { hasMultiSelectModifier } from '../utils/selection';
 import { CORE_PALETTE } from '../constants/palettes';
-import { ColorSwatches } from './ui/ColorSwatches';
+import { ItemPalettePopover } from './ui/ItemPalettePopover';
+import { ItemToolbar } from './ui/ItemToolbar';
 
 interface TextItemProps {
   element: TextElement;
@@ -362,19 +361,18 @@ export const TextItem: React.FC<TextItemProps> = ({
     >
       {/* Floating Styling & Formatting Menu (Visible when selected or editing) */}
       {showControls && (
-        <div
-          onMouseDown={(e) => e.stopPropagation()}
-          className="absolute left-1/2 -translate-x-1/2 -top-11 z-30 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md rounded-xl shadow-xl border border-slate-200 dark:border-slate-800 p-1 flex items-center gap-0.5 sm:gap-1 text-xs select-none animate-in fade-in zoom-in-95 duration-100 whitespace-nowrap"
+        <ItemToolbar
+          className="-top-11 z-30 p-1 gap-0.5 sm:gap-1 text-xs"
+          showHoverBridge={false}
+          onMoveStart={handleMouseDownHeader}
+          moveTitle="Drag to move text"
+          onDuplicate={onDuplicate ? () => onDuplicate(element) : undefined}
+          duplicateTitle="Duplicate text"
+          duplicateAriaLabel="Duplicate text"
+          onDelete={() => onDelete(element.id)}
+          deleteTitle="Delete text"
+          deleteAriaLabel="Delete text"
         >
-          {/* Drag Handle */}
-          <div
-            onMouseDown={handleMouseDownHeader}
-            title="Drag to move text"
-            className="p-1 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg cursor-grab active:cursor-grabbing"
-          >
-            <Move className="w-3.5 h-3.5" />
-          </div>
-
           <div className="h-4 w-[1px] bg-slate-200 dark:bg-slate-800 mx-0.5" />
 
           {/* Font Family Selector Button & Popover */}
@@ -480,49 +478,26 @@ export const TextItem: React.FC<TextItemProps> = ({
           </div>
 
           {/* Color Picker Toggle & Popover */}
-          <div className="relative">
-            <button
-              type="button"
-              data-popover-trigger
-              aria-label="Change text color"
-              aria-expanded={showColorPicker}
-              onClick={() => {
-                setShowColorPicker(!showColorPicker);
-                setShowFontMenu(false);
-                setShowSizeMenu(false);
-              }}
-              title="Change text color"
-              className={`p-1.5 min-h-[32px] min-w-[32px] rounded-lg flex items-center gap-1.5 transition-colors cursor-pointer border ${
-                showColorPicker
-                  ? 'bg-blue-50 dark:bg-blue-950 border-blue-200 dark:border-blue-800'
-                  : 'hover:bg-slate-100 dark:hover:bg-slate-800 border-transparent'
-              }`}
-            >
-              <Palette className="w-3.5 h-3.5 text-slate-500 dark:text-slate-400" />
-              <span
-                className="w-3 h-3 rounded-full border border-slate-300 dark:border-slate-600 shrink-0 shadow-2xs"
-                style={{ backgroundColor: effectiveTextColor }}
-              />
-            </button>
-
-            {showColorPicker && (
-              <div
-                onMouseDown={(e) => e.stopPropagation()}
-                className="absolute left-1/2 -translate-x-1/2 bottom-8 bg-white dark:bg-slate-900 rounded-xl shadow-2xl border border-slate-200 dark:border-slate-800 p-2 z-50 animate-in fade-in zoom-in-95 duration-100"
-              >
-                <ColorSwatches
-                  colors={CORE_PALETTE}
-                  selectedColor={element.color || '#0f172a'}
-                  onSelect={(c) => {
-                    updateStyleProp({ color: c });
-                    setShowColorPicker(false);
-                  }}
-                  size="md"
-                  ariaLabelSuffix=" text color"
-                />
-              </div>
-            )}
-          </div>
+          <ItemPalettePopover
+            isOpen={showColorPicker}
+            onToggle={() => {
+              setShowColorPicker(!showColorPicker);
+              setShowFontMenu(false);
+              setShowSizeMenu(false);
+            }}
+            colors={CORE_PALETTE}
+            selectedColor={element.color || '#0f172a'}
+            onSelectColor={(c) => {
+              updateStyleProp({ color: c });
+              setShowColorPicker(false);
+            }}
+            ariaLabel="Change text color"
+            title="Change text color"
+            triggerVariant="palette-with-dot"
+            dotColor={effectiveTextColor}
+            popoverPosition="top"
+            ariaLabelSuffix=" text color"
+          />
 
           <div className="h-4 w-[1px] bg-slate-200 dark:bg-slate-800 mx-0.5" />
 
@@ -532,7 +507,7 @@ export const TextItem: React.FC<TextItemProps> = ({
             aria-label="Toggle bold"
             aria-pressed={isBold}
             onClick={handleToggleBold}
-            title={isBold ? "Bold (Active)" : "Bold (Ctrl+B)"}
+            title={isBold ? 'Bold (Active)' : 'Bold (Ctrl+B)'}
             className={`p-1.5 min-w-[32px] min-h-[32px] rounded-lg transition-colors cursor-pointer ${
               isBold
                 ? 'bg-blue-100 dark:bg-blue-950 text-blue-600 dark:text-blue-400 font-bold'
@@ -548,7 +523,7 @@ export const TextItem: React.FC<TextItemProps> = ({
             aria-label="Toggle italic"
             aria-pressed={isItalic}
             onClick={handleToggleItalic}
-            title={isItalic ? "Italic (Active)" : "Italic (Ctrl+I)"}
+            title={isItalic ? 'Italic (Active)' : 'Italic (Ctrl+I)'}
             className={`p-1.5 min-w-[32px] min-h-[32px] rounded-lg transition-colors cursor-pointer ${
               isItalic
                 ? 'bg-blue-100 dark:bg-blue-950 text-blue-600 dark:text-blue-400'
@@ -564,7 +539,7 @@ export const TextItem: React.FC<TextItemProps> = ({
             aria-label="Toggle underline"
             aria-pressed={isUnderline}
             onClick={handleToggleUnderline}
-            title={isUnderline ? "Underline (Active)" : "Underline (Ctrl+U)"}
+            title={isUnderline ? 'Underline (Active)' : 'Underline (Ctrl+U)'}
             className={`p-1.5 min-w-[32px] min-h-[32px] rounded-lg transition-colors cursor-pointer ${
               isUnderline
                 ? 'bg-blue-100 dark:bg-blue-950 text-blue-600 dark:text-blue-400'
@@ -592,34 +567,7 @@ export const TextItem: React.FC<TextItemProps> = ({
           </button>
 
           <div className="h-4 w-[1px] bg-slate-200 dark:bg-slate-800 mx-0.5" />
-
-          {/* Duplicate Text */}
-          {onDuplicate && (
-            <button
-              type="button"
-              aria-label="Duplicate text"
-              onClick={() => onDuplicate(element)}
-              title="Duplicate text"
-              className="p-1.5 min-w-[32px] min-h-[32px] text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg cursor-pointer transition-colors"
-            >
-              <Copy className="w-3.5 h-3.5" />
-            </button>
-          )}
-
-          {/* Delete Text */}
-          <button
-            type="button"
-            aria-label="Delete text"
-            onClick={(e) => {
-              e.stopPropagation();
-              onDelete(element.id);
-            }}
-            title="Delete text"
-            className="p-1.5 min-w-[32px] min-h-[32px] text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-lg cursor-pointer transition-colors"
-          >
-            <Trash2 className="w-3.5 h-3.5" />
-          </button>
-        </div>
+        </ItemToolbar>
       )}
 
       {/* Drag & Author Bar (visible on hover when controls aren't open) */}

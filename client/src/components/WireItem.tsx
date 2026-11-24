@@ -11,12 +11,12 @@ import {
   Minus,
   ArrowRight,
   ArrowLeftRight,
-  Trash2,
   Sliders,
   Type,
 } from 'lucide-react';
 import { WIRE_PALETTE } from '../constants/palettes';
-import { ColorSwatches } from './ui/ColorSwatches';
+import { ItemPalettePopover } from './ui/ItemPalettePopover';
+import { ItemToolbar } from './ui/ItemToolbar';
 
 export const WIRE_COLORS = WIRE_PALETTE.map((c) => c.hex);
 
@@ -372,210 +372,174 @@ export const WireOverlay: React.FC<WireOverlayProps> = ({
 
       {/* Floating Action Menu when Wire is Selected and unlocked */}
       {isSelected && !isLocked && (
-        <div
-          className="absolute -translate-x-1/2 -top-14 pointer-events-auto select-none"
-          onMouseDown={(e) => e.stopPropagation()}
-          onPointerDown={(e) => e.stopPropagation()}
-          onClick={(e) => e.stopPropagation()}
+        <ItemToolbar
+          className="-top-14 p-1 gap-1 pointer-events-auto"
+          showHoverBridge={false}
+          onDelete={canWrite ? () => onDelete(wire.id) : undefined}
+          deleteTitle="Delete Wire"
+          deleteAriaLabel="Delete Wire"
         >
-          <div className="flex items-center gap-1 p-1 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md rounded-xl shadow-2xl border border-slate-200/90 dark:border-slate-800 animate-in fade-in zoom-in-95 duration-150 w-fit mx-auto">
-            {/* Line vs Curve Toggle */}
+          {/* Line vs Curve Toggle */}
+          <button
+            type="button"
+            onClick={handleToggleWireType}
+            title={`Switch to ${wire.wireType === 'curve' ? 'Straight Line' : 'Smooth Curve'}`}
+            className="p-1.5 rounded-lg text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer flex items-center gap-1 text-xs font-medium"
+          >
+            {wire.wireType === 'curve' ? (
+              <>
+                <Spline className="w-3.5 h-3.5 text-blue-500" />
+                <span>Curve</span>
+              </>
+            ) : (
+              <>
+                <Minus className="w-3.5 h-3.5 text-blue-500" />
+                <span>Line</span>
+              </>
+            )}
+          </button>
+
+          <div className="h-4 w-px bg-slate-200 dark:bg-slate-700 mx-0.5" />
+
+          {/* Arrow Style Cycle */}
+          <button
+            type="button"
+            onClick={handleCycleArrowStyle}
+            title={`Arrow: ${wire.arrowStart && wire.arrowEnd ? 'Both Ends' : wire.arrowEnd ? 'Target Arrow' : 'No Arrow'}`}
+            className="p-1.5 rounded-lg text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+          >
+            {wire.arrowStart && wire.arrowEnd ? (
+              <ArrowLeftRight className="w-3.5 h-3.5 text-emerald-500" />
+            ) : wire.arrowEnd !== false ? (
+              <ArrowRight className="w-3.5 h-3.5 text-blue-500" />
+            ) : (
+              <Minus className="w-3.5 h-3.5 text-slate-400" />
+            )}
+          </button>
+
+          {/* Color Swatch Trigger */}
+          <ItemPalettePopover
+            isOpen={showColorPicker}
+            onToggle={(e) => {
+              e.stopPropagation();
+              setShowColorPicker((prev) => !prev);
+              setShowStyleMenu(false);
+            }}
+            triggerId={`wire-color-btn-${wire.id}`}
+            colors={WIRE_PALETTE}
+            selectedColor={wire.color || '#3b82f6'}
+            onSelectColor={handleColorChange}
+            ariaLabel="Change wire color"
+            title="Change Wire Color"
+            swatchSize="sm"
+            idPrefix="wire-color-swatch-"
+            ariaLabelSuffix=" wire color"
+            popoverPosition="top"
+            triggerVariant="dot"
+            dotColor={effectiveColor}
+            stopMouseDown
+          />
+
+          {/* Stroke Width & Style Trigger */}
+          <div className="relative">
             <button
               type="button"
-              onClick={handleToggleWireType}
-              title={`Switch to ${wire.wireType === 'curve' ? 'Straight Line' : 'Smooth Curve'}`}
-              className="p-1.5 rounded-lg text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer flex items-center gap-1 text-xs font-medium"
-            >
-              {wire.wireType === 'curve' ? (
-                <>
-                  <Spline className="w-3.5 h-3.5 text-blue-500" />
-                  <span>Curve</span>
-                </>
-              ) : (
-                <>
-                  <Minus className="w-3.5 h-3.5 text-blue-500" />
-                  <span>Line</span>
-                </>
-              )}
-            </button>
-
-            <div className="h-4 w-px bg-slate-200 dark:bg-slate-700 mx-0.5" />
-
-            {/* Arrow Style Cycle */}
-            <button
-              type="button"
-              onClick={handleCycleArrowStyle}
-              title={`Arrow: ${wire.arrowStart && wire.arrowEnd ? 'Both Ends' : wire.arrowEnd ? 'Target Arrow' : 'No Arrow'}`}
-              className="p-1.5 rounded-lg text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
-            >
-              {wire.arrowStart && wire.arrowEnd ? (
-                <ArrowLeftRight className="w-3.5 h-3.5 text-emerald-500" />
-              ) : wire.arrowEnd !== false ? (
-                <ArrowRight className="w-3.5 h-3.5 text-blue-500" />
-              ) : (
-                <Minus className="w-3.5 h-3.5 text-slate-400" />
-              )}
-            </button>
-
-            {/* Color Swatch Trigger */}
-            <div className="relative">
-              <button
-                type="button"
-                data-popover-trigger
-                id={`wire-color-btn-${wire.id}`}
-                aria-label="Change wire color"
-                aria-expanded={showColorPicker}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setShowColorPicker((prev) => !prev);
-                  setShowStyleMenu(false);
-                }}
-                title="Change Wire Color"
-                className="p-1.5 min-w-[32px] min-h-[32px] rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer flex items-center justify-center"
-              >
-                <div
-                  className="w-4 h-4 rounded-full border border-slate-300 dark:border-slate-600 shadow-xs"
-                  style={{ backgroundColor: effectiveColor }}
-                />
-              </button>
-
-              {/* Color Swatches Popover */}
-              {showColorPicker && (
-                <div
-                  onMouseDown={(e) => e.stopPropagation()}
-                  onPointerDown={(e) => e.stopPropagation()}
-                  onClick={(e) => e.stopPropagation()}
-                  className="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 p-2 bg-white dark:bg-slate-900 rounded-xl shadow-2xl border border-slate-200 dark:border-slate-800 z-50 animate-in fade-in zoom-in-95 duration-100"
-                >
-                  <ColorSwatches
-                    colors={WIRE_PALETTE}
-                    selectedColor={wire.color || '#3b82f6'}
-                    onSelect={handleColorChange}
-                    size="sm"
-                    idPrefix="wire-color-swatch-"
-                    ariaLabelSuffix=" wire color"
-                    stopMouseDown
-                  />
-                </div>
-              )}
-            </div>
-
-            {/* Stroke Width & Style Trigger */}
-            <div className="relative">
-              <button
-                type="button"
-                data-popover-trigger
-                aria-label="Stroke width and style"
-                aria-expanded={showStyleMenu}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setShowStyleMenu((prev) => !prev);
-                  setShowColorPicker(false);
-                }}
-                title="Stroke Width & Style"
-                className="p-1.5 min-w-[32px] min-h-[32px] flex items-center justify-center rounded-lg text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
-              >
-                <Sliders className="w-3.5 h-3.5" />
-              </button>
-
-              {showStyleMenu && (
-                <div
-                  onMouseDown={(e) => e.stopPropagation()}
-                  onPointerDown={(e) => e.stopPropagation()}
-                  onClick={(e) => e.stopPropagation()}
-                  className="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 p-2.5 bg-white dark:bg-slate-900 rounded-xl shadow-2xl border border-slate-200 dark:border-slate-800 flex flex-col gap-2 min-w-[140px] z-50 text-xs animate-in fade-in zoom-in-95 duration-100"
-                >
-                  <div className="font-semibold text-slate-500 dark:text-slate-400 text-[10px] uppercase">
-                    Thickness
-                  </div>
-                  <div className="flex gap-1">
-                    {WIRE_WIDTHS.map((w) => (
-                      <button
-                        key={w.val}
-                        type="button"
-                        onClick={() => handleWidthChange(w.val)}
-                        className={`px-2 py-1 rounded text-xs flex-1 text-center font-medium cursor-pointer transition-colors ${
-                          (wire.strokeWidth || 3) === w.val
-                            ? 'bg-blue-500 text-white'
-                            : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700'
-                        }`}
-                      >
-                        {w.label}
-                      </button>
-                    ))}
-                  </div>
-
-                  <div className="font-semibold text-slate-500 dark:text-slate-400 text-[10px] uppercase mt-1">
-                    Style
-                  </div>
-                  <div className="flex gap-1">
-                    <button
-                      type="button"
-                      onClick={() => handleStyleChange('solid')}
-                      className={`px-2 py-1 rounded text-xs flex-1 text-center font-medium cursor-pointer transition-colors ${
-                        !wire.strokeStyle || wire.strokeStyle === 'solid'
-                          ? 'bg-blue-500 text-white'
-                          : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700'
-                      }`}
-                    >
-                      Solid
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleStyleChange('dashed')}
-                      className={`px-2 py-1 rounded text-xs flex-1 text-center font-medium cursor-pointer transition-colors ${
-                        wire.strokeStyle === 'dashed'
-                          ? 'bg-blue-500 text-white'
-                          : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700'
-                      }`}
-                    >
-                      Dash
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleStyleChange('dotted')}
-                      className={`px-2 py-1 rounded text-xs flex-1 text-center font-medium cursor-pointer transition-colors ${
-                        wire.strokeStyle === 'dotted'
-                          ? 'bg-blue-500 text-white'
-                          : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700'
-                      }`}
-                    >
-                      Dot
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* Label Add / Edit Trigger */}
-            <button
-              type="button"
+              data-popover-trigger
+              aria-label="Stroke width and style"
+              aria-expanded={showStyleMenu}
               onClick={(e) => {
                 e.stopPropagation();
-                setIsEditingLabel(true);
+                setShowStyleMenu((prev) => !prev);
+                setShowColorPicker(false);
               }}
-              title="Add / Edit Wire Label"
-              className="p-1.5 rounded-lg text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+              title="Stroke Width & Style"
+              className="p-1.5 min-w-[32px] min-h-[32px] flex items-center justify-center rounded-lg text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
             >
-              <Type className="w-3.5 h-3.5" />
+              <Sliders className="w-3.5 h-3.5" />
             </button>
 
-            {/* Delete Wire */}
-            {canWrite && (
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onDelete(wire.id);
-                }}
-                title="Delete Wire"
-                className="p-1.5 rounded-lg text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors cursor-pointer"
+            {showStyleMenu && (
+              <div
+                onMouseDown={(e) => e.stopPropagation()}
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={(e) => e.stopPropagation()}
+                className="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 p-2.5 bg-white dark:bg-slate-900 rounded-xl shadow-2xl border border-slate-200 dark:border-slate-800 flex flex-col gap-2 min-w-[140px] z-50 text-xs animate-in fade-in zoom-in-95 duration-100"
               >
-                <Trash2 className="w-3.5 h-3.5" />
-              </button>
+                <div className="font-semibold text-slate-500 dark:text-slate-400 text-[10px] uppercase">
+                  Thickness
+                </div>
+                <div className="flex gap-1">
+                  {WIRE_WIDTHS.map((w) => (
+                    <button
+                      key={w.val}
+                      type="button"
+                      onClick={() => handleWidthChange(w.val)}
+                      className={`px-2 py-1 rounded text-xs flex-1 text-center font-medium cursor-pointer transition-colors ${
+                        (wire.strokeWidth || 3) === w.val
+                          ? 'bg-blue-500 text-white'
+                          : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700'
+                      }`}
+                    >
+                      {w.label}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="font-semibold text-slate-500 dark:text-slate-400 text-[10px] uppercase mt-1">
+                  Style
+                </div>
+                <div className="flex gap-1">
+                  <button
+                    type="button"
+                    onClick={() => handleStyleChange('solid')}
+                    className={`px-2 py-1 rounded text-xs flex-1 text-center font-medium cursor-pointer transition-colors ${
+                      !wire.strokeStyle || wire.strokeStyle === 'solid'
+                        ? 'bg-blue-500 text-white'
+                        : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700'
+                    }`}
+                  >
+                    Solid
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleStyleChange('dashed')}
+                    className={`px-2 py-1 rounded text-xs flex-1 text-center font-medium cursor-pointer transition-colors ${
+                      wire.strokeStyle === 'dashed'
+                        ? 'bg-blue-500 text-white'
+                        : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700'
+                    }`}
+                  >
+                    Dash
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleStyleChange('dotted')}
+                    className={`px-2 py-1 rounded text-xs flex-1 text-center font-medium cursor-pointer transition-colors ${
+                      wire.strokeStyle === 'dotted'
+                        ? 'bg-blue-500 text-white'
+                        : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700'
+                    }`}
+                  >
+                    Dot
+                  </button>
+                </div>
+              </div>
             )}
           </div>
-        </div>
+
+          {/* Label Add / Edit Trigger */}
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setIsEditingLabel(true);
+            }}
+            title="Add / Edit Wire Label"
+            className="p-1.5 rounded-lg text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+          >
+            <Type className="w-3.5 h-3.5" />
+          </button>
+        </ItemToolbar>
       )}
     </div>
   );
