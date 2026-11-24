@@ -38,7 +38,8 @@ test('sidebar actions reuse existing controls instead of duplicating logic (#147
   assert.doesNotMatch(sidebar, /clickHeaderControl\('shortcuts-btn'\)/);
   assert.match(sidebar, /onSelectTool\(tool\)/);
   assert.match(sidebar, /disabled=\{needsWrite && !canWrite\}/);
-  assert.match(sidebar, /isVoiceConnected \? 'Leave voice' : 'Join voice'/);
+  assert.match(sidebar, /getVoiceConnectionMeta\(isVoiceConnected\)/);
+  assert.match(sidebar, /getVoiceMuteMeta\(isMuted\)/);
   assert.match(sidebar, /getThemeToggleMeta\(theme\)/);
 });
 
@@ -54,11 +55,12 @@ test('App mounts the sidebar with all grouped actions wired (#147)', () => {
     'onOpenShare=',
     'onOpenAi=',
     'onToggleAiChat=',
-    'onToggleVoice=',
+    'onToggleVoice={handleToggleVoice}',
     'onOpenShortcuts=',
   ]) {
     assert.ok(app.includes(prop), `Sidebar missing ${prop}`);
   }
+  assert.doesNotMatch(app, /onJoinVoice=|onLeaveVoice=/);
 
   assert.match(app, /board\?\.clientWidth \|\| window\.innerWidth/);
   assert.match(app, /board\?\.clientHeight \|\| window\.innerHeight/);
