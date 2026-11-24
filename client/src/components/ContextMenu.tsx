@@ -1,5 +1,6 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { shouldCloseContextMenuOnScroll } from '../utils/contextMenuDismiss';
 
 export type ContextMenuEntry =
   | { type: 'separator' }
@@ -82,16 +83,21 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({ x, y, items, onClose, 
       else nextIndex = currentIndex <= 0 ? menuItems.length - 1 : currentIndex - 1;
       menuItems[nextIndex].focus();
     };
-    const handleScroll = () => onClose();
+    const handleScroll = (event: Event) => {
+      if (shouldCloseContextMenuOnScroll(menuRef.current, event.target)) {
+        onClose();
+      }
+    };
+    const handleResize = () => onClose();
 
     window.addEventListener('pointerdown', handlePointerDown, true);
     window.addEventListener('keydown', handleKeyDown);
-    window.addEventListener('resize', handleScroll);
+    window.addEventListener('resize', handleResize);
     window.addEventListener('scroll', handleScroll, true);
     return () => {
       window.removeEventListener('pointerdown', handlePointerDown, true);
       window.removeEventListener('keydown', handleKeyDown);
-      window.removeEventListener('resize', handleScroll);
+      window.removeEventListener('resize', handleResize);
       window.removeEventListener('scroll', handleScroll, true);
     };
   }, [onClose]);
