@@ -672,6 +672,31 @@ const pendingElementSaves = new Map<string, { timer: NodeJS.Timeout; elements: R
 // Rooms being deleted must reject late saves from sockets that have not yet
 // been detached, otherwise deleted rooms can be recreated in room_elements.
 const roomsBeingDeleted = new Set<string>();
+
+function cancelPendingElementSave(cleanRoomId: string): void {
+  const existingTimer = pendingElementSaves.get(cleanRoomId);
+  if (existingTimer) {
+    clearTimeout(existingTimer.timer);
+    pendingElementSaves.delete(cleanRoomId);
+  }
+}
+
+/** Guard used at both scheduling and persistence time (#72). */
+export function canPersistRoomElements(roomId: string): boolean {
+  const cleanRoomId = sanitizeString(roomId);
+  return Boolean(cleanRoomId) && !roomsBeingDeleted.has(cleanRoomId);
+}
+
+export function isRoomBeingDeleted(roomId: string): boolean {
+  const cleanRoomId = sanitizeString(roomId);
+  return Boolean(cleanRoomId) && roomsBeingDeleted.has(cleanRoomId);
+}
+
+/** Test/introspection helper for pending debounce state. */
+export function hasPendingElementSave(roomId: string): boolean {
+  return pendingElementSaves.has(sanitizeString(roomId));
+}
+
 // Serialize writes per room so an older snapshot cannot delete newer elements.
 const roomSaveChains = new Map<string, Promise<void>>();
 // Last successfully persisted snapshot per room. Element objects are replaced
@@ -692,6 +717,9 @@ function rememberPersistedElements(roomId: string, snapshot: Record<string, any>
 }
 
 async function persistRoomElements(cleanRoomId: string, elements: Record<string, any>) {
+  // Re-check inside the write itself: a debounce scheduled before deletion may
+  // fire after the room has been marked as deleting (#72).
+  if (!canPersistRoomElements(cleanRoomId)) return;
   try {
     // Snapshot before touching the database: the live room map can mutate while
     // the write is in flight, and the cache must only record what this write
@@ -777,11 +805,21 @@ export function markRoomBeingDeleted(roomId: string): void {
   const cleanRoomId = sanitizeString(roomId);
   if (!cleanRoomId) return;
   roomsBeingDeleted.add(cleanRoomId);
-  const existingTimer = pendingElementSaves.get(cleanRoomId);
-  if (existingTimer) {
-    clearTimeout(existingTimer.timer);
-    pendingElementSaves.delete(cleanRoomId);
-  }
+  cancelPendingElementSave(cleanRoomId);
+}
+
+/**
+ * Release the deletion guard only after callers have detached sockets and
+ * removed the in-memory room. Any debounce scheduled in the gap is cancelled
+ * here too (#72).
+ */
+export function finalizeRoomDeletion(roomId: string): void {
+  const cleanRoomId = sanitizeString(roomId);
+  if (!cleanRoomId) return;
+  cancelPendingElementSave(cleanRoomId);
+  roomSaveChains.delete(cleanRoomId);
+  persistedElementsCache.delete(cleanRoomId);
+  roomsBeingDeleted.delete(cleanRoomId);
 }
 
 export async function saveRoomElements(roomId: string, elements: Record<string, any>): Promise<void> {
@@ -806,7 +844,7 @@ export async function saveRoomElements(roomId: string, elements: Record<string, 
 }
 
 export function saveRoomElementsDebounced(roomId: string, elements: Record<string, any>, delayMs = 1000) {
-  if (roomsBeingDeleted.has(sanitizeString(roomId))) return;
+  if (!canPersistRoomElements(roomId)) return;
   const existing = pendingElementSaves.get(roomId);
   if (existing) {
     clearTimeout(existing.timer);
@@ -865,8 +903,11 @@ export async function deleteRoom(
     await users.updateMany({}, { $pull: { createdRooms: cleanRoomId } });
 
     return true;
-  } finally {
+  } catch (err) {
+    // The deletion did not complete; let normal saves resume. On success the
+    // caller must call finalizeRoomDeletion after socket cleanup (#72).
     roomsBeingDeleted.delete(cleanRoomId);
+    throw err;
   }
 }
 
