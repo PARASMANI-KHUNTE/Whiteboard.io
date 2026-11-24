@@ -62,8 +62,8 @@ import {
   distanceToSegment,
   segmentDistance,
   segmentIntersectsRect,
-  simplifyStrokePoints,
 } from '../utils/strokeSimplification';
+import { finalizeStrokeForCommit } from '../utils/strokeCommit';
 
 interface CanvasProps {
   currentTool: ToolType;
@@ -226,6 +226,9 @@ export const Canvas: React.FC<CanvasProps> = ({
 
   const [isDrawing, setIsDrawing] = useState(false);
   const [currentStroke, setCurrentStroke] = useState<DrawingStroke | null>(null);
+  // Synchronous mirror of currentStroke so an interrupting gesture can commit
+  // the latest points even if React has not re-rendered yet.
+  const strokeInProgressRef = useRef<DrawingStroke | null>(null);
   const [eraserCursor, setEraserCursor] = useState<{ x: number; y: number } | null>(null);
   const lastEraserPointRef = useRef<Point | null>(null);
   const elementsRef = useRef<Record<string, CanvasElement>>(elements);
@@ -1439,6 +1442,21 @@ export const Canvas: React.FC<CanvasProps> = ({
     };
   };
 
+  // Single exit path for an active stroke. Both pointer-up and gesture
+  // interruption (pinch) use it, so a live stroke is always persisted and
+  // removed from collaborators' live state through element-create.
+  const finishStroke = useCallback(() => {
+    const stroke = strokeInProgressRef.current;
+    strokeInProgressRef.current = null;
+
+    const committed = finalizeStrokeForCommit(stroke, zoom);
+    if (committed) onElementCreate(committed);
+
+    setIsDrawing(false);
+    setCurrentStroke(null);
+    lastEraserPointRef.current = null;
+  }, [onElementCreate, zoom]);
+
   const handlePointerDown = (e: React.MouseEvent | React.TouchEvent) => {
     cancelNavAnimation();
     // Multi-touch: If 2 or more fingers touch the screen, immediately enter pinch-to-zoom & two-finger pan
@@ -1446,10 +1464,9 @@ export const Canvas: React.FC<CanvasProps> = ({
       if ('preventDefault' in e && typeof (e as any).preventDefault === 'function') {
         e.preventDefault();
       }
-      // Cancel any active drawing, eraser or marquee so no accidental strokes are made
-      setIsDrawing(false);
-      setCurrentStroke(null);
-      lastEraserPointRef.current = null;
+      // Commit an in-progress stroke instead of dropping it: the final element
+      // clears every client's live-stroke representation, so no ghost remains.
+      finishStroke();
       isMarqueeRef.current = false;
       setMarqueeRect(null);
 
@@ -1720,6 +1737,7 @@ export const Canvas: React.FC<CanvasProps> = ({
         createdAt: Date.now(),
       };
 
+      strokeInProgressRef.current = newStroke;
       setCurrentStroke(newStroke);
       onStrokeLiveStart(strokeId, coords, effectiveColor, currentSize, currentTool === 'highlighter');
     }
@@ -1836,13 +1854,14 @@ export const Canvas: React.FC<CanvasProps> = ({
       return;
     }
 
-    if (!currentStroke) return;
+    const stroke = strokeInProgressRef.current;
+    if (!stroke) return;
 
     // Skip points the user cannot distinguish at the current zoom level.
     // This cuts array copies, React renders, live-stroke traffic and final
     // persisted stroke size.
     const minPointDistance = 1.25 / zoom;
-    const points = currentStroke.points;
+    const points = stroke.points;
     const lastPoint = points[points.length - 1];
     if (lastPoint) {
       const dx = coords.x - lastPoint.x;
@@ -1850,12 +1869,11 @@ export const Canvas: React.FC<CanvasProps> = ({
       if (dx * dx + dy * dy < minPointDistance * minPointDistance) return;
     }
 
-    setCurrentStroke({
-      ...currentStroke,
-      points: [...points, coords],
-    });
+    const updatedStroke = { ...stroke, points: [...points, coords] };
+    strokeInProgressRef.current = updatedStroke;
+    setCurrentStroke(updatedStroke);
 
-    onStrokeLivePoint(currentStroke.id, coords);
+    onStrokeLivePoint(stroke.id, coords);
   };
 
   const handlePointerUp = (e?: React.MouseEvent | React.TouchEvent) => {
@@ -1961,19 +1979,7 @@ export const Canvas: React.FC<CanvasProps> = ({
       return;
     }
 
-    if (isDrawing && currentStroke && currentStroke.points.length > 0) {
-      // Ramer–Douglas–Peucker simplification: discard points that do not change
-      // the visible line before persisting/broadcasting the stroke.
-      const simplified = simplifyStrokePoints(currentStroke.points, 0.75 / zoom);
-      onElementCreate(
-        simplified.length === currentStroke.points.length
-          ? currentStroke
-          : { ...currentStroke, points: simplified }
-      );
-    }
-    setIsDrawing(false);
-    setCurrentStroke(null);
-    lastEraserPointRef.current = null;
+    finishStroke();
   };
 
   // Partition elements once per update instead of running five separate
