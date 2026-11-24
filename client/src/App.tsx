@@ -227,6 +227,12 @@ export default function App() {
   const aiBoardKeyRef = useRef(aiBoardKey);
   aiBoardKeyRef.current = aiBoardKey;
 
+  // Async AI results must be checked against refs, not a callback closure: a
+  // stale onApplyTurn from the previous room would otherwise pass its own old
+  // `aiSession` check and write into the new room (#68).
+  const aiSessionRef = useRef<AiSessionState | null>(aiSession);
+  aiSessionRef.current = aiSession;
+
   const applyAiSession = useCallback((next: AiSessionState | null) => {
     setAiSession(next);
     const key = aiBoardKeyRef.current;
@@ -627,7 +633,14 @@ export default function App() {
   );
 
   const handleAiGenerated = useCallback(
-    async (payload: AiDiagramPayload, options: { origin: { x: number; y: number }; replaceBoard: boolean }) => {
+    async (
+      payload: AiDiagramPayload,
+      options: { origin: { x: number; y: number }; replaceBoard: boolean },
+      context: { boardKey: string }
+    ) => {
+      // The modal may have been opened in a different room. Never mutate the
+      // room the user switched to while generation was in flight (#68).
+      if (context.boardKey !== aiBoardKeyRef.current) return;
       if (!canWrite) {
         addNotification('You do not have permission to edit this board', 'warning');
         return;
@@ -644,6 +657,9 @@ export default function App() {
         // authorization: a participant may have joined while AI was in flight.
         const previous = Object.values(elementsRef.current) as CanvasElement[];
         const cleared = await emitClearBoardDirect();
+        // A room switch can happen while the host-authorization round trip is
+        // pending. Bail before applying elements/session to the new board.
+        if (context.boardKey !== aiBoardKeyRef.current) return;
         if (cleared) {
           recordBoardClearHistory(previous);
         } else {
@@ -705,14 +721,20 @@ export default function App() {
   );
 
   const handleAiApplyTurn = useCallback(
-    (payload: AiDiagramPayload, instruction: string) => {
+    (
+      payload: AiDiagramPayload,
+      instruction: string,
+      context: { boardKey: string; sessionId: string }
+    ) => {
+      if (context.boardKey !== aiBoardKeyRef.current) return;
+      const currentSession = aiSessionRef.current;
+      if (!currentSession || currentSession.sessionId !== context.sessionId) return;
       if (!canWrite) {
         addNotification('You do not have permission to edit this board', 'warning');
         return;
       }
-      if (!aiSession) return;
 
-      applyAiElements(aiSession.sessionId, payload.elements);
+      applyAiElements(currentSession.sessionId, payload.elements);
 
       const now = Date.now();
       const userMessage = {
@@ -725,7 +747,7 @@ export default function App() {
         id: `ai-msg-${now}-a`,
         role: 'assistant' as const,
         content:
-          payload.summary && payload.summary !== aiSession.summary
+          payload.summary && payload.summary !== currentSession.summary
             ? payload.summary
             : 'Done — the canvas is updated.',
         changes: payload.changes,
@@ -735,7 +757,7 @@ export default function App() {
       };
 
       applyAiSession({
-        ...aiSession,
+        ...currentSession,
         type: payload.type,
         detail: payload.detail,
         direction: payload.direction,
@@ -743,7 +765,7 @@ export default function App() {
         title: payload.title,
         summary: payload.summary,
         suggestions: payload.suggestions,
-        messages: [...aiSession.messages, userMessage, assistantMessage],
+        messages: [...currentSession.messages, userMessage, assistantMessage],
       });
 
       addNotification(
@@ -751,7 +773,7 @@ export default function App() {
         'success'
       );
     },
-    [aiSession, canWrite, addNotification, applyAiElements, applyAiSession]
+    [canWrite, addNotification, applyAiElements, applyAiSession]
   );
 
   // Reset undo history and restore the AI chat that belongs to this board.
@@ -1609,6 +1631,7 @@ export default function App() {
         isOpen={showAiModal}
         onClose={() => setShowAiModal(false)}
         onGenerated={handleAiGenerated}
+        boardKey={aiBoardKey}
         canvasCenter={
           getWorldCenterRef.current
             ? getWorldCenterRef.current()
@@ -1624,6 +1647,7 @@ export default function App() {
       {/* Docked follow-up chat for the current session (null session shows an empty state) */}
       <AiChatPanel
         isOpen={isAiChatOpen}
+        boardKey={aiBoardKey}
         session={aiSession}
         onClose={() => setIsAiChatOpen(false)}
         onNewDiagram={() => setShowAiModal(true)}

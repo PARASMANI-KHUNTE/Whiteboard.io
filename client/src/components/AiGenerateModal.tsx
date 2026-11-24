@@ -30,8 +30,11 @@ interface AiGenerateModalProps {
   onClose: () => void;
   onGenerated: (
     payload: AiDiagramPayload,
-    options: { origin: { x: number; y: number }; replaceBoard: boolean }
+    options: { origin: { x: number; y: number }; replaceBoard: boolean },
+    context: { boardKey: string }
   ) => void;
+  /** Room code (or "solo") captured when generation starts. */
+  boardKey: string;
   canvasCenter: { x: number; y: number };
   authToken?: string | null;
   /** Only the host (or a sole participant) may replace the whole board. */
@@ -104,6 +107,7 @@ export const AiGenerateModal: React.FC<AiGenerateModalProps> = ({
   isOpen,
   onClose,
   onGenerated,
+  boardKey,
   canvasCenter,
   authToken,
   canClearBoard = true,
@@ -122,6 +126,8 @@ export const AiGenerateModal: React.FC<AiGenerateModalProps> = ({
   const [engineProvider, setEngineProvider] = useState<AiEngineConfig['provider'] | null>(null);
 
   const abortControllerRef = useRef<AbortController | null>(null);
+
+  useEffect(() => () => abortControllerRef.current?.abort(), [boardKey]);
 
   const handleCancel = () => {
     if (abortControllerRef.current) {
@@ -206,6 +212,11 @@ export const AiGenerateModal: React.FC<AiGenerateModalProps> = ({
     setIsReady(false);
     setError(null);
 
+    // Snapshot the originating board before awaiting; props may change if the
+    // user switches rooms while the request is in flight (#68).
+    const requestBoardKey = boardKey;
+    const requestCanvasCenter = canvasCenter;
+    const requestReplaceBoard = replaceBoard && canClearBoard;
     const controller = new AbortController();
     abortControllerRef.current = controller;
 
@@ -215,7 +226,7 @@ export const AiGenerateModal: React.FC<AiGenerateModalProps> = ({
         type: selectedType,
         detail,
         direction,
-        canvasCenter,
+        canvasCenter: requestCanvasCenter,
         authToken,
         signal: controller.signal,
       });
@@ -226,7 +237,11 @@ export const AiGenerateModal: React.FC<AiGenerateModalProps> = ({
 
       if (controller.signal.aborted) return;
 
-      onGenerated(payload, { origin: canvasCenter, replaceBoard: replaceBoard && canClearBoard });
+      onGenerated(
+        payload,
+        { origin: requestCanvasCenter, replaceBoard: requestReplaceBoard },
+        { boardKey: requestBoardKey }
+      );
       onClose();
       setPrompt('');
       setIsReady(false);
