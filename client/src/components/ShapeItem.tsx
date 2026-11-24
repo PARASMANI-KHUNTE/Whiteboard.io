@@ -13,6 +13,7 @@ import {
   Type,
 } from 'lucide-react';
 import { getAdaptiveDisplayColor } from '../utils/themeColors';
+import { computeRotatedResize, getRotatedResizeCursor } from '../utils/shapeResize';
 
 interface ShapeItemProps {
   element: ShapeElement;
@@ -263,40 +264,21 @@ export const ShapeItem: React.FC<ShapeItemProps> = ({
       const deltaX = (moveEvent.clientX - startX) / (zoom || 1);
       const deltaY = (moveEvent.clientY - startY) / (zoom || 1);
 
-      let newWidth = initialSize.width;
-      let newHeight = initialSize.height;
-      let newX = initialPos.x;
-      let newY = initialPos.y;
+      const resized = computeRotatedResize({
+        corner,
+        initialPos,
+        initialSize,
+        rotationDeg: rotation,
+        deltaX,
+        deltaY,
+        minWidth: 40,
+        minHeight: 40,
+      });
 
-      if (corner === 'se') {
-        newWidth = Math.max(40, initialSize.width + deltaX);
-        newHeight = Math.max(40, initialSize.height + deltaY);
-      } else if (corner === 'ne') {
-        newWidth = Math.max(40, initialSize.width + deltaX);
-        const tentativeHeight = initialSize.height - deltaY;
-        if (tentativeHeight >= 40) {
-          newHeight = tentativeHeight;
-          newY = initialPos.y + deltaY;
-        }
-      } else if (corner === 'sw') {
-        const tentativeWidth = initialSize.width - deltaX;
-        if (tentativeWidth >= 40) {
-          newWidth = tentativeWidth;
-          newX = initialPos.x + deltaX;
-        }
-        newHeight = Math.max(40, initialSize.height + deltaY);
-      } else if (corner === 'nw') {
-        const tentativeWidth = initialSize.width - deltaX;
-        const tentativeHeight = initialSize.height - deltaY;
-        if (tentativeWidth >= 40) {
-          newWidth = tentativeWidth;
-          newX = initialPos.x + deltaX;
-        }
-        if (tentativeHeight >= 40) {
-          newHeight = tentativeHeight;
-          newY = initialPos.y + deltaY;
-        }
-      }
+      const newWidth = Math.round(resized.width);
+      const newHeight = Math.round(resized.height);
+      const newX = Math.round(resized.x);
+      const newY = Math.round(resized.y);
 
       currentPosRef.current = { x: newX, y: newY };
       currentSizeRef.current = { width: newWidth, height: newHeight };
@@ -1053,25 +1035,29 @@ export const ShapeItem: React.FC<ShapeItemProps> = ({
           <div
             onMouseDown={(e) => handleMouseDownResize(e, 'nw')}
             title="Resize shape"
-            className="absolute -top-1.5 -left-1.5 w-3.5 h-3.5 bg-white dark:bg-slate-800 border-2 border-blue-500 rounded-full shadow-sm cursor-nwse-resize z-30 hover:scale-125 transition-transform"
+            style={{ cursor: getRotatedResizeCursor('nw', rotation) }}
+            className="absolute -top-1.5 -left-1.5 w-3.5 h-3.5 bg-white dark:bg-slate-800 border-2 border-blue-500 rounded-full shadow-sm z-30 hover:scale-125 transition-transform"
           />
           {/* NE - Top Right */}
           <div
             onMouseDown={(e) => handleMouseDownResize(e, 'ne')}
             title="Resize shape"
-            className="absolute -top-1.5 -right-1.5 w-3.5 h-3.5 bg-white dark:bg-slate-800 border-2 border-blue-500 rounded-full shadow-sm cursor-nesw-resize z-30 hover:scale-125 transition-transform"
+            style={{ cursor: getRotatedResizeCursor('ne', rotation) }}
+            className="absolute -top-1.5 -right-1.5 w-3.5 h-3.5 bg-white dark:bg-slate-800 border-2 border-blue-500 rounded-full shadow-sm z-30 hover:scale-125 transition-transform"
           />
           {/* SW - Bottom Left */}
           <div
             onMouseDown={(e) => handleMouseDownResize(e, 'sw')}
             title="Resize shape"
-            className="absolute -bottom-1.5 -left-1.5 w-3.5 h-3.5 bg-white dark:bg-slate-800 border-2 border-blue-500 rounded-full shadow-sm cursor-nesw-resize z-30 hover:scale-125 transition-transform"
+            style={{ cursor: getRotatedResizeCursor('sw', rotation) }}
+            className="absolute -bottom-1.5 -left-1.5 w-3.5 h-3.5 bg-white dark:bg-slate-800 border-2 border-blue-500 rounded-full shadow-sm z-30 hover:scale-125 transition-transform"
           />
           {/* SE - Bottom Right */}
           <div
             onMouseDown={(e) => handleMouseDownResize(e, 'se')}
             title="Resize shape"
-            className="absolute -bottom-1.5 -right-1.5 w-3.5 h-3.5 bg-white dark:bg-slate-800 border-2 border-blue-500 rounded-full shadow-sm cursor-nwse-resize z-30 hover:scale-125 transition-transform"
+            style={{ cursor: getRotatedResizeCursor('se', rotation) }}
+            className="absolute -bottom-1.5 -right-1.5 w-3.5 h-3.5 bg-white dark:bg-slate-800 border-2 border-blue-500 rounded-full shadow-sm z-30 hover:scale-125 transition-transform"
           />
         </>
       )}
