@@ -39,6 +39,7 @@ import {
 } from "./roomPermissions";
 import { getOrCreateCached } from "./roomCreation";
 import { SlidingWindowRateLimiter } from "./joinRateLimiter";
+import { parseTrustProxy } from "./trustProxy";
 import {
   canUpdateElement,
   filterDeletableIds,
@@ -355,6 +356,16 @@ function getGoogleRedirectUri(req: express.Request): string {
 // In-memory rate limiter to protect against credential stuffing / brute-force.
 // Buckets are namespaced per endpoint so exhausting one limit cannot block others.
 const authRateLimitMap = new Map<string, { count: number; resetTime: number }>();
+const MAX_AUTH_RATE_LIMIT_KEYS = 10_000;
+
+/** Bound limiter keys so random tokens cannot turn the map into a memory leak. */
+function rememberRateLimitBucket(key: string, record: { count: number; resetTime: number }): void {
+  if (!authRateLimitMap.has(key) && authRateLimitMap.size >= MAX_AUTH_RATE_LIMIT_KEYS) {
+    const oldest = authRateLimitMap.keys().next().value;
+    if (oldest !== undefined) authRateLimitMap.delete(oldest);
+  }
+  authRateLimitMap.set(key, record);
+}
 
 // Periodic pruning of expired rate-limit records
 setInterval(() => {
@@ -376,7 +387,7 @@ function authRateLimiter(maxRequests = 30, windowMs = 60000, bucket = "default")
     const record = authRateLimitMap.get(key);
 
     if (!record || now > record.resetTime) {
-      authRateLimitMap.set(key, { count: 1, resetTime: now + windowMs });
+      rememberRateLimitBucket(key, { count: 1, resetTime: now + windowMs });
       return next();
     }
 
@@ -395,14 +406,12 @@ function authRateLimiter(maxRequests = 30, windowMs = 60000, bucket = "default")
 async function startServer() {
   await connectDb();
   const app = express();
-  // X-Forwarded-For is only trusted when a deployment explicitly opts in.
-  // Otherwise any caller can forge it and bypass per-IP rate limits.
-  const trustProxy = (process.env.TRUST_PROXY || "").trim().toLowerCase();
-  if (trustProxy === "true") {
-    app.set("trust proxy", true);
-  } else if (/^\d+$/.test(trustProxy)) {
-    app.set("trust proxy", Number(trustProxy));
-  }
+  // Only a known proxy hop count may influence req.ip. Trusting `true` would
+  // let clients forge the leftmost X-Forwarded-For and mint unlimited buckets
+  // (#75); parseTrustProxy logs and ignores any unsupported value.
+  const trustProxy = parseTrustProxy(process.env.TRUST_PROXY);
+  if (trustProxy.warning) console.warn(`[Config] ${trustProxy.warning}`);
+  if (trustProxy.hops !== null) app.set("trust proxy", trustProxy.hops);
   const server = http.createServer(app);
   server.requestTimeout = positiveEnvInt("HTTP_REQUEST_TIMEOUT_MS", 60000);
   server.headersTimeout = Math.max(
