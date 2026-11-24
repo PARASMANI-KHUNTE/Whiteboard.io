@@ -1,11 +1,10 @@
 import React, { useState, useRef, useCallback } from 'react';
-import { createPortal } from 'react-dom';
 import { RemoteUser } from '../types';
 import { AuthUser } from '../hooks/useAuth';
 import { usePopoverDismiss } from '../hooks/usePopoverDismiss';
 import { AudioVisualizerBar } from './AudioVisualizerBar';
 import { AboutModal } from './AboutModal';
-import { useModalA11y } from '../hooks/useModalA11y';
+import { ModalShell } from './ui/ModalShell';
 import { USER_PROFILE_PALETTE } from '../constants/palettes';
 import { ColorSwatches } from './ui/ColorSwatches';
 import {
@@ -125,12 +124,6 @@ export const Header: React.FC<HeaderProps> = ({
   onAudioLevelChange,
 }) => {
   const [showProfileModal, setShowProfileModal] = useState(false);
-  const profileDialogRef = useRef<HTMLDivElement>(null);
-  useModalA11y({
-    isOpen: showProfileModal,
-    onClose: () => setShowProfileModal(false),
-    dialogRef: profileDialogRef,
-  });
   const [showAboutModal, setShowAboutModal] = useState(false);
   const [showMobileMenu, setShowMobileMenu] = useState(false);
   const [tempName, setTempName] = useState(currentUser.name);
@@ -544,22 +537,13 @@ export const Header: React.FC<HeaderProps> = ({
       </div>
 
       {/* User Profile & Account Settings Dialog mounted through React Portal (Centered, No viewport shift) */}
-      {showProfileModal &&
-        createPortal(
-          <div
-            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 dark:bg-black/70 backdrop-blur-sm animate-in fade-in duration-150"
-            onClick={(e) => {
-              if (e.target === e.currentTarget) setShowProfileModal(false);
-            }}
-          >
-            <div
-              ref={profileDialogRef}
-              role="dialog"
-              aria-modal="true"
-              aria-labelledby="profile-modal-title"
-              tabIndex={-1}
-              className="bg-white dark:bg-slate-900 rounded-2xl p-6 w-full max-w-sm border border-slate-200 dark:border-slate-800 shadow-2xl animate-in zoom-in-95 duration-150 text-slate-900 dark:text-slate-100"
-            >
+      <ModalShell
+        isOpen={showProfileModal}
+        onClose={() => setShowProfileModal(false)}
+        titleId="profile-modal-title"
+        overlayClassName="z-50 flex items-center justify-center p-4 bg-slate-900/50 dark:bg-black/70 backdrop-blur-sm animate-in fade-in duration-150"
+        panelClassName="bg-white dark:bg-slate-900 rounded-2xl p-6 w-full max-w-sm border border-slate-200 dark:border-slate-800 shadow-2xl animate-in zoom-in-95 duration-150 text-slate-900 dark:text-slate-100"
+      >
               <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800 mb-4">
                 <div className="flex items-center gap-2">
                   <div className="w-7 h-7 rounded-lg bg-blue-600 text-white flex items-center justify-center text-xs font-bold">
@@ -722,10 +706,7 @@ export const Header: React.FC<HeaderProps> = ({
                   </button>
                 </div>
               </div>
-            </div>
-          </div>,
-          document.body
-        )}
+      </ModalShell>
 
       {/* About & Alternatives Comparison Modal */}
       <AboutModal

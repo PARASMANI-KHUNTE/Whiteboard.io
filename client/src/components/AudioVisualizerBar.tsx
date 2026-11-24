@@ -10,7 +10,7 @@ import {
   AlertCircle,
   Headphones,
 } from 'lucide-react';
-import { useModalA11y } from '../hooks/useModalA11y';
+import { ModalShell } from './ui/ModalShell';
 
 interface AudioVisualizerBarProps {
   roomId?: string | null;
@@ -60,16 +60,10 @@ export const AudioVisualizerBar: React.FC<AudioVisualizerBarProps> = ({
   const volumePopoverRef = useRef<HTMLDivElement | null>(null);
   const [showVolumeSlider, setShowVolumeSlider] = useState(false);
   const [showErrorModal, setShowErrorModal] = useState(false);
-  const voiceErrorDialogRef = useRef<HTMLDivElement>(null);
   const closeVoiceErrorModal = () => {
     setShowErrorModal(false);
     onClearError();
   };
-  useModalA11y({
-    isOpen: showErrorModal,
-    onClose: closeVoiceErrorModal,
-    dialogRef: voiceErrorDialogRef,
-  });
 
   // If an error occurs, show error details
   useEffect(() => {
@@ -365,84 +359,80 @@ export const AudioVisualizerBar: React.FC<AudioVisualizerBarProps> = ({
       </div>
 
       {/* Permission / Iframe Error Diagnostic Modal */}
-      {showErrorModal && (
-        <div
-          id="voice-troubleshoot-modal"
-          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 dark:bg-black/60 backdrop-blur-xs p-4"
-        >
-          <div
-            ref={voiceErrorDialogRef}
-            role="alertdialog"
-            aria-modal="true"
-            aria-labelledby="voice-error-title"
-            aria-describedby="voice-error-description"
-            tabIndex={-1}
-            className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl max-w-md w-full p-6 text-slate-800 dark:text-slate-200 animate-in fade-in zoom-in-95 duration-200"
-          >
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-rose-50 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400 flex items-center justify-center">
-                <AlertCircle className="w-5 h-5" />
-              </div>
-              <div>
-                <h3 id="voice-error-title" className="text-base font-bold text-slate-900 dark:text-white">Voice Chat Setup</h3>
-                <p className="text-xs text-slate-500 dark:text-slate-400">Microphone permission notice</p>
-              </div>
-            </div>
-
-            <div id="voice-error-description" className="mt-4 p-3.5 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200/80 dark:border-slate-700 text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
-              {isIframeRestricted ? (
-                <>
-                  <p className="font-semibold text-slate-800 dark:text-slate-100 mb-1">
-                    Running inside an embedded preview iframe:
-                  </p>
-                  <p>
-                    Browsers often restrict microphone hardware access inside preview frames for security.
-                    To use voice chat with your live microphone, open the whiteboard in its own browser tab!
-                  </p>
-                </>
-              ) : (
-                <p>{error || 'Microphone access is not available in current browser settings.'}</p>
-              )}
-            </div>
-
-            <div className="mt-6 flex flex-col sm:flex-row items-center gap-2.5">
-              <button
-                type="button"
-                id="voice-open-new-tab-btn"
-                onClick={() => {
-                  onOpenInNewTab();
-                  closeVoiceErrorModal();
-                }}
-                className="w-full sm:w-auto flex-1 flex items-center justify-center gap-1.5 px-4 py-2.5 bg-slate-900 dark:bg-slate-700 hover:bg-slate-800 dark:hover:bg-slate-600 text-white rounded-xl text-xs font-semibold transition-colors cursor-pointer shadow-sm"
-              >
-                <ExternalLink className="w-3.5 h-3.5" />
-                <span>Open in New Tab (Enable Mic)</span>
-              </button>
-
-              <button
-                type="button"
-                id="voice-use-sim-btn"
-                onClick={() => {
-                  closeVoiceErrorModal();
-                  onToggleSimulated();
-                }}
-                className="w-full sm:w-auto px-4 py-2.5 bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-950 rounded-xl text-xs font-semibold transition-colors cursor-pointer flex items-center justify-center gap-1.5"
-              >
-                <Sparkles className="w-3.5 h-3.5 text-amber-500" />
-                <span>Test Simulation</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={closeVoiceErrorModal}
-                className="w-full sm:w-auto px-3 py-2.5 text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-100 text-xs font-medium cursor-pointer"
-              >
-                Close
-              </button>
-            </div>
+      <ModalShell
+        isOpen={showErrorModal}
+        onClose={closeVoiceErrorModal}
+        role="alertdialog"
+        titleId="voice-error-title"
+        describedById="voice-error-description"
+        closeOnBackdrop={false}
+        portal={false}
+        overlayId="voice-troubleshoot-modal"
+        overlayClassName="z-50 flex items-center justify-center bg-slate-900/40 dark:bg-black/60 backdrop-blur-xs p-4"
+        panelClassName="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl max-w-md w-full p-6 text-slate-800 dark:text-slate-200 animate-in fade-in zoom-in-95 duration-200"
+      >
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-rose-50 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400 flex items-center justify-center">
+            <AlertCircle className="w-5 h-5" />
+          </div>
+          <div>
+            <h3 id="voice-error-title" className="text-base font-bold text-slate-900 dark:text-white">Voice Chat Setup</h3>
+            <p className="text-xs text-slate-500 dark:text-slate-400">Microphone permission notice</p>
           </div>
         </div>
-      )}
+
+        <div id="voice-error-description" className="mt-4 p-3.5 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200/80 dark:border-slate-700 text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+          {isIframeRestricted ? (
+            <>
+              <p className="font-semibold text-slate-800 dark:text-slate-100 mb-1">
+                Running inside an embedded preview iframe:
+              </p>
+              <p>
+                Browsers often restrict microphone hardware access inside preview frames for security.
+                To use voice chat with your live microphone, open the whiteboard in its own browser tab!
+              </p>
+            </>
+          ) : (
+            <p>{error || 'Microphone access is not available in current browser settings.'}</p>
+          )}
+        </div>
+
+        <div className="mt-6 flex flex-col sm:flex-row items-center gap-2.5">
+          <button
+            type="button"
+            id="voice-open-new-tab-btn"
+            onClick={() => {
+              onOpenInNewTab();
+              closeVoiceErrorModal();
+            }}
+            className="w-full sm:w-auto flex-1 flex items-center justify-center gap-1.5 px-4 py-2.5 bg-slate-900 dark:bg-slate-700 hover:bg-slate-800 dark:hover:bg-slate-600 text-white rounded-xl text-xs font-semibold transition-colors cursor-pointer shadow-sm"
+          >
+            <ExternalLink className="w-3.5 h-3.5" />
+            <span>Open in New Tab (Enable Mic)</span>
+          </button>
+
+          <button
+            type="button"
+            id="voice-use-sim-btn"
+            onClick={() => {
+              closeVoiceErrorModal();
+              onToggleSimulated();
+            }}
+            className="w-full sm:w-auto px-4 py-2.5 bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-950 rounded-xl text-xs font-semibold transition-colors cursor-pointer flex items-center justify-center gap-1.5"
+          >
+            <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+            <span>Test Simulation</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={closeVoiceErrorModal}
+            className="w-full sm:w-auto px-3 py-2.5 text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-100 text-xs font-medium cursor-pointer"
+          >
+            Close
+          </button>
+        </div>
+      </ModalShell>
     </div>
   );
 };
