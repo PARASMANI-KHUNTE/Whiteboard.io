@@ -63,7 +63,7 @@ Located in [`../client/src/hooks/useAuth.ts`](../client/src/hooks/useAuth.ts).
 - Supports:
   - Account registration and login via `/api/auth/*`.
   - Ephemeral guest creation via `/api/auth/guest` with seamless identity recovery (`guestIdentity.ts`).
-  - Google OAuth popup flow with `postMessage` listener and URL hash redirect fallback (`#auth_token=`).
+  - Google OAuth popup flow that starts at `/api/auth/google/start` on the backend, with a `postMessage` listener and URL hash redirect fallback (`#auth_token=`).
   - Room querying via `/api/rooms/my-rooms`.
 
 ### 3. `useVoiceChat({ socket, currentUser, roomId, users })`

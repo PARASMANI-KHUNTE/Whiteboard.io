@@ -4,6 +4,50 @@ export const OAUTH_NONCE_COOKIE = 'wb_oauth_nonce';
 export const OAUTH_STATE_TTL_MS = 10 * 60 * 1000;
 const MAX_CLOCK_SKEW_MS = 60 * 1000;
 
+export interface OAuthCookieOptions {
+  httpOnly: boolean;
+  sameSite: "lax" | "none";
+  secure: boolean;
+  maxAge: number;
+  path: string;
+}
+
+/**
+ * Older clients request the auth URL with a cross-site fetch, which cannot set
+ * a Lax cookie. Use SameSite=None; Secure only for cross-host HTTPS deployments,
+ * where browsers require those attributes; every other setup keeps Lax.
+ */
+export function oauthCookieOptions({
+  frontendOrigin,
+  serverOrigin,
+  secure = false,
+}: {
+  frontendOrigin?: string;
+  serverOrigin?: string;
+  secure?: boolean;
+}): OAuthCookieOptions {
+  let crossSiteHttps = false;
+  if (frontendOrigin && serverOrigin) {
+    try {
+      const frontend = new URL(frontendOrigin);
+      const server = new URL(serverOrigin);
+      crossSiteHttps =
+        frontend.hostname !== server.hostname &&
+        frontend.protocol === "https:" &&
+        server.protocol === "https:";
+    } catch {
+      crossSiteHttps = false;
+    }
+  }
+  return {
+    httpOnly: true,
+    sameSite: crossSiteHttps ? "none" : "lax",
+    secure: crossSiteHttps || secure,
+    maxAge: OAUTH_STATE_TTL_MS,
+    path: "/",
+  };
+}
+
 export interface OAuthStatePayload {
   redirectUri?: string;
   origin?: string;

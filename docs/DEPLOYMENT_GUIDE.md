@@ -112,9 +112,9 @@ To enable **Continue with Google**, configure credentials in the [Google Cloud C
 
 ### OAuth state cookie and cross-site hosting
 
-`/api/auth/google/url` creates a short-lived (10 minute) random nonce, stores it in the base64url `state` parameter, and sets an `HttpOnly; SameSite=Lax` cookie named `wb_oauth_nonce` (with `Secure` on HTTPS). `/auth/google/callback` clears the cookie and rejects any callback whose state is missing, expired, or does not match that cookie with an `HTTP 400` page and a `GOOGLE_OAUTH_ERROR` postMessage to the opener. The callback also only accepts the redirect URI that the server originally issued.
+Both `/api/auth/google/start` (used by the popup) and `/api/auth/google/url` create a short-lived (10 minute) random nonce, store it in the base64url `state` parameter, and set an `HttpOnly` cookie named `wb_oauth_nonce`. The cookie is `SameSite=Lax` when frontend and backend share a host, and `SameSite=None; Secure` for split deployments so browsers can store it across sites. `/auth/google/callback` clears the cookie and rejects any callback whose state is missing, expired, or does not match that cookie with an `HTTP 400` page and a `GOOGLE_OAUTH_ERROR` postMessage to the opener. The callback also only accepts the redirect URI that the server originally issued.
 
-The client calls `/api/auth/google/url` with `credentials: 'include'`, so the frontend origin must be in the server's CORS allowlist (`APP_URL`, `CLIENT_URL`, or `ALLOWED_ORIGINS`). For split deployments, host frontend and backend on the same site (for example, sibling subdomains) where possible. If they are on unrelated sites, browsers that block cross-site cookies can prevent the nonce from being stored or returned; in that case Google sign-in will fail with the `400` invalid-request page until third-party cookies are allowed for the backend or the apps are hosted under the same site.
+The popup navigates directly to `/api/auth/google/start` on the backend, so the nonce cookie is set in a first-party top-level navigation rather than a cross-site `fetch`. The frontend origin must still be in the server's CORS/trusted-origin allowlist (`APP_URL`, `CLIENT_URL`, or `ALLOWED_ORIGINS`) so the callback can deliver the token with `postMessage`.
 
 ---
 

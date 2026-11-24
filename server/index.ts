@@ -72,8 +72,8 @@ const MAX_CONCURRENT_LIVE_STROKES = 8;
 import {
   createOAuthState,
   verifyOAuthState,
+  oauthCookieOptions,
   OAUTH_NONCE_COOKIE,
-  OAUTH_STATE_TTL_MS,
 } from "./oauthState";
 import { AiQueueFullError, generateDiagram, reviseDiagram } from "./ai/generate";
 import { bindRequestAbort } from "./ai/abort";
@@ -355,6 +355,61 @@ function getGoogleRedirectUri(req: express.Request): string {
   const host = req.get("host") || `localhost:${PORT}`;
   const serverOrigin = (process.env.SERVER_URL || `${protocol}://${host}`).replace(/\/$/, "");
   return (process.env.GOOGLE_CALLBACK_URL || `${serverOrigin}/auth/google/callback`).trim();
+}
+
+interface GoogleAuthRequest {
+  nonce: string;
+  state: string;
+  url: string;
+  redirectUri: string;
+}
+
+function buildGoogleAuthRequest(req: express.Request, trustedOrigin: string): GoogleAuthRequest | null {
+  const redirectUri = getGoogleRedirectUri(req);
+  const clientId = process.env.GOOGLE_CLIENT_ID?.trim();
+  if (!clientId) return null;
+
+  const nonce = crypto.randomBytes(24).toString("base64url");
+  const state = createOAuthState({ redirectUri, origin: trustedOrigin, nonce, issuedAt: Date.now() });
+  const params = new URLSearchParams({
+    client_id: clientId,
+    redirect_uri: redirectUri,
+    response_type: "code",
+    scope: "openid email profile",
+    access_type: "offline",
+    prompt: "select_account",
+    state,
+  });
+
+  return {
+    nonce,
+    state,
+    url: `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`,
+    redirectUri,
+  };
+}
+
+function setOAuthNonceCookie(
+  req: express.Request,
+  res: express.Response,
+  auth: GoogleAuthRequest,
+  trustedOrigin: string
+): void {
+  let serverOrigin: string | undefined;
+  try {
+    serverOrigin = new URL(auth.redirectUri).origin;
+  } catch {
+    serverOrigin = undefined;
+  }
+  res.cookie(
+    OAUTH_NONCE_COOKIE,
+    auth.nonce,
+    oauthCookieOptions({
+      frontendOrigin: trustedOrigin,
+      serverOrigin,
+      secure: req.secure || req.get("x-forwarded-proto") === "https",
+    })
+  );
 }
 
 // In-memory rate limiter to protect against credential stuffing / brute-force.
@@ -709,50 +764,59 @@ async function startServer() {
   // Google OAuth URL generator
   app.get("/api/auth/google/url", (req, res) => {
     const originParam = (req.query.origin as string)?.trim();
-    const reqOrigin = originParam || req.get("origin") || "";
-    const trustedOrigin = resolveTrustedOrigin(reqOrigin);
+    const trustedOrigin = resolveTrustedOrigin(originParam || req.get("origin") || "");
+    const auth = buildGoogleAuthRequest(req, trustedOrigin);
 
-    // The callback endpoint /auth/google/callback is hosted on this backend server
-    const redirectUri = getGoogleRedirectUri(req);
-    const clientId = process.env.GOOGLE_CLIENT_ID?.trim();
-
-    if (!clientId) {
+    if (!auth) {
       res.json({
         configured: false,
-        redirectUri,
+        redirectUri: getGoogleRedirectUri(req),
         message: "GOOGLE_CLIENT_ID not configured in server/.env",
       });
       return;
     }
 
-    // Bind the flow to this browser with a random nonce kept in an HttpOnly
-    // cookie. The callback rejects any state whose nonce does not match.
-    const nonce = crypto.randomBytes(24).toString("base64url");
-    const state = createOAuthState({ redirectUri, origin: trustedOrigin, nonce, issuedAt: Date.now() });
-    res.cookie(OAUTH_NONCE_COOKIE, nonce, {
-      httpOnly: true,
-      sameSite: "lax",
-      secure: req.secure || req.get("x-forwarded-proto") === "https",
-      maxAge: OAUTH_STATE_TTL_MS,
-      path: "/",
-    });
-
-    const params = new URLSearchParams({
-      client_id: clientId,
-      redirect_uri: redirectUri,
-      response_type: "code",
-      scope: "openid email profile",
-      access_type: "offline",
-      prompt: "select_account",
-      state,
-    });
-
-    const googleAuthUrl = `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`;
+    setOAuthNonceCookie(req, res, auth, trustedOrigin);
     res.json({
       configured: true,
-      url: googleAuthUrl,
-      redirectUri,
+      url: auth.url,
+      redirectUri: auth.redirectUri,
     });
+  });
+
+  // Top-level entry point used by the popup. Setting the nonce cookie during a
+  // first-party navigation to the backend avoids cross-site cookie blocking in
+  // split frontend/backend deployments.
+  app.get(["/api/auth/google/start", "/api/auth/google/start/"], (req, res) => {
+    const originParam = (req.query.origin as string)?.trim();
+    const trustedOrigin = resolveTrustedOrigin(originParam || req.get("origin") || "");
+    const auth = buildGoogleAuthRequest(req, trustedOrigin);
+
+    if (!auth) {
+      const safeTargetOriginJs = safeJsonForScript(trustedOrigin);
+      res.status(400).send(`
+        <!DOCTYPE html>
+        <html>
+          <head><title>Authentication Unavailable</title></head>
+          <body style="font-family:sans-serif;padding:30px;text-align:center;background:#fff1f2;color:#9f1239;">
+            <h3>Google Sign-In Unavailable</h3>
+            <p>Google OAuth is not configured on the server. Please contact the administrator.</p>
+            <script>
+              if (window.opener) {
+                window.opener.postMessage({ type: 'GOOGLE_OAUTH_ERROR', error: 'Google OAuth is not configured on the server.' }, ${safeTargetOriginJs});
+                setTimeout(() => window.close(), 1500);
+              } else {
+                setTimeout(() => { window.location.href = ${safeTargetOriginJs}; }, 2000);
+              }
+            </script>
+          </body>
+        </html>
+      `);
+      return;
+    }
+
+    setOAuthNonceCookie(req, res, auth, trustedOrigin);
+    res.redirect(auth.url);
   });
 
   // Google OAuth Callback Handler (Popup Window)

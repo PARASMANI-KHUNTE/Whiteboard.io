@@ -4,7 +4,9 @@ import {
   createOAuthState,
   verifyOAuthState,
   readCookie,
+  oauthCookieOptions,
   OAUTH_NONCE_COOKIE,
+  OAUTH_STATE_TTL_MS,
 } from './oauthState';
 
 const NOW = 1_700_000_000_000;
@@ -53,4 +55,40 @@ test('rejects expired state and future-dated state', () => {
 test('reads only the requested cookie', () => {
   assert.equal(readCookie(cookie(), OAUTH_NONCE_COOKIE), NONCE);
   assert.equal(readCookie(`theme=dark`, OAUTH_NONCE_COOKIE), null);
+});
+
+test('keeps a Lax cookie when frontend and backend share a host', () => {
+  const options = oauthCookieOptions({
+    frontendOrigin: 'https://app.example.com',
+    serverOrigin: 'https://app.example.com',
+    secure: true,
+  });
+  assert.equal(options.sameSite, 'lax');
+  assert.equal(options.secure, true);
+  assert.equal(options.httpOnly, true);
+  assert.equal(options.maxAge, OAUTH_STATE_TTL_MS);
+  assert.equal(options.path, '/');
+});
+
+test('uses a Secure SameSite=None cookie for split frontend/backend hosts', () => {
+  const options = oauthCookieOptions({
+    frontendOrigin: 'https://whiteboard-io-1.onrender.com',
+    serverOrigin: 'https://whiteboard-io-server.onrender.com',
+  });
+  assert.equal(options.sameSite, 'none');
+  assert.equal(options.secure, true);
+});
+
+test('keeps a Lax cookie for cross-origin local HTTP development', () => {
+  const options = oauthCookieOptions({
+    frontendOrigin: 'http://127.0.0.1:5173',
+    serverOrigin: 'http://localhost:3000',
+  });
+  assert.equal(options.sameSite, 'lax');
+  assert.equal(options.secure, false);
+});
+
+test('falls back to Lax for missing or malformed origins', () => {
+  assert.equal(oauthCookieOptions({}).sameSite, 'lax');
+  assert.equal(oauthCookieOptions({ frontendOrigin: 'not a url' }).sameSite, 'lax');
 });
