@@ -14,12 +14,11 @@ import {
   Maximize2,
   Smile,
   Sliders,
-  Search,
-  X,
 } from 'lucide-react';
 import { AVAILABLE_ICONS } from '../constants/icons';
 import { CORE_PALETTE } from '../constants/palettes';
 import { ColorSwatches } from './ui/ColorSwatches';
+import { SearchablePickerPopover } from './ui/SearchablePickerPopover';
 import { shouldBailOutItemMouseDown } from '../utils/canvasPan';
 import { hasMultiSelectModifier } from '../utils/selection';
 
@@ -582,56 +581,43 @@ export const IconItem: React.FC<IconItemProps> = ({
               </button>
 
               {showIconPicker && (
-                <div
+                <SearchablePickerPopover
+                  title={`Swap Icon (${filteredIcons.length})`}
+                  onClose={() => {
+                    setShowIconPicker(false);
+                    setIconSearchQuery('');
+                  }}
+                  closeAriaLabel="Close icon picker"
+                  searchQuery={iconSearchQuery}
+                  onSearchChange={setIconSearchQuery}
+                  searchPlaceholder="Search icons..."
+                  clearAriaLabel="Clear icon search"
+                  isEmpty={filteredIcons.length === 0}
+                  emptyMessage="No matching icons"
+                  widthClassName="w-72"
+                  gridClassName="grid-cols-6 gap-1 max-h-40 p-0.5"
+                  className="absolute left-1/2 -translate-x-1/2 bottom-8"
                   onMouseDown={(e) => e.stopPropagation()}
-                  className="absolute left-1/2 -translate-x-1/2 bottom-8 bg-white dark:bg-slate-900 rounded-xl shadow-2xl border border-slate-200 dark:border-slate-800 p-2.5 flex flex-col gap-2 z-50 w-72"
                 >
-                  <div className="relative flex items-center">
-                    <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2 pointer-events-none" />
-                    <input
-                      type="text"
-                      value={iconSearchQuery}
-                      onChange={(e) => setIconSearchQuery(e.target.value)}
-                      placeholder="Search icons..."
-                      className="w-full pl-7 pr-6 py-1 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                      autoFocus
-                    />
-                    {iconSearchQuery && (
+                  {filteredIcons.map(([key, config]) => {
+                    const Comp = config.component;
+                    const isCurrent = element.iconName === key;
+                    return (
                       <button
-                        onClick={() => setIconSearchQuery('')}
-                        className="absolute right-1.5 text-slate-400 hover:text-slate-600 cursor-pointer"
+                        key={key}
+                        onClick={() => handleIconChange(key)}
+                        className={`p-1.5 rounded-lg border flex items-center justify-center cursor-pointer transition-colors ${
+                          isCurrent
+                            ? 'bg-blue-50 dark:bg-blue-950 border-blue-500 text-blue-600 dark:text-blue-400 font-bold'
+                            : 'border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200'
+                        }`}
+                        title={`${config.label} (${config.keywords?.slice(0, 3).join(', ')})`}
                       >
-                        <X className="w-3 h-3" />
+                        <Comp size={16} />
                       </button>
-                    )}
-                  </div>
-                  {filteredIcons.length > 0 ? (
-                    <div className="grid grid-cols-6 gap-1 max-h-40 overflow-y-auto p-0.5">
-                      {filteredIcons.map(([key, config]) => {
-                        const Comp = config.component;
-                        const isCurrent = element.iconName === key;
-                        return (
-                          <button
-                            key={key}
-                            onClick={() => handleIconChange(key)}
-                            className={`p-1.5 rounded-lg border flex items-center justify-center cursor-pointer transition-colors ${
-                              isCurrent
-                                ? 'bg-blue-50 dark:bg-blue-950 border-blue-500 text-blue-600 dark:text-blue-400 font-bold'
-                                : 'border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200'
-                            }`}
-                            title={`${config.label} (${config.keywords?.slice(0, 3).join(', ')})`}
-                          >
-                            <Comp size={16} />
-                          </button>
-                        );
-                      })}
-                    </div>
-                  ) : (
-                    <div className="py-3 text-center text-[11px] text-slate-400">
-                      No matching icons
-                    </div>
-                  )}
-                </div>
+                    );
+                  })}
+                </SearchablePickerPopover>
               )}
             </div>
           )}
