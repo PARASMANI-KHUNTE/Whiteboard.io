@@ -12,7 +12,7 @@
     "build:server": "npm run build --prefix server",
     "typecheck": "npm run typecheck --prefix client && npm run typecheck --prefix server",
     "test": "npm test --prefix server",
-    "docs:validate": "python validate_report.py",
+    "docs:validate": "python validate_report.py --check-freshness",
     "start": "node server/dist/server.js"
   }
 }

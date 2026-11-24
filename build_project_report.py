@@ -1,4 +1,6 @@
 import os
+import json
+import shutil
 import docx
 from docx import Document
 from docx.shared import Inches, Pt, RGBColor
@@ -6,6 +8,26 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.enum.table import WD_TABLE_ALIGNMENT, WD_ALIGN_VERTICAL
 from docx.oxml import OxmlElement, parse_xml
 from docx.oxml.ns import nsdecls, qn
+
+
+REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
+
+def load_pkg_versions():
+    client_pkg_path = os.path.join(REPO_ROOT, "client", "package.json")
+    server_pkg_path = os.path.join(REPO_ROOT, "server", "package.json")
+    client_deps = {}
+    server_deps = {}
+    if os.path.exists(client_pkg_path):
+        with open(client_pkg_path, "r", encoding="utf-8") as f:
+            d = json.load(f)
+            client_deps.update(d.get("dependencies", {}))
+            client_deps.update(d.get("devDependencies", {}))
+    if os.path.exists(server_pkg_path):
+        with open(server_pkg_path, "r", encoding="utf-8") as f:
+            d = json.load(f)
+            server_deps.update(d.get("dependencies", {}))
+            server_deps.update(d.get("devDependencies", {}))
+    return client_deps, server_deps
 
 def set_cell_background(cell, fill_hex):
     tcPr = cell._tc.get_or_add_tcPr()
@@ -254,7 +276,7 @@ def format_custom_table(table, col_widths, headers, rows):
                 r.font.size = Pt(9.5)
                 r.font.color.rgb = RGBColor(30, 41, 59)
 
-def build_report():
+def build_report(output_filename=None):
     doc = Document()
     
     # Page setup - A4
@@ -878,24 +900,39 @@ def build_report():
     tech_headers = ["Layer", "Technology", "Version / Source", "Purpose & Architectural Role"]
     tech_widths = [1.2, 1.4, 1.2, 2.6]
     
+    client_deps, server_deps = load_pkg_versions()
+    react_ver = client_deps.get("react", "^19.0.1")
+    react_dom_ver = client_deps.get("react-dom", "^19.0.1")
+    vite_ver = client_deps.get("vite", "^6.4.6")
+    ts_ver = client_deps.get("typescript", "~5.8.2")
+    tw_ver = client_deps.get("tailwindcss", "^4.1.14")
+    motion_ver = client_deps.get("motion", "^12.23.24")
+    lucide_ver = client_deps.get("lucide-react", "^0.546.0")
+    sio_client_ver = client_deps.get("socket.io-client", "^4.8.3")
+    express_ver = server_deps.get("express", "^4.22.3")
+    sio_server_ver = server_deps.get("socket.io", "^4.8.3")
+    mongo_ver = server_deps.get("mongodb", "^7.6.0")
+    esbuild_ver = server_deps.get("esbuild", "^0.25.0")
+    tsx_ver = server_deps.get("tsx", "^4.21.0")
+
     tech_rows = [
-        ["Frontend UI", "React", "^19.0.1", "Component-driven user interface, state management, and virtual DOM rendering."],
-        ["Frontend DOM", "React DOM", "^19.0.1", "Browser DOM bindings and mounting lifecycle for the React application tree."],
-        ["Build Tool", "Vite", "^6.2.3", "Next-generation frontend tooling providing ultra-fast HMR and optimized bundling."],
-        ["Language", "TypeScript", "~5.8.2", "Static type checking across frontend and backend for robust enterprise safety."],
-        ["Styling", "Tailwind CSS", "^4.1.14", "Utility-first CSS framework with Vite integration (@tailwindcss/vite)."],
-        ["Animations", "Motion", "^12.23.24", "Fluid physics-based spring animations for modals, notifications, and menus."],
-        ["Icons", "Lucide React", "^0.546.0", "Crisp vector icons for canvas tools, admin panels, and status indicators."],
-        ["Real-Time Client", "Socket.io Client", "^4.8.3", "WebSocket client handling room events, drawing streams, and voice signaling."],
+        ["Frontend UI", "React", react_ver, "Component-driven user interface, state management, and virtual DOM rendering."],
+        ["Frontend DOM", "React DOM", react_dom_ver, "Browser DOM bindings and mounting lifecycle for the React application tree."],
+        ["Build Tool", "Vite", vite_ver, "Next-generation frontend tooling providing ultra-fast HMR and optimized bundling."],
+        ["Language", "TypeScript", ts_ver, "Static type checking across frontend and backend for robust enterprise safety."],
+        ["Styling", "Tailwind CSS", tw_ver, "Utility-first CSS framework with Vite integration (@tailwindcss/vite)."],
+        ["Animations", "Motion", motion_ver, "Fluid physics-based spring animations for modals, notifications, and menus."],
+        ["Icons", "Lucide React", lucide_ver, "Crisp vector icons for canvas tools, admin panels, and status indicators."],
+        ["Real-Time Client", "Socket.io Client", sio_client_ver, "WebSocket client handling room events, drawing streams, and voice signaling."],
         ["Backend Runtime", "Node.js", ">=20.19 / ES Modules", "Asynchronous, event-driven JavaScript runtime executing the backend server."],
-        ["Backend Framework", "Express", "^4.21.2", "Lightweight HTTP server hosting REST APIs, CORS, and security middleware."],
-        ["Real-Time Server", "Socket.io", "^4.8.3", "WebSocket server gateway managing rooms, event routing, and binary packets."],
-        ["Database Driver", "MongoDB Driver", "^7.6.0", "Official native MongoDB Node.js driver providing high-speed direct queries."],
+        ["Backend Framework", "Express", express_ver, "Lightweight HTTP server hosting REST APIs, CORS, and security middleware."],
+        ["Real-Time Server", "Socket.io", sio_server_ver, "WebSocket server gateway managing rooms, event routing, and binary packets."],
+        ["Database Driver", "MongoDB Driver", mongo_ver, "Official native MongoDB Node.js driver providing high-speed direct queries."],
         ["Security / Crypto", "Node.js Crypto", "Built-in native", "PBKDF2-SHA512 password hashing, salt generation, and secure UUID generation."],
         ["Voice Media", "WebRTC 1.0", "W3C Standard", "Decentralized peer-to-peer audio streaming mesh directly between browsers."],
         ["Audio Processing", "Web Audio API", "W3C Standard", "AnalyserNode frequency analysis, volume RMS calculation, speaking halos."],
         ["Generative AI", "Gemini & Ollama", "gemini-3.8 / llama3.2", "Multi-engine diagram generation with model failover chain and JSON schema output."],
-        ["Bundler / Server", "esbuild & tsx", "^0.25.0 / ^4.21.0", "High-speed TypeScript transpilation and server production bundling."]
+        ["Bundler / Server", "esbuild & tsx", f"{esbuild_ver} / {tsx_ver}", "High-speed TypeScript transpilation and server production bundling."]
     ]
     
     format_custom_table(tech_table, tech_widths, tech_headers, tech_rows)
@@ -1386,9 +1423,15 @@ def build_report():
         r.font.size = Pt(10)
         r.font.color.rgb = RGBColor(30, 41, 59)
 
-    output_filename = "Generated_Project_Report.docx"
-    doc.save(output_filename)
-    print(f"Successfully generated {output_filename} ({os.path.getsize(output_filename)} bytes)")
+    if output_filename is None:
+        target_file = "Generated_Project_Report.docx"
+        doc.save(target_file)
+        docs_copy = os.path.join(REPO_ROOT, "docs", "Generated_Project_Report.docx")
+        shutil.copyfile(target_file, docs_copy)
+        print(f"Successfully generated {target_file} and {docs_copy} ({os.path.getsize(target_file)} bytes)")
+    else:
+        doc.save(output_filename)
+        print(f"Successfully generated {output_filename} ({os.path.getsize(output_filename)} bytes)")
 
 if __name__ == "__main__":
     build_report()
