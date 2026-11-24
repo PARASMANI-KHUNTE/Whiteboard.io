@@ -89,11 +89,18 @@ import { fileURLToPath } from "url";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Load environment variables cleanly
-const envPath = fs.existsSync(path.resolve(__dirname, ".env"))
-  ? path.resolve(__dirname, ".env")
-  : path.resolve(process.cwd(), ".env");
-dotenv.config({ path: envPath });
+// Load environment variables cleanly across root, server, and dist modes
+const envCandidates = [
+  path.resolve(process.cwd(), "server", ".env"),
+  path.resolve(process.cwd(), ".env"),
+  path.resolve(__dirname, ".env"),
+  path.resolve(__dirname, "../.env"),
+];
+for (const candidate of envCandidates) {
+  if (fs.existsSync(candidate)) {
+    dotenv.config({ path: candidate });
+  }
+}
 
 // Last-resort logging. Socket handler errors are caught locally by `safeOn`;
 // these listeners make any remaining async/fatal failure diagnosable.

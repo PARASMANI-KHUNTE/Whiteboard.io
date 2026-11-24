@@ -10,11 +10,11 @@ export interface AiProviderInfo {
   label: string;
 }
 
-const DEFAULT_GEMINI_MODEL = "gemini-3.8-flash";
+const DEFAULT_GEMINI_MODEL = "gemini-2.5-flash";
 // Newest Gemini flash tiers can 503 during demand spikes. When that happens the
 // next model in the chain is tried instead of dropping straight to the local
 // procedural engine. Override with GEMINI_FALLBACK_MODELS (comma separated).
-const DEFAULT_GEMINI_FALLBACK_MODELS = ["gemini-3.6-flash"];
+const DEFAULT_GEMINI_FALLBACK_MODELS = ["gemini-1.5-flash"];
 const DEFAULT_OLLAMA_MODEL = "llama3.2";
 const DEFAULT_OLLAMA_BASE_URL = "http://127.0.0.1:11434";
 

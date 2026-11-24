@@ -263,8 +263,8 @@ Whiteboard.io includes an enterprise-grade AI diagram synthesis pipeline (`serve
 
 ### AI Model Failover Chain
 An AI turn walks an ordered chain of backends:
-- `GEMINI_MODEL` (default: `gemini-3.8-flash`)
-- `GEMINI_FALLBACK_MODELS` (default: `gemini-3.6-flash`)
+- `GEMINI_MODEL` (default: `gemini-2.5-flash`)
+- `GEMINI_FALLBACK_MODELS` (default: `gemini-1.5-flash`)
 - Local **Ollama** model (`llama3.2` at `http://127.0.0.1:11434`)
 - Offline **Procedural Engine** (deterministic diagram synthesis)
 

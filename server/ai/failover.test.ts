@@ -10,7 +10,7 @@ test('formats retry attempt counts with correct pluralization', () => {
 
 test('summarizes exhausted failover without repeating provider reasons', () => {
   const reasons = [
-    'Gemini 3.6 Flash (gemini-3.6-flash): Gemini service unavailable (HTTP 503).',
+    'Gemini 1.5 Flash (gemini-1.5-flash): Gemini service unavailable (HTTP 503).',
     'Ollama (llama3.2): Could not reach Ollama at http://127.0.0.1:11434.',
   ];
 
