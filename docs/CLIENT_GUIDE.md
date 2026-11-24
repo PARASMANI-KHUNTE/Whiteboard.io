@@ -101,6 +101,10 @@ To prevent blurry lines on Retina and 4K displays:
   canvas.height = rect.height * dpr;
   ctx.scale(dpr, dpr);
   ```
+  The component writes `width`/`height` only when the computed pixel size
+  actually changes, so panning and zooming never reallocate the backing store.
+  A `(resolution: <dpr>dppx)` media query is re-armed on each DPR change so
+  moving the window to another display restores crisp rendering.
 
 ### 2D Spatial Indexing (`spatialIndex.ts`)
 To maintain 60 FPS even on whiteboards with thousands of elements, Whiteboard.io uses a spatial acceleration grid:
