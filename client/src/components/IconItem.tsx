@@ -386,6 +386,7 @@ export const IconItem: React.FC<IconItemProps> = ({
 
   const handleIconChange = (iconKey: string) => {
     setShowIconPicker(false);
+    setIconSearchQuery('');
     onUpdate({
       ...element,
       iconName: iconKey,
@@ -501,49 +502,6 @@ export const IconItem: React.FC<IconItemProps> = ({
               <Move className="w-3.5 h-3.5" />
             </div>
           )}
-
-          {/* Quick Swap Icon Popover */}
-          {!isLocked && (
-            <div className="relative">
-              <button
-                type="button"
-                data-popover-trigger
-                aria-label="Change icon symbol"
-                aria-expanded={showIconPicker}
-                onClick={() => setShowIconPicker(!showIconPicker)}
-                title="Change icon symbol"
-                className="p-1.5 min-w-[32px] min-h-[32px] flex items-center justify-center text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg cursor-pointer"
-              >
-                <Smile className="w-3.5 h-3.5" />
-              </button>
-
-              {showIconPicker && (
-                <div
-                  onMouseDown={(e) => e.stopPropagation()}
-                  className="absolute left-1/2 -translate-x-1/2 top-8 bg-white dark:bg-slate-900 rounded-xl shadow-2xl border border-slate-200 dark:border-slate-800 p-2 grid grid-cols-4 gap-1.5 z-50 max-h-56 overflow-y-auto min-w-[160px]"
-                >
-                  {Object.entries(AVAILABLE_ICONS).map(([key, item]) => {
-                    const Component = item.component;
-                    return (
-                      <button
-                        key={key}
-                        onClick={() => handleIconChange(key)}
-                        title={item.label}
-                        className={`p-1.5 rounded-lg flex items-center justify-center hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer ${
-                          element.iconName === key
-                            ? 'bg-blue-100 dark:bg-blue-950 text-blue-600'
-                            : 'text-slate-700 dark:text-slate-300'
-                        }`}
-                      >
-                        <Component size={18} />
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          )}
-
           {/* Preset Size Buttons */}
           {!isLocked && (
             <div className="flex items-center gap-0.5 border-l border-r border-slate-200 dark:border-slate-700 px-1">
@@ -609,6 +567,10 @@ export const IconItem: React.FC<IconItemProps> = ({
           {!isLocked && (
             <div className="relative">
               <button
+                type="button"
+                data-popover-trigger
+                aria-label="Change icon"
+                aria-expanded={showIconPicker}
                 onClick={() => {
                   setShowIconPicker(!showIconPicker);
                   setShowColorPicker(false);
@@ -656,11 +618,7 @@ export const IconItem: React.FC<IconItemProps> = ({
                         return (
                           <button
                             key={key}
-                            onClick={() => {
-                              onUpdate({ ...element, iconName: key });
-                              setShowIconPicker(false);
-                              setIconSearchQuery('');
-                            }}
+                            onClick={() => handleIconChange(key)}
                             className={`p-1.5 rounded-lg border flex items-center justify-center cursor-pointer transition-colors ${
                               isCurrent
                                 ? 'bg-blue-50 dark:bg-blue-950 border-blue-500 text-blue-600 dark:text-blue-400 font-bold'
