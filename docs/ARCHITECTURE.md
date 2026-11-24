@@ -261,10 +261,12 @@ Whiteboard.io includes an enterprise-grade AI diagram synthesis pipeline (`serve
                                                                       └────────────────────────┘
 ```
 
-### AI Model Failover Chain
+### AI Model Failover Chain & Dynamic Discovery
 An AI turn walks an ordered chain of backends:
 - `GEMINI_MODEL` (default: `gemini-3.8-flash`)
 - `GEMINI_FALLBACK_MODELS` (default: `gemini-flash-lite-latest,gemini-3.6-flash`)
+- **Dynamic Model Discovery**: Asynchronously queries Google's `/v1beta/models` endpoint for newly available models matching the API key (cached for 30 minutes).
+- **Self-Healing Circuit Breaker**: Models returning HTTP 404 (retired) are permanently excluded from rotation; models returning HTTP 503 (demand spikes) are placed on temporary 3-minute cooldowns, automatically promoting healthy models to the front of the rotation.
 - Local **Ollama** model (`llama3.2` at `http://127.0.0.1:11434`)
 - Offline **Procedural Engine** (deterministic diagram synthesis)
 

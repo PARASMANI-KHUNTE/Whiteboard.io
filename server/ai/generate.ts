@@ -28,6 +28,7 @@ import {
   defaultDiagramAuthor,
   providerDisplayName,
   resolveProviderChain,
+  resolveProviderChainAsync,
   summarizeProvider,
   type AiProviderInfo,
   type AiProviderSummary,
@@ -408,7 +409,7 @@ export async function generateDiagram(params: GenerateDiagramParams): Promise<Di
   const { prompt, type, detail, direction, canvasCenter = { x: 0, y: 0 }, signal } = params;
   throwIfAborted(signal);
 
-  const chain = resolveProviderChain();
+  const chain = await resolveProviderChainAsync(signal);
   const provider = chain[0] ?? null;
   const sessionId = sanitizeSessionId(params.sessionId);
   const options: NormalizeOptions = {
@@ -559,7 +560,7 @@ export async function reviseDiagram(params: ReviseDiagramParams): Promise<Diagra
     fallbackSummary: graph.summary,
   });
 
-  const chain = resolveProviderChain();
+  const chain = await resolveProviderChainAsync(signal);
   const provider = chain[0] ?? null;
 
   // A failed follow-up must never erase the user's existing diagram.

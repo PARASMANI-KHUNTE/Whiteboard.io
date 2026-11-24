@@ -18,6 +18,109 @@ const DEFAULT_GEMINI_FALLBACK_MODELS = ["gemini-flash-lite-latest", "gemini-3.6-
 const DEFAULT_OLLAMA_MODEL = "llama3.2";
 const DEFAULT_OLLAMA_BASE_URL = "http://127.0.0.1:11434";
 
+// ---------------------------------------------------------------------------
+// Dynamic Model Discovery & Self-Healing Circuit Breaker
+// ---------------------------------------------------------------------------
+
+interface ModelHealth {
+  cooldownUntil: number;
+  retired?: boolean;
+}
+
+const modelHealth = new Map<string, ModelHealth>();
+let cachedDiscoveredModels: string[] | null = null;
+let lastDiscoveryTime = 0;
+const DISCOVERY_TTL_MS = 30 * 60 * 1000; // 30 minutes
+
+export function recordModelFailure(model: string, status: number): void {
+  const norm = model.toLowerCase();
+  if (status === 404) {
+    // Model is retired or does not exist for this API key: exclude for 24 hours
+    modelHealth.set(norm, { cooldownUntil: Date.now() + 24 * 60 * 60 * 1000, retired: true });
+    console.warn(`[AI Discovery]: Model ${model} returned HTTP 404 and was removed from rotation.`);
+  } else if (status === 503 || status === 429) {
+    // Transient demand spike: demote for 3 minutes (50ms in test)
+    const cooldownMs = process.env.NODE_ENV === "test" ? 50 : 3 * 60 * 1000;
+    modelHealth.set(norm, { cooldownUntil: Date.now() + cooldownMs });
+    console.warn(
+      `[AI Discovery]: Model ${model} temporarily demoted due to HTTP ${status} (cooldown: ${Math.round(cooldownMs / 1000)}s).`
+    );
+  }
+}
+
+export function recordModelSuccess(model: string): void {
+  modelHealth.delete(model.toLowerCase());
+}
+
+export function isModelHealthy(model: string): boolean {
+  const entry = modelHealth.get(model.toLowerCase());
+  if (!entry) return true;
+  if (entry.retired) return false;
+  return Date.now() > entry.cooldownUntil;
+}
+
+export function clearModelHealth(): void {
+  modelHealth.clear();
+}
+
+export function setCachedDiscoveredModels(models: string[] | null): void {
+  cachedDiscoveredModels = models;
+  lastDiscoveryTime = models ? Date.now() : 0;
+}
+
+export async function discoverGeminiModels(apiKey: string, signal?: AbortSignal): Promise<string[]> {
+  if (!apiKey || process.env.NODE_ENV === "test") {
+    return cachedDiscoveredModels || [];
+  }
+  const now = Date.now();
+  if (cachedDiscoveredModels && now - lastDiscoveryTime < DISCOVERY_TTL_MS) {
+    return cachedDiscoveredModels;
+  }
+  try {
+    const requestSignal = signal ? combineWithTimeout(8000, signal).signal : AbortSignal.timeout(8000);
+    const res = await fetch("https://generativelanguage.googleapis.com/v1beta/models", {
+      headers: { "x-goog-api-key": apiKey },
+      signal: requestSignal,
+    });
+    if (!res.ok) {
+      return cachedDiscoveredModels || [];
+    }
+    const data = (await res.json()) as {
+      models?: Array<{
+        name?: string;
+        supportedGenerationMethods?: string[];
+      }>;
+    };
+    const candidates = (data.models || [])
+      .filter((m) => {
+        const methods = m.supportedGenerationMethods || [];
+        const name = (m.name || "").replace(/^models\//, "");
+        if (!methods.includes("generateContent")) return false;
+        if (/tts|image|audio|robotics|computer-use|transcribe|embed/i.test(name)) return false;
+        return true;
+      })
+      .map((m) => (m.name || "").replace(/^models\//, ""));
+
+    const scored = candidates.map((name) => {
+      let score = 0;
+      if (/flash-lite/i.test(name)) score += 80;
+      else if (/flash/i.test(name)) score += 90;
+      else if (/pro/i.test(name)) score += 40;
+      if (/latest/i.test(name)) score += 15;
+      const verMatch = name.match(/(\d+(?:\.\d+)?)/);
+      if (verMatch) score += parseFloat(verMatch[1]) * 5;
+      return { name, score };
+    });
+    scored.sort((a, b) => b.score - a.score);
+
+    cachedDiscoveredModels = scored.map((s) => s.name);
+    lastDiscoveryTime = now;
+    return cachedDiscoveredModels;
+  } catch {
+    return cachedDiscoveredModels || [];
+  }
+}
+
 function splitList(value: string | undefined): string[] {
   if (!value) return [];
   return value
@@ -91,8 +194,8 @@ export function resolveAiProvider(): AiProviderInfo | null {
   return null;
 }
 
-/** Gemini model chain: the configured primary, then GEMINI_FALLBACK_MODELS. */
-function geminiProviderChain(): AiProviderInfo[] {
+/** Gemini model chain: configured primary, fallbacks, and dynamically discovered models. */
+export function geminiProviderChain(dynamicModels: string[] = []): AiProviderInfo[] {
   const primary = process.env.GEMINI_MODEL?.trim() || DEFAULT_GEMINI_MODEL;
   const configured = process.env.GEMINI_FALLBACK_MODELS?.trim();
   const disabled = /^(none|off|-)$/i.test(configured || "");
@@ -102,11 +205,33 @@ function geminiProviderChain(): AiProviderInfo[] {
       ? splitList(configured)
       : DEFAULT_GEMINI_FALLBACK_MODELS;
 
-  const models: string[] = [];
-  for (const model of [primary, ...fallbacks]) {
-    if (model && !models.includes(model)) models.push(model);
+  const rawList = [primary, ...fallbacks, ...dynamicModels, ...(cachedDiscoveredModels || [])];
+  const uniqueModels: string[] = [];
+  for (const m of rawList) {
+    if (m && !uniqueModels.includes(m)) {
+      uniqueModels.push(m);
+    }
   }
-  return models.map(geminiInfo);
+
+  // Filter out permanently retired models (HTTP 404)
+  const activeModels = uniqueModels.filter((m) => {
+    const health = modelHealth.get(m.toLowerCase());
+    return !health?.retired;
+  });
+
+  // Partition into healthy models and currently cooling down models
+  const healthy: string[] = [];
+  const coolingDown: string[] = [];
+  for (const m of activeModels) {
+    if (isModelHealthy(m)) {
+      healthy.push(m);
+    } else {
+      coolingDown.push(m);
+    }
+  }
+
+  const ordered = [...healthy, ...coolingDown];
+  return ordered.map(geminiInfo);
 }
 
 /**
@@ -129,7 +254,7 @@ export function ollamaFallbackEnabled(): boolean {
  * - unset / `auto`         -> Gemini chain, then Ollama (unless disabled).
  * - no Gemini key          -> Ollama when configured.
  */
-export function resolveProviderChain(): AiProviderInfo[] {
+export function resolveProviderChain(dynamicModels: string[] = []): AiProviderInfo[] {
   const requested = (process.env.AI_PROVIDER || "").trim().toLowerCase();
   const geminiKey = process.env.GEMINI_API_KEY?.trim();
   const ollamaModel = process.env.OLLAMA_MODEL?.trim();
@@ -142,11 +267,11 @@ export function resolveProviderChain(): AiProviderInfo[] {
     return [ollamaInfo()];
   }
   if (requested === "gemini") {
-    return geminiKey ? geminiProviderChain() : [];
+    return geminiKey ? geminiProviderChain(dynamicModels) : [];
   }
 
   if (geminiKey) {
-    const chain = geminiProviderChain();
+    const chain = geminiProviderChain(dynamicModels);
     if (ollamaFallbackEnabled()) chain.push(ollamaInfo());
     return chain;
   }
@@ -156,6 +281,13 @@ export function resolveProviderChain(): AiProviderInfo[] {
   }
 
   return [];
+}
+
+/** Asynchronously resolves the provider chain, discovering available models when an API key is present. */
+export async function resolveProviderChainAsync(signal?: AbortSignal): Promise<AiProviderInfo[]> {
+  const geminiKey = process.env.GEMINI_API_KEY?.trim();
+  const dynamicModels = geminiKey ? await discoverGeminiModels(geminiKey, signal) : [];
+  return resolveProviderChain(dynamicModels);
 }
 
 export interface AiProviderSummary {
@@ -296,6 +428,7 @@ async function callGemini(
       throwIfAborted(signal);
 
       if (response.status === 429 || response.status === 503) {
+        recordModelFailure(model, response.status);
         if (attempt === maxRetries) {
           const reason = response.status === 429 ? "rate limit" : "service unavailable";
           throw new Error(
@@ -318,6 +451,7 @@ async function callGemini(
 
       const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
       if (!response.ok || !text) {
+        recordModelFailure(model, response.status);
         const message =
           data.error?.message || response.statusText || "Failed to generate a diagram from Gemini";
         const error = new Error(`Gemini API Error: ${message}`) as Error & { fatal?: boolean };
@@ -325,6 +459,7 @@ async function callGemini(
         throw error;
       }
 
+      recordModelSuccess(model);
       return extractJson(text);
     } catch (err: unknown) {
       throwIfAborted(signal);
