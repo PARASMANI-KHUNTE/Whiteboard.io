@@ -18,6 +18,8 @@ import {
 import { getAdaptiveDisplayColor } from '../utils/themeColors';
 import { shouldBailOutItemMouseDown } from '../utils/canvasPan';
 import { hasMultiSelectModifier } from '../utils/selection';
+import { CORE_PALETTE } from '../constants/palettes';
+import { ColorSwatches } from './ui/ColorSwatches';
 
 interface TextItemProps {
   element: TextElement;
@@ -50,18 +52,6 @@ const FONT_SIZES = [
   { label: 'L', value: 24, text: '24' },
   { label: 'XL', value: 32, text: '32' },
   { label: '2XL', value: 48, text: '48' },
-];
-
-const PALETTE_COLORS = [
-  { hex: '#0f172a', label: 'Charcoal' },
-  { hex: '#ffffff', label: 'White' },
-  { hex: '#ef4444', label: 'Coral' },
-  { hex: '#3b82f6', label: 'Blue' },
-  { hex: '#10b981', label: 'Green' },
-  { hex: '#f59e0b', label: 'Amber' },
-  { hex: '#8b5cf6', label: 'Purple' },
-  { hex: '#ec4899', label: 'Pink' },
-  { hex: '#06b6d4', label: 'Cyan' },
 ];
 
 export const TextItem: React.FC<TextItemProps> = ({
@@ -518,25 +508,18 @@ export const TextItem: React.FC<TextItemProps> = ({
             {showColorPicker && (
               <div
                 onMouseDown={(e) => e.stopPropagation()}
-                className="absolute left-1/2 -translate-x-1/2 bottom-8 bg-white dark:bg-slate-900 rounded-xl shadow-2xl border border-slate-200 dark:border-slate-800 p-2 flex gap-1.5 z-50 animate-in fade-in zoom-in-95 duration-100"
+                className="absolute left-1/2 -translate-x-1/2 bottom-8 bg-white dark:bg-slate-900 rounded-xl shadow-2xl border border-slate-200 dark:border-slate-800 p-2 z-50 animate-in fade-in zoom-in-95 duration-100"
               >
-                {PALETTE_COLORS.map((c) => (
-                  <button
-                    key={c.hex}
-                    type="button"
-                    aria-label={`Use ${c.label} text color`}
-                    aria-pressed={(element.color || '#0f172a') === c.hex}
-                    onClick={() => {
-                      updateStyleProp({ color: c.hex });
-                      setShowColorPicker(false);
-                    }}
-                    title={c.label}
-                    style={{ backgroundColor: c.hex }}
-                    className={`w-7 h-7 rounded-full border border-slate-300 dark:border-slate-600 hover:scale-110 transition-transform cursor-pointer shadow-2xs ${
-                      (element.color || '#0f172a') === c.hex ? 'ring-2 ring-blue-500 scale-110' : ''
-                    }`}
-                  />
-                ))}
+                <ColorSwatches
+                  colors={CORE_PALETTE}
+                  selectedColor={element.color || '#0f172a'}
+                  onSelect={(c) => {
+                    updateStyleProp({ color: c });
+                    setShowColorPicker(false);
+                  }}
+                  size="md"
+                  ariaLabelSuffix=" text color"
+                />
               </div>
             )}
           </div>

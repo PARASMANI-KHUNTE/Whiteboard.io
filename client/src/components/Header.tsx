@@ -6,6 +6,8 @@ import { usePopoverDismiss } from '../hooks/usePopoverDismiss';
 import { AudioVisualizerBar } from './AudioVisualizerBar';
 import { AboutModal } from './AboutModal';
 import { useModalA11y } from '../hooks/useModalA11y';
+import { USER_PROFILE_PALETTE } from '../constants/palettes';
+import { ColorSwatches } from './ui/ColorSwatches';
 import {
   Share2,
   Radio,
@@ -74,8 +76,6 @@ interface HeaderProps {
   onOpenInNewTab: () => void;
   onAudioLevelChange?: (level: number, isSpeaking: boolean) => void;
 }
-
-const PALETTE = ['#ef4444', '#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899'];
 
 export const Header: React.FC<HeaderProps> = ({
   roomId,
@@ -669,23 +669,17 @@ export const Header: React.FC<HeaderProps> = ({
                 <div id="profile-color-label" className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
                   Cursor & Avatar Color
                 </div>
-                <div role="group" aria-labelledby="profile-color-label" className="flex gap-2">
-                  {PALETTE.map((color) => (
-                    <button
-                      key={color}
-                      type="button"
-                      aria-label={`Use ${color} cursor and avatar color`}
-                      aria-pressed={currentUser.color === color}
-                      onClick={() => onUpdateUserColor(color)}
-                      style={{ backgroundColor: color }}
-                      className={`w-7 h-7 rounded-full transition-transform cursor-pointer ${
-                        currentUser.color === color
-                          ? 'ring-2 ring-offset-2 ring-slate-800 dark:ring-white scale-110'
-                          : 'hover:scale-105'
-                      }`}
-                    />
-                  ))}
-                </div>
+                <ColorSwatches
+                  colors={USER_PROFILE_PALETTE}
+                  selectedColor={currentUser.color}
+                  onSelect={onUpdateUserColor}
+                  size="md"
+                  ringTone="slate"
+                  ariaLabelledBy="profile-color-label"
+                  ariaLabelPrefix="Use "
+                  ariaLabelSuffix=" cursor and avatar color"
+                  className="gap-2"
+                />
               </div>
 
               {/* Action Buttons */}
