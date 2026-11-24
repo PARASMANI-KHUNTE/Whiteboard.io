@@ -40,6 +40,8 @@ test('sidebar actions reuse existing controls instead of duplicating logic (#147
   assert.match(sidebar, /disabled=\{needsWrite && !canWrite\}/);
   assert.match(sidebar, /getVoiceConnectionMeta\(isVoiceConnected\)/);
   assert.match(sidebar, /getVoiceMuteMeta\(isMuted\)/);
+  assert.match(sidebar, /getAiDiagramActionMeta\(canWrite\)/);
+  assert.match(sidebar, /getAiChatActionMeta\(isAiChatOpen\)/);
   assert.match(sidebar, /getThemeToggleMeta\(theme\)/);
 });
 
@@ -53,8 +55,8 @@ test('App mounts the sidebar with all grouped actions wired (#147)', () => {
     'onSelectTool={setCurrentTool}',
     'onToggleTheme={handleToggleTheme}',
     'onOpenShare=',
-    'onOpenAi=',
-    'onToggleAiChat=',
+    'onOpenAi={openAiDiagram}',
+    'onToggleAiChat={toggleAiChat}',
     'onToggleVoice={handleToggleVoice}',
     'onOpenShortcuts=',
   ]) {

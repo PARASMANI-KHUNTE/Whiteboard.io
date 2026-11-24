@@ -5,6 +5,7 @@ import { usePopoverDismiss } from '../hooks/usePopoverDismiss';
 import { AudioVisualizerBar } from './AudioVisualizerBar';
 import { AboutModal } from './AboutModal';
 import { ThemeToggle } from './ui/ThemeToggle';
+import { getAiChatActionMeta, getAiDiagramActionMeta } from './ui/aiActions';
 import {
   Share2,
   Radio,
@@ -14,9 +15,7 @@ import {
   Plus,
   LogIn,
   MicOff,
-  Sparkles,
   Info,
-  MessageSquare,
   MoreHorizontal,
   UserRound,
 } from 'lucide-react';
@@ -122,6 +121,11 @@ export const Header: React.FC<HeaderProps> = ({
     setShowMobileMenu(false);
     action();
   };
+
+  const aiChatMeta = getAiChatActionMeta(isAiChatOpen);
+  const aiDiagramMeta = getAiDiagramActionMeta(canWrite);
+  const AiChatIcon = aiChatMeta.Icon;
+  const AiDiagramIcon = aiDiagramMeta.Icon;
 
   const activeUserList = Object.values(users) as RemoteUser[];
 
@@ -340,22 +344,18 @@ export const Header: React.FC<HeaderProps> = ({
           <button
             id="ai-chat-header-btn"
             type="button"
-            aria-label={isAiChatOpen ? 'Minimize AI chat' : 'Open AI chat'}
+            aria-label={aiChatMeta.ariaLabel}
             onClick={onToggleAiChat}
             aria-pressed={isAiChatOpen}
-            title={
-              isAiChatOpen
-                ? 'Minimize the AI chat for this session'
-                : 'Open the AI chat for this session'
-            }
+            title={aiChatMeta.title}
             className={`relative hidden sm:inline-flex items-center justify-center gap-1.5 p-2 sm:px-2.5 sm:py-2 min-h-[44px] rounded-xl border text-xs font-semibold transition-colors cursor-pointer btn-press ${
               isAiChatOpen
                 ? 'bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800'
                 : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800'
             }`}
           >
-            <MessageSquare className="w-4 h-4 shrink-0" />
-            <span className="hidden lg:inline">AI Chat</span>
+            <AiChatIcon className="w-4 h-4 shrink-0" />
+            <span className="hidden lg:inline">{aiChatMeta.compactLabel}</span>
             {isAiChatOpen && (
               <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-emerald-500 ring-2 ring-white dark:ring-slate-900" />
             )}
@@ -367,13 +367,13 @@ export const Header: React.FC<HeaderProps> = ({
           <button
             id="ai-diagram-header-btn"
             type="button"
-            aria-label="Generate AI diagram"
+            aria-label={aiDiagramMeta.ariaLabel}
             onClick={onOpenAiModal}
             className="inline-flex items-center justify-center gap-1.5 px-2.5 py-1.5 sm:px-3.5 sm:py-2 min-w-[44px] min-h-[44px] rounded-xl text-xs sm:text-sm font-bold transition-all shadow-md cursor-pointer active:scale-95 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white shadow-indigo-500/20 btn-press"
-            title="Generate Mindmaps, Flowcharts & Sticky Boards with Gemini AI"
+            title={aiDiagramMeta.title}
           >
-            <Sparkles className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-amber-300 animate-pulse shrink-0" />
-            <span className="hidden md:inline">AI Diagram</span>
+            <AiDiagramIcon className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-amber-300 animate-pulse shrink-0" />
+            <span className="hidden md:inline">{aiDiagramMeta.compactLabel}</span>
             <span className="md:hidden">AI</span>
           </button>
         )}
@@ -478,8 +478,8 @@ export const Header: React.FC<HeaderProps> = ({
                   onClick={() => runMobileAction(onToggleAiChat)}
                   className="w-full min-h-[44px] px-3 py-2 flex items-center gap-2.5 text-left text-sm font-medium hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
                 >
-                  <MessageSquare className="w-4 h-4 text-indigo-500" />
-                  {isAiChatOpen ? 'Minimize AI chat' : 'Open AI chat'}
+                  <AiChatIcon className="w-4 h-4 text-indigo-500" />
+                  {aiChatMeta.label}
                 </button>
               )}
               {onOpenAiModal && (
@@ -489,8 +489,8 @@ export const Header: React.FC<HeaderProps> = ({
                   onClick={() => runMobileAction(onOpenAiModal)}
                   className="w-full min-h-[44px] px-3 py-2 flex items-center gap-2.5 text-left text-sm font-medium hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
                 >
-                  <Sparkles className="w-4 h-4 text-violet-500" />
-                  Generate AI diagram
+                  <AiDiagramIcon className="w-4 h-4 text-violet-500" />
+                  {aiDiagramMeta.label}
                 </button>
               )}
             </div>
