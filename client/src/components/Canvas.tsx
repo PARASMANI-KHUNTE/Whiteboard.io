@@ -48,6 +48,11 @@ import { getElementBounds, getElementAnchors, routeDraftWire } from '../utils/wi
 import { SpatialIndex, IndexedElement } from '../utils/spatialIndex';
 import { writeClipboard, readClipboard, cloneElementsForPaste, hasClipboardContent } from '../utils/clipboard';
 import {
+  cancelNavigationAnimation,
+  computeNavigationStep,
+  scheduleNavigationFrame,
+} from '../utils/canvasNavigation';
+import {
   distanceToSegment,
   segmentDistance,
   segmentIntersectsRect,
@@ -211,6 +216,11 @@ export const Canvas: React.FC<CanvasProps> = ({
     panX: 0,
     panY: 0,
   });
+  const navAnimationRef = useRef<number | null>(null);
+
+  const cancelNavAnimation = useCallback(() => {
+    cancelNavigationAnimation(navAnimationRef);
+  }, []);
 
   const [isDrawing, setIsDrawing] = useState(false);
   const [currentStroke, setCurrentStroke] = useState<DrawingStroke | null>(null);
@@ -841,6 +851,7 @@ export const Canvas: React.FC<CanvasProps> = ({
 
   // Smoothly pan & zoom viewport to fit and focus on a set of elements (e.g. newly generated AI diagram)
   const navigateToElements = useCallback((newElements: CanvasElement[]) => {
+    cancelNavAnimation();
     if (!newElements || newElements.length === 0) return;
 
     let minX = Infinity;
@@ -884,27 +895,37 @@ export const Canvas: React.FC<CanvasProps> = ({
     const duration = 520;
 
     const animate = (now: number) => {
-      const progress = Math.min(1, (now - startTime) / duration);
-      // easeOutCubic
-      const ease = 1 - Math.pow(1 - progress, 3);
+      const step = computeNavigationStep({
+        startTime,
+        now,
+        duration,
+        startPan,
+        targetPan: { x: targetPanX, y: targetPanY },
+        startZoom,
+        targetZoom,
+      });
 
-      const currentPanX = Math.round(startPan.x + (targetPanX - startPan.x) * ease);
-      const currentPanY = Math.round(startPan.y + (targetPanY - startPan.y) * ease);
-      const currentZ = Number((startZoom + (targetZoom - startZoom) * ease).toFixed(3));
+      setPan(step.pan);
+      setZoom(step.zoom);
 
-      setPan({ x: currentPanX, y: currentPanY });
-      setZoom(currentZ);
-
-      if (progress < 1) {
-        requestAnimationFrame(animate);
+      if (!step.done) {
+        scheduleNavigationFrame(navAnimationRef, animate);
       } else {
+        navAnimationRef.current = null;
         // Highlight newly generated diagram elements with selection
         setSelectedElementIds(new Set(newElements.map((e) => e.id)));
       }
     };
 
-    requestAnimationFrame(animate);
-  }, []);
+    scheduleNavigationFrame(navAnimationRef, animate);
+  }, [cancelNavAnimation]);
+
+  // Cancel any running navigation animation when Canvas unmounts (#93)
+  useEffect(() => {
+    return () => {
+      cancelNavAnimation();
+    };
+  }, [cancelNavAnimation]);
 
   useEffect(() => {
     onRegisterNavigateToElements?.(navigateToElements);
@@ -928,17 +949,20 @@ export const Canvas: React.FC<CanvasProps> = ({
 
   // Zoom helpers shared by keyboard shortcuts and the floating controls
   const zoomIn = useCallback(() => {
+    cancelNavAnimation();
     setZoom((z) => Math.min(3.0, Number((z + 0.2).toFixed(2))));
-  }, []);
+  }, [cancelNavAnimation]);
 
   const zoomOut = useCallback(() => {
+    cancelNavAnimation();
     setZoom((z) => Math.max(0.25, Number((z - 0.2).toFixed(2))));
-  }, []);
+  }, [cancelNavAnimation]);
 
   const resetView = useCallback(() => {
+    cancelNavAnimation();
     setZoom(1.0);
     setPan({ x: 0, y: 0 });
-  }, []);
+  }, [cancelNavAnimation]);
 
   // Keyboard shortcuts, spacebar pan & selection actions
   useEffect(() => {
@@ -1132,6 +1156,7 @@ export const Canvas: React.FC<CanvasProps> = ({
     if (!container) return;
 
     const handleWheel = (e: WheelEvent) => {
+      cancelNavAnimation();
       e.preventDefault();
 
       if (e.ctrlKey || e.metaKey) {
@@ -1174,6 +1199,7 @@ export const Canvas: React.FC<CanvasProps> = ({
     if (!container) return;
 
     const onNativeTouchStart = (e: TouchEvent) => {
+      cancelNavAnimation();
       if (e.touches.length >= 2 || currentTool === 'hand') {
         e.preventDefault();
       }
@@ -1444,6 +1470,7 @@ export const Canvas: React.FC<CanvasProps> = ({
   };
 
   const handlePointerDown = (e: React.MouseEvent | React.TouchEvent) => {
+    cancelNavAnimation();
     // Multi-touch: If 2 or more fingers touch the screen, immediately enter pinch-to-zoom & two-finger pan
     if ('touches' in e && e.touches.length >= 2) {
       if ('preventDefault' in e && typeof (e as any).preventDefault === 'function') {
