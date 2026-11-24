@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { getAdaptiveDisplayColor } from '../utils/themeColors';
 import { computeRotatedResize, getRotatedResizeCursor } from '../utils/shapeResize';
+import { shouldBailOutItemMouseDown } from '../utils/canvasPan';
 
 interface ShapeItemProps {
   element: ShapeElement;
@@ -176,6 +177,7 @@ export const ShapeItem: React.FC<ShapeItemProps> = ({
 
   // Handle Dragging / Repositioning
   const handleMouseDownDrag = (e: React.MouseEvent) => {
+    if (shouldBailOutItemMouseDown(e)) return;
     if (!canWrite || isLocked) return;
     e.stopPropagation();
     onSelect?.();
@@ -319,6 +321,7 @@ export const ShapeItem: React.FC<ShapeItemProps> = ({
 
   // Handle Free Rotation
   const handleMouseDownRotate = (e: React.MouseEvent) => {
+    if (shouldBailOutItemMouseDown(e)) return;
     if (!canWrite || isLocked) return;
     e.stopPropagation();
     onSelect?.();
@@ -677,6 +680,7 @@ export const ShapeItem: React.FC<ShapeItemProps> = ({
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
       onMouseDown={(e) => {
+        if (shouldBailOutItemMouseDown(e)) return;
         e.stopPropagation();
         onSelect?.(e.shiftKey || e.ctrlKey || e.metaKey);
       }}

@@ -4,6 +4,7 @@ import { WireElement, CanvasElement, WireStyle } from '../types';
 import { routeWire } from '../utils/wireGeometry';
 import { getAdaptiveDisplayColor } from '../utils/themeColors';
 import { computeWireHitStrokeWidth } from '../utils/hitTesting';
+import { shouldBailOutItemMouseDown } from '../utils/canvasPan';
 import {
   Spline,
   Minus,
@@ -160,6 +161,7 @@ export const WireItem: React.FC<WireItemProps> = ({
         strokeLinejoin="round"
         style={{ pointerEvents: 'stroke', cursor: 'pointer' }}
         onMouseDown={(e) => {
+          if (shouldBailOutItemMouseDown(e)) return;
           e.stopPropagation();
           onSelect?.();
         }}

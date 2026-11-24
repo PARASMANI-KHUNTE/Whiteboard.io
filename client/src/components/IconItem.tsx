@@ -18,6 +18,7 @@ import {
   X,
 } from 'lucide-react';
 import { AVAILABLE_ICONS } from '../constants/icons';
+import { shouldBailOutItemMouseDown } from '../utils/canvasPan';
 
 interface IconItemProps {
   element: IconElement;
@@ -163,6 +164,7 @@ export const IconItem: React.FC<IconItemProps> = ({
 
   // Handle Dragging
   const handleMouseDownDrag = (e: React.MouseEvent) => {
+    if (shouldBailOutItemMouseDown(e)) return;
     if (!canWrite || isLocked) return;
     e.stopPropagation();
     onSelect?.();
@@ -233,6 +235,7 @@ export const IconItem: React.FC<IconItemProps> = ({
 
   // Handle Smooth Corner Resizing (Drag to resize icon)
   const handleMouseDownResize = (e: React.MouseEvent) => {
+    if (shouldBailOutItemMouseDown(e)) return;
     if (!canWrite || isLocked) return;
     e.stopPropagation();
     onSelect?.();
@@ -276,6 +279,7 @@ export const IconItem: React.FC<IconItemProps> = ({
 
   // Handle Free Rotation
   const handleMouseDownRotate = (e: React.MouseEvent) => {
+    if (shouldBailOutItemMouseDown(e)) return;
     if (!canWrite || isLocked) return;
     e.stopPropagation();
     onSelect?.();
@@ -451,6 +455,7 @@ export const IconItem: React.FC<IconItemProps> = ({
         height: `${boxDim}px`,
       }}
       onMouseDown={(e) => {
+        if (shouldBailOutItemMouseDown(e)) return;
         e.stopPropagation();
         onSelect?.(e.shiftKey || e.ctrlKey || e.metaKey);
       }}
