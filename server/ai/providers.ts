@@ -236,6 +236,9 @@ export function extractJson(text: string): unknown {
 // ---------------------------------------------------------------------------
 
 function getRetryDelayMs(response: Response, attempt: number): number {
+  if (process.env.NODE_ENV === "test") {
+    return 5;
+  }
   const retryAfter = response.headers.get("retry-after");
   if (retryAfter) {
     const seconds = Number(retryAfter);
@@ -255,7 +258,7 @@ async function callGemini(
   maxRetries = 3,
   timeoutMs = 45_000
 ): Promise<unknown> {
-  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
 
   const requestBody = {
     system_instruction: {
@@ -279,7 +282,10 @@ async function callGemini(
     try {
       const response = await fetch(endpoint, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "x-goog-api-key": apiKey,
+        },
         body: JSON.stringify(requestBody),
         signal: AbortSignal.timeout(timeoutMs),
       });
@@ -328,7 +334,9 @@ async function callGemini(
         continue;
       }
       if (attempt === maxRetries || error.fatal) throw error;
-      const delayMs = Math.min(1500 * attempt, 5000) + Math.floor(Math.random() * 500);
+      const delayMs = process.env.NODE_ENV === "test"
+        ? 5
+        : Math.min(1500 * attempt, 5000) + Math.floor(Math.random() * 500);
       console.warn(
         `[AI Retry]: ${error.message}. Retrying in ${delayMs}ms (attempt ${attempt + 1}/${maxRetries})...`
       );
@@ -379,10 +387,12 @@ export function ollamaBaseUrl(): string {
 async function callOllama(
   model: string,
   userMessage: string,
-  temperature: number
+  temperature: number,
+  maxRetries = 3,
+  timeoutMs?: number
 ): Promise<unknown> {
   const endpoint = `${ollamaBaseUrl()}/api/chat`;
-  const timeoutMs = numberFromEnv("OLLAMA_TIMEOUT_MS", 180_000, 10_000, 900_000);
+  const effectiveTimeoutMs = timeoutMs ?? numberFromEnv("OLLAMA_TIMEOUT_MS", 180_000, 10_000, 900_000);
   const numCtx = numberFromEnv("OLLAMA_NUM_CTX", 12_288, 2048, 65_536);
   const numPredict = numberFromEnv("OLLAMA_NUM_PREDICT", 6_144, 512, 32_768);
 
@@ -404,77 +414,112 @@ async function callOllama(
     ],
   };
 
-  try {
-    const response = await fetch(endpoint, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
-      },
-      body: JSON.stringify(requestBody),
-      signal: AbortSignal.timeout(timeoutMs),
-    });
-
-    if (!response.ok) {
-      const detail = (await response.text().catch(() => "")).slice(0, 300);
-      const error = new Error(
-        `Ollama request failed (HTTP ${response.status}${detail ? `: ${detail}` : ""}).`
-      ) as Error & { fatal?: boolean };
-      // 400/404 usually mean the model name is wrong, so retrying is pointless.
-      if (response.status === 400 || response.status === 404) error.fatal = true;
-      throw error;
-    }
-
-    const data = (await response.json()) as {
-      message?: { content?: string };
-      response?: string;
-      done_reason?: string;
-      error?: string;
-    };
-
-    if (data.error) {
-      throw new Error(`Ollama error: ${data.error}`);
-    }
-
-    const text = data.message?.content || data.response;
-    if (!text) {
-      throw new Error("Ollama returned an empty response.");
-    }
-
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
-      return extractJson(text);
-    } catch (parseError: unknown) {
-      if (data.done_reason === "length") {
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
+        },
+        body: JSON.stringify(requestBody),
+        signal: AbortSignal.timeout(effectiveTimeoutMs),
+      });
+
+      if (response.status === 429 || (response.status >= 500 && response.status <= 599)) {
+        if (attempt === maxRetries) {
+          const detail = (await response.text().catch(() => "")).slice(0, 300);
+          const reason = response.status === 429 ? "rate limit" : "server error";
+          throw new Error(
+            `Ollama ${reason} after ${attemptCountLabel(maxRetries)} (HTTP ${response.status}${detail ? `: ${detail}` : ""}).`
+          );
+        }
+        const delayMs = getRetryDelayMs(response, attempt);
+        console.warn(
+          `[AI Retry]: Ollama HTTP ${response.status}. Retrying in ${delayMs}ms (attempt ${attempt + 1}/${maxRetries})...`
+        );
+        await response.body?.cancel().catch(() => {});
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+        continue;
+      }
+
+      if (!response.ok) {
+        const detail = (await response.text().catch(() => "")).slice(0, 300);
+        const error = new Error(
+          `Ollama request failed (HTTP ${response.status}${detail ? `: ${detail}` : ""}).`
+        ) as Error & { fatal?: boolean };
+        // 400/404 usually mean the model name is wrong, so retrying is pointless.
+        if (response.status === 400 || response.status === 404) error.fatal = true;
+        throw error;
+      }
+
+      const data = (await response.json()) as {
+        message?: { content?: string };
+        response?: string;
+        done_reason?: string;
+        error?: string;
+      };
+
+      if (data.error) {
+        throw new Error(`Ollama error: ${data.error}`);
+      }
+
+      const text = data.message?.content || data.response;
+      if (!text) {
+        throw new Error("Ollama returned an empty response.");
+      }
+
+      try {
+        return extractJson(text);
+      } catch (parseError: unknown) {
+        if (data.done_reason === "length") {
+          throw new Error(
+            `Ollama hit the ${numPredict}-token output limit before finishing the diagram. ` +
+              'Raise OLLAMA_NUM_PREDICT and OLLAMA_NUM_CTX, or use the "standard" detail level.'
+          );
+        }
+        throw parseError;
+      }
+    } catch (err: unknown) {
+      const error = err as Error & { fatal?: boolean };
+
+      if (error.name === "TimeoutError" || error.name === "AbortError") {
+        if (attempt === maxRetries) {
+          throw new Error(
+            `Ollama did not respond within ${Math.round(effectiveTimeoutMs / 1000)}s while running "${model}". ` +
+              "The model may still be loading — try again, or raise OLLAMA_TIMEOUT_MS."
+          );
+        }
+        console.warn(
+          `[AI Retry]: Ollama "${model}" timed out after ${Math.round(effectiveTimeoutMs / 1000)}s. Retrying (attempt ${attempt + 1}/${maxRetries})...`
+        );
+        continue;
+      }
+
+      if (
+        !error.fatal &&
+        (error.message.includes("fetch failed") ||
+          error.message.includes("ECONNREFUSED") ||
+          error.message.includes("connect"))
+      ) {
         throw new Error(
-          `Ollama hit the ${numPredict}-token output limit before finishing the diagram. ` +
-            'Raise OLLAMA_NUM_PREDICT and OLLAMA_NUM_CTX, or use the "standard" detail level.'
+          `Could not reach Ollama at ${ollamaBaseUrl()}. Start it with "ollama serve" and confirm the model is pulled with "ollama pull ${model}".`
         );
       }
-      throw parseError;
-    }
-  } catch (err: unknown) {
-    const error = err as Error & { fatal?: boolean };
 
-    if (error.name === "TimeoutError" || error.name === "AbortError") {
-      throw new Error(
-        `Ollama did not respond within ${Math.round(timeoutMs / 1000)}s while running "${model}". ` +
-          "The model may still be loading — try again, or raise OLLAMA_TIMEOUT_MS."
+      if (attempt === maxRetries || error.fatal) throw error;
+
+      const delayMs = process.env.NODE_ENV === "test"
+        ? 5
+        : Math.min(1500 * attempt, 5000) + Math.floor(Math.random() * 500);
+      console.warn(
+        `[AI Retry]: ${error.message}. Retrying in ${delayMs}ms (attempt ${attempt + 1}/${maxRetries})...`
       );
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
     }
-
-    if (
-      !error.fatal &&
-      (error.message.includes("fetch failed") ||
-        error.message.includes("ECONNREFUSED") ||
-        error.message.includes("connect"))
-    ) {
-      throw new Error(
-        `Could not reach Ollama at ${ollamaBaseUrl()}. Start it with "ollama serve" and confirm the model is pulled with "ollama pull ${model}".`
-      );
-    }
-
-    throw error;
   }
+
+  throw new Error("Ollama API call failed after multiple retry attempts");
 }
 
 // ---------------------------------------------------------------------------
@@ -484,7 +529,7 @@ async function callOllama(
 export interface AiCallOptions {
   /** How many times to retry transient failures against this model. */
   maxRetries?: number;
-  /** Per-attempt timeout for Gemini requests. */
+  /** Per-attempt timeout for model requests. */
   timeoutMs?: number;
 }
 
@@ -495,7 +540,13 @@ export async function callAiModel(
   options: AiCallOptions = {}
 ): Promise<unknown> {
   if (provider.name === "ollama") {
-    return callOllama(provider.model, userMessage, temperature);
+    return callOllama(
+      provider.model,
+      userMessage,
+      temperature,
+      Math.max(1, options.maxRetries ?? 3),
+      options.timeoutMs
+    );
   }
 
   const apiKey = process.env.GEMINI_API_KEY?.trim();
