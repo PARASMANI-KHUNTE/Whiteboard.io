@@ -25,7 +25,7 @@ import {
   flushAllPendingSaves,
   type RoomPermission,
 } from "./auth";
-import { connectDb, checkDbHealth } from "./db";
+import { connectDb, checkDbHealth, disconnectDb } from "./db";
 import { resolveSocketIdentity } from "./socketIdentity";
 import { chooseReplacementHost } from "./roomHost";
 import { canDirectClearBoard } from "./boardClear";
@@ -36,6 +36,7 @@ import {
   setExplicitPermission,
 } from "./roomPermissions";
 import { getOrCreateCached } from "./roomCreation";
+import { RoomLifecycleManager } from "./roomLifecycle";
 import {
   isRecord,
   readBoolean,
@@ -173,6 +174,7 @@ function positiveEnvInt(name: string, fallback: number): number {
 }
 const rooms = new Map<string, RoomData>();
 const roomCreations = new Map<string, Promise<RoomData>>();
+const roomLifecycle = new RoomLifecycleManager(rooms);
 
 async function buildRoom(roomId: string): Promise<RoomData> {
   const meta = await getRoomMeta(roomId);
@@ -972,6 +974,7 @@ async function startServer() {
 
       // Notify and clean up active socket room
       if (rooms.has(roomId)) {
+        roomLifecycle.cancelCleanup(roomId);
         io.to(roomId).emit("room-deleted", {
           roomId,
           deletedBy: requesterId,
@@ -1126,6 +1129,7 @@ async function startServer() {
       }
 
       currentRoomId = roomId;
+      roomLifecycle.cancelCleanup(roomId);
       socket.join(roomId);
 
       // Determine Host / Admin status
@@ -1400,6 +1404,7 @@ async function startServer() {
         message: "This room has been permanently deleted by the host.",
       });
       io.in(targetRoomId).socketsLeave(targetRoomId);
+      roomLifecycle.cancelCleanup(targetRoomId);
       rooms.delete(targetRoomId);
     });
 
@@ -1850,14 +1855,9 @@ async function startServer() {
       // Clean up empty rooms after 1 hour if no one is in them. Capture the id
       // now: the closure below outlives this socket, so `currentRoomId` may
       // already point at a different room by the time it runs.
+      // Clean up empty rooms after 1 hour if no one is in them (#104).
       if (remainingUserIds.length === 0) {
-        const roomIdToCleanup = currentRoomId;
-        setTimeout(() => {
-          const r = rooms.get(roomIdToCleanup);
-          if (r && Object.keys(r.users).length === 0) {
-            rooms.delete(roomIdToCleanup);
-          }
-        }, 3600000);
+        roomLifecycle.scheduleCleanup(currentRoomId);
       }
     });
   });
@@ -1891,10 +1891,16 @@ async function startServer() {
 
   const shutdown = async (signal: string) => {
     console.log(`[Shutdown] Received ${signal}, flushing pending saves...`);
+    roomLifecycle.clearAll();
     try {
       await flushAllPendingSaves();
     } catch (err) {
       console.warn("[Shutdown] Failed to flush pending saves:", err);
+    }
+    try {
+      await disconnectDb();
+    } catch (err) {
+      console.warn("[Shutdown] Failed to disconnect database:", err);
     }
     io.close();
     server.close(() => process.exit(0));
