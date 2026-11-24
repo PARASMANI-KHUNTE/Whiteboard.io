@@ -37,6 +37,12 @@ import {
   setExplicitPermission,
 } from "./roomPermissions";
 import { getOrCreateCached } from "./roomCreation";
+import {
+  canUpdateElement,
+  filterDeletableIds,
+  hasLockedElement,
+  isElementLocked,
+} from "./elementLocks";
 import { RoomLifecycleManager } from "./roomLifecycle";
 import {
   isRecord,
@@ -1479,6 +1485,12 @@ async function startServer() {
       if (!clean) return;
       const room = rooms.get(currentRoomId);
       if (!room) return;
+      if (isElementLocked(room.elements[clean.id])) {
+        socket.emit("permission-denied", {
+          message: "Locked elements cannot be replaced.",
+        });
+        return;
+      }
       room.elements[clean.id] = clean as CanvasElement;
       liveStrokes.delete(clean.id);
       saveRoomElementsDebounced(currentRoomId, room.elements, 400);
@@ -1492,6 +1504,12 @@ async function startServer() {
       if (clean.length === 0) return;
       const room = rooms.get(currentRoomId);
       if (!room) return;
+      if (hasLockedElement(room.elements, clean.map((el) => el.id))) {
+        socket.emit("permission-denied", {
+          message: "Locked elements cannot be replaced.",
+        });
+        return;
+      }
       clean.forEach((el) => {
         room.elements[el.id] = el as CanvasElement;
       });
@@ -1506,6 +1524,12 @@ async function startServer() {
       if (!clean) return;
       const room = rooms.get(currentRoomId);
       if (!room) return;
+      if (!canUpdateElement(room.elements[clean.id], clean as CanvasElement)) {
+        socket.emit("permission-denied", {
+          message: "Locked elements cannot be modified. Unlock them first.",
+        });
+        return;
+      }
       if (room.elements[clean.id]) {
         room.elements[clean.id] = { ...room.elements[clean.id], ...clean } as CanvasElement;
       } else {
@@ -1523,6 +1547,12 @@ async function startServer() {
       if (!elementId) return;
       const room = rooms.get(currentRoomId);
       if (!room) return;
+      if (isElementLocked(room.elements[elementId])) {
+        socket.emit("permission-denied", {
+          message: "Locked elements cannot be deleted. Unlock them first.",
+        });
+        return;
+      }
       delete room.elements[elementId];
       saveRoomElementsDebounced(currentRoomId, room.elements, 400);
       socket.to(currentRoomId).emit("element-deleted", { elementId });
@@ -1531,10 +1561,18 @@ async function startServer() {
     // Batch elements delete (e.g. eraser dragged across multiple strokes, Guarded)
     safeOn("elements-batch-delete", (payload: { elementIds: string[] }) => {
       if (!currentRoomId || !checkCanWrite()) return;
-      const elementIds = sanitizeElementIds(isRecord(payload) ? payload.elementIds : undefined);
+      let elementIds = sanitizeElementIds(isRecord(payload) ? payload.elementIds : undefined);
       if (elementIds.length === 0) return;
       const room = rooms.get(currentRoomId);
       if (!room) return;
+      const deletableIds = filterDeletableIds(room.elements, elementIds);
+      if (deletableIds.length !== elementIds.length) {
+        socket.emit("permission-denied", {
+          message: "Locked elements cannot be deleted. Unlock them first.",
+        });
+      }
+      if (deletableIds.length === 0) return;
+      elementIds = deletableIds;
       elementIds.forEach((id) => {
         delete room.elements[id];
       });
