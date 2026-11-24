@@ -1,5 +1,6 @@
 import { BACKEND_URL } from '../config';
 import { notifySessionExpired } from './authSession';
+import { safeGetItem, safeRemoveItem } from './safeStorage';
 
 export const AUTH_TOKEN_KEY = 'whiteboard_auth_token';
 export const AUTH_USER_KEY = 'whiteboard_cached_user';
@@ -23,9 +24,8 @@ export class ApiError extends Error {
 
 /** Drop credentials that the server has already rejected. */
 export function clearStoredAuth(): void {
-  if (typeof localStorage === 'undefined') return;
-  localStorage.removeItem(AUTH_TOKEN_KEY);
-  localStorage.removeItem(AUTH_USER_KEY);
+  safeRemoveItem(AUTH_TOKEN_KEY);
+  safeRemoveItem(AUTH_USER_KEY);
 }
 
 /**
@@ -34,7 +34,7 @@ export function clearStoredAuth(): void {
  * recovers consistently instead of showing a generic error.
  */
 export async function apiFetch(path: string, init: RequestInit = {}): Promise<Response> {
-  const token = typeof localStorage !== 'undefined' ? localStorage.getItem(AUTH_TOKEN_KEY) : null;
+  const token = safeGetItem(AUTH_TOKEN_KEY);
   const headers = new Headers(init.headers);
   if (token && !headers.has('Authorization')) {
     headers.set('Authorization', `Bearer ${token}`);

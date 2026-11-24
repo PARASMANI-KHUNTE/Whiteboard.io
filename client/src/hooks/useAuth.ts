@@ -8,6 +8,7 @@ import {
   AUTH_USER_KEY,
 } from '../utils/apiFetch';
 import { subscribeToSessionExpired } from '../utils/authSession';
+import { safeGetItem, safeRemoveItem, safeSetItem } from '../utils/safeStorage';
 
 export type { AuthUser, SessionRoom };
 
@@ -59,14 +60,14 @@ interface OAuthResult {
 export function useAuth() {
   const [user, setUser] = useState<AuthUser | null>(() => {
     try {
-      const cached = localStorage.getItem(USER_KEY);
+      const cached = safeGetItem(USER_KEY);
       return cached ? JSON.parse(cached) : null;
     } catch {
       return null;
     }
   });
   const [token, setToken] = useState<string | null>(() => {
-    return localStorage.getItem(TOKEN_KEY) || null;
+    return safeGetItem(TOKEN_KEY) || null;
   });
   const [myRooms, setMyRooms] = useState<SessionRoom[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
@@ -85,8 +86,8 @@ export function useAuth() {
     authGenerationRef.current += 1;
     setUser(newUser);
     setToken(newToken);
-    localStorage.setItem(TOKEN_KEY, newToken);
-    localStorage.setItem(USER_KEY, JSON.stringify(newUser));
+    safeSetItem(TOKEN_KEY, newToken);
+    safeSetItem(USER_KEY, JSON.stringify(newUser));
   }, []);
 
   const clearAuth = useCallback(() => {
@@ -95,8 +96,8 @@ export function useAuth() {
     setToken(null);
     setMyRooms([]);
     setAuthError(null);
-    localStorage.removeItem(TOKEN_KEY);
-    localStorage.removeItem(USER_KEY);
+    safeRemoveItem(TOKEN_KEY);
+    safeRemoveItem(USER_KEY);
   }, []);
 
   const finishOAuth = useCallback((result: OAuthResult) => {
@@ -144,8 +145,10 @@ export function useAuth() {
   const recoverSession = useCallback(async () => {
     if (recoveringRef.current) return;
     recoveringRef.current = true;
-    clearAuth();
     try {
+      // This used to run before the try: a storage failure here skipped the
+      // finally block and left recoveringRef true forever (#67).
+      clearAuth();
       const guest = getGuestIdentity();
       const result = await continueAsGuest(guest.name, guest.color);
       if (!result.success) {
@@ -203,11 +206,11 @@ export function useAuth() {
       }
 
       if (incomingToken) {
-        localStorage.setItem(TOKEN_KEY, incomingToken);
+        safeSetItem(TOKEN_KEY, incomingToken);
         setToken(incomingToken);
       }
 
-      const currentToken = incomingToken || localStorage.getItem(TOKEN_KEY);
+      const currentToken = incomingToken || safeGetItem(TOKEN_KEY);
       if (!currentToken) {
         // Room identity must be issued by the server. Provision a guest session
         // before the socket connects so joins never carry a client-made id.
@@ -225,7 +228,7 @@ export function useAuth() {
         if (authGenerationRef.current !== generation) return;
         if (res.ok && data.success && data.user) {
           setUser(data.user);
-          localStorage.setItem(USER_KEY, JSON.stringify(data.user));
+          safeSetItem(USER_KEY, JSON.stringify(data.user));
         } else {
           // Expired/invalid token: never leave user/token null with no recovery,
           // otherwise AuthModal opens and cannot be dismissed.
@@ -241,7 +244,12 @@ export function useAuth() {
       }
     };
 
-    checkAuth();
+    void checkAuth().catch((err) => {
+      // No storage or network failure may leave the app on "Checking
+      // authentication..." forever (#67).
+      console.warn('Auth check failed:', err);
+      setIsLoading(false);
+    });
   }, [recoverSession]);
 
   // The only window message listener for OAuth. Origin alone is not enough:
@@ -275,7 +283,7 @@ export function useAuth() {
 
   // Fetch user's created rooms
   const fetchMyRooms = useCallback(async () => {
-    const currentToken = token || localStorage.getItem(TOKEN_KEY);
+    const currentToken = token || safeGetItem(TOKEN_KEY);
     if (!currentToken) return;
 
     try {
