@@ -45,6 +45,7 @@ import {
   translateElement,
 } from '../utils/elementMutations';
 import { getElementBounds, getElementAnchors, routeDraftWire } from '../utils/wireGeometry';
+import { reorderZIndex, getElementZ } from '../utils/zOrder';
 import { SpatialIndex, IndexedElement } from '../utils/spatialIndex';
 import { writeClipboard, readClipboard, cloneElementsForPaste, hasClipboardContent } from '../utils/clipboard';
 import {
@@ -114,11 +115,7 @@ const TOOL_KEY_MAP: Record<string, ToolType> = {
   w: 'wire',
 };
 
-/** Render order within a layer: explicit zIndex wins, insertion order is the fallback. */
-const getElementZ = (element: CanvasElement, fallbackOrder: number): number =>
-  typeof (element as { zIndex?: number }).zIndex === 'number'
-    ? (element as { zIndex: number }).zIndex
-    : fallbackOrder;
+
 
 export const Canvas: React.FC<CanvasProps> = ({
   currentTool,
@@ -545,52 +542,8 @@ export const Canvas: React.FC<CanvasProps> = ({
   const handleZOrder = useCallback(
     (action: 'front' | 'forward' | 'backward' | 'back') => {
       if (!canWrite || selectedElementIds.size === 0) return;
-      const selected = new Set(selectedElementIds);
-      const byType = new Map<string, { element: CanvasElement; order: number }[]>();
-      let order = 0;
-
-      for (const element of Object.values(elementsRef.current) as CanvasElement[]) {
-        if (element.type === 'wire' || element.type === 'stroke' || isElementLocked(element)) continue;
-        const list = byType.get(element.type) ?? [];
-        list.push({ element, order: order++ });
-        byType.set(element.type, list);
-      }
-
-      byType.forEach((entries) => {
-        const arranged = entries
-          .slice()
-          .sort((a, b) => getElementZ(a.element, a.order) - getElementZ(b.element, b.order))
-          .map((entry) => entry.element);
-
-        if (action === 'front' || action === 'back') {
-          const moving = arranged.filter((el) => selected.has(el.id));
-          const rest = arranged.filter((el) => !selected.has(el.id));
-          arranged.length = 0;
-          arranged.push(...(action === 'front' ? [...rest, ...moving] : [...moving, ...rest]));
-        } else if (action === 'forward') {
-          for (let i = arranged.length - 2; i >= 0; i--) {
-            if (selected.has(arranged[i].id) && !selected.has(arranged[i + 1].id)) {
-              [arranged[i], arranged[i + 1]] = [arranged[i + 1], arranged[i]];
-            }
-          }
-        } else {
-          for (let i = 1; i < arranged.length; i++) {
-            if (selected.has(arranged[i].id) && !selected.has(arranged[i - 1].id)) {
-              [arranged[i], arranged[i - 1]] = [arranged[i - 1], arranged[i]];
-            }
-          }
-        }
-
-        arranged.forEach((element, index) => {
-          if ((element as { zIndex?: number }).zIndex !== index) {
-            onElementUpdate({
-              ...element,
-              zIndex: index,
-              updatedAt: Date.now(),
-            } as CanvasElement);
-          }
-        });
-      });
+      const { changed } = reorderZIndex(elementsRef.current, selectedElementIds, action);
+      changed.forEach((el) => onElementUpdate(el));
     },
     [canWrite, selectedElementIds, onElementUpdate]
   );
@@ -2004,50 +1957,25 @@ export const Canvas: React.FC<CanvasProps> = ({
 
   // Partition elements once per update instead of running five separate
   // full-array filters on every render.
-  const { wireElements, stickyNotes, textElements, shapeElements, iconElements } = useMemo(() => {
+  const { wireElements, positionedElements } = useMemo(() => {
     const wires: WireElement[] = [];
-    const stickies: StickyNote[] = [];
-    const texts: TextElement[] = [];
-    const shapes: ShapeElement[] = [];
-    const icons: IconElement[] = [];
+    const positioned: CanvasElement[] = [];
 
     for (const el of Object.values(elements) as CanvasElement[]) {
-      switch (el.type) {
-        case 'wire':
-          wires.push(el);
-          break;
-        case 'sticky':
-          stickies.push(el);
-          break;
-        case 'text':
-          texts.push(el);
-          break;
-        case 'shape':
-          shapes.push(el);
-          break;
-        case 'icon':
-          icons.push(el);
-          break;
+      if (el.type === 'wire') {
+        wires.push(el);
+      } else if (el.type === 'sticky' || el.type === 'text' || el.type === 'shape' || el.type === 'icon') {
+        positioned.push(el);
       }
     }
 
-    // Stable sort keeps the insertion order for legacy elements without an
-    // explicit zIndex while honouring stacking changes from the context menu.
-    const byZ = (a: CanvasElement, b: CanvasElement, order: Map<string, number>) =>
-      getElementZ(a, order.get(a.id) ?? 0) - getElementZ(b, order.get(b.id) ?? 0);
     const order = new Map<string, number>();
     Object.keys(elements).forEach((id, index) => order.set(id, index));
-    stickies.sort((a, b) => byZ(a, b, order));
-    texts.sort((a, b) => byZ(a, b, order));
-    shapes.sort((a, b) => byZ(a, b, order));
-    icons.sort((a, b) => byZ(a, b, order));
+    positioned.sort((a, b) => getElementZ(a, order.get(a.id) ?? 0) - getElementZ(b, order.get(b.id) ?? 0));
 
     return {
       wireElements: wires,
-      stickyNotes: stickies,
-      textElements: texts,
-      shapeElements: shapes,
-      iconElements: icons,
+      positionedElements: positioned,
     };
   }, [elements]);
   const userList = Object.values(remoteUsers) as RemoteUser[];
@@ -2221,87 +2149,92 @@ export const Canvas: React.FC<CanvasProps> = ({
           })()}
         </svg>
 
-        {/* Sticky Notes Layer */}
-        {stickyNotes.map((note) => (
-          <StickyNoteItem
-            key={note.id}
-            note={note}
-            currentUserId={currentUserId}
-            canWrite={canWrite}
-            zoom={zoom}
-            isSelected={selectedElementIds.has(note.id)}
-            isMultiSelection={selectedElementIds.size > 1}
-            onSelect={(isMulti) => handleSelectElement(note.id, isMulti)}
-            onUpdate={onElementUpdate}
-            onDelete={handleElementDelete}
-            onDuplicate={handleDuplicateElement}
-            onMoveSelectionStart={beginSelectionDrag}
-            onMoveSelection={moveSelectionByDelta}
-            onMoveSelectionEnd={endSelectionDrag}
-          />
-        ))}
-
-        {/* Text Elements Layer */}
-        {textElements.map((el) => (
-          <TextItem
-            key={el.id}
-            element={el}
-            currentUserId={currentUserId}
-            canWrite={canWrite}
-            zoom={zoom}
-            theme={theme}
-            isSelected={selectedElementIds.has(el.id)}
-            isMultiSelection={selectedElementIds.size > 1}
-            onSelect={(isMulti) => handleSelectElement(el.id, isMulti)}
-            onUpdate={onElementUpdate}
-            onDelete={handleElementDelete}
-            onDuplicate={handleDuplicateElement}
-            onMoveSelectionStart={beginSelectionDrag}
-            onMoveSelection={moveSelectionByDelta}
-            onMoveSelectionEnd={endSelectionDrag}
-          />
-        ))}
-
-        {/* Shapes Layer with Persistent Selection */}
-        {shapeElements.map((shape) => (
-          <ShapeItem
-            key={shape.id}
-            element={shape}
-            currentUserId={currentUserId}
-            canWrite={canWrite}
-            zoom={zoom}
-            theme={theme}
-            isSelected={selectedElementIds.has(shape.id)}
-            isMultiSelection={selectedElementIds.size > 1}
-            onSelect={(isMulti) => handleSelectElement(shape.id, isMulti)}
-            onUpdate={onElementUpdate}
-            onDelete={handleElementDelete}
-            onDuplicate={handleDuplicateElement}
-            onMoveSelectionStart={beginSelectionDrag}
-            onMoveSelection={moveSelectionByDelta}
-            onMoveSelectionEnd={endSelectionDrag}
-          />
-        ))}
-
-        {/* Icons / Stickers Layer with Persistent Selection */}
-        {iconElements.map((icon) => (
-          <IconItem
-            key={icon.id}
-            element={icon}
-            currentUserId={currentUserId}
-            canWrite={canWrite}
-            zoom={zoom}
-            isSelected={selectedElementIds.has(icon.id)}
-            isMultiSelection={selectedElementIds.size > 1}
-            onSelect={(isMulti) => handleSelectElement(icon.id, isMulti)}
-            onUpdate={onElementUpdate}
-            onDelete={handleElementDelete}
-            onDuplicate={handleDuplicateElement}
-            onMoveSelectionStart={beginSelectionDrag}
-            onMoveSelection={moveSelectionByDelta}
-            onMoveSelectionEnd={endSelectionDrag}
-          />
-        ))}
+        {/* Positioned Elements Layer (Unified global z-order across sticky, text, shape, icon) */}
+        {positionedElements.map((el) => {
+          if (el.type === 'sticky') {
+            return (
+              <StickyNoteItem
+                key={el.id}
+                note={el}
+                currentUserId={currentUserId}
+                canWrite={canWrite}
+                zoom={zoom}
+                isSelected={selectedElementIds.has(el.id)}
+                isMultiSelection={selectedElementIds.size > 1}
+                onSelect={(isMulti) => handleSelectElement(el.id, isMulti)}
+                onUpdate={onElementUpdate}
+                onDelete={handleElementDelete}
+                onDuplicate={handleDuplicateElement}
+                onMoveSelectionStart={beginSelectionDrag}
+                onMoveSelection={moveSelectionByDelta}
+                onMoveSelectionEnd={endSelectionDrag}
+              />
+            );
+          }
+          if (el.type === 'text') {
+            return (
+              <TextItem
+                key={el.id}
+                element={el}
+                currentUserId={currentUserId}
+                canWrite={canWrite}
+                zoom={zoom}
+                theme={theme}
+                isSelected={selectedElementIds.has(el.id)}
+                isMultiSelection={selectedElementIds.size > 1}
+                onSelect={(isMulti) => handleSelectElement(el.id, isMulti)}
+                onUpdate={onElementUpdate}
+                onDelete={handleElementDelete}
+                onDuplicate={handleDuplicateElement}
+                onMoveSelectionStart={beginSelectionDrag}
+                onMoveSelection={moveSelectionByDelta}
+                onMoveSelectionEnd={endSelectionDrag}
+              />
+            );
+          }
+          if (el.type === 'shape') {
+            return (
+              <ShapeItem
+                key={el.id}
+                element={el}
+                currentUserId={currentUserId}
+                canWrite={canWrite}
+                zoom={zoom}
+                theme={theme}
+                isSelected={selectedElementIds.has(el.id)}
+                isMultiSelection={selectedElementIds.size > 1}
+                onSelect={(isMulti) => handleSelectElement(el.id, isMulti)}
+                onUpdate={onElementUpdate}
+                onDelete={handleElementDelete}
+                onDuplicate={handleDuplicateElement}
+                onMoveSelectionStart={beginSelectionDrag}
+                onMoveSelection={moveSelectionByDelta}
+                onMoveSelectionEnd={endSelectionDrag}
+              />
+            );
+          }
+          if (el.type === 'icon') {
+            return (
+              <IconItem
+                key={el.id}
+                element={el}
+                currentUserId={currentUserId}
+                canWrite={canWrite}
+                zoom={zoom}
+                isSelected={selectedElementIds.has(el.id)}
+                isMultiSelection={selectedElementIds.size > 1}
+                onSelect={(isMulti) => handleSelectElement(el.id, isMulti)}
+                onUpdate={onElementUpdate}
+                onDelete={handleElementDelete}
+                onDuplicate={handleDuplicateElement}
+                onMoveSelectionStart={beginSelectionDrag}
+                onMoveSelection={moveSelectionByDelta}
+                onMoveSelectionEnd={endSelectionDrag}
+              />
+            );
+          }
+          return null;
+        })}
 
         {/* Wire Interactive Overlays Layer (Floating Action Bar, Color Picker, and Midpoint Label) */}
         {wireElements.map((wire) => (
