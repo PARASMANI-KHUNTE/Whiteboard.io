@@ -121,7 +121,12 @@ The client calls `/api/auth/google/url` with `credentials: 'include'`, so the fr
 ## 5. MongoDB Database Setup (Atlas)
 
 1. Create a free M0 cluster on [MongoDB Atlas](https://www.mongodb.com/atlas).
-2. Under **Network Access**, add `0.0.0.0/0` to allow connections from cloud hosts like Render or Railway.
+2. Under **Network Access**, configure ingress IP access:
+   - **Recommended (Restricted Access)**: Add only the documented outbound/egress IP addresses of your hosting provider (such as [Render Static Outbound IPs](https://render.com/docs/static-outbound-ip-addresses) or your cloud platform's VPC peering / private networking). This ensures only your application containers can communicate with the database.
+   - **Prototyping / Dynamic IP Fallback**: If your hosting tier lacks static outbound IPs, you may temporarily add `0.0.0.0/0` ("Allow Access from Anywhere").
+
+> [!WARNING]
+> Setting Network Access to `0.0.0.0/0` exposes your database cluster port directly to the public internet, leaving authentication credentials as the sole barrier against unauthorized access and brute-force attempts. For production workloads, always restrict IP access to known CIDR blocks, enforce strong complex database passwords, and enable IP access auditing in MongoDB Atlas.
 3. Under **Database Access**, create a user and password.
 4. Copy the connection string:
    ```text
