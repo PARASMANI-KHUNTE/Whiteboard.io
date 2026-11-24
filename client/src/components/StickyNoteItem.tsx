@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { StickyNote } from '../types';
 import { Trash2, Move, Palette, Lock } from 'lucide-react';
+import { shouldBailOutItemMouseDown } from '../utils/canvasPan';
 import { hasMultiSelectModifier } from '../utils/selection';
 
 interface StickyNoteItemProps {
@@ -92,6 +93,7 @@ export const StickyNoteItem: React.FC<StickyNoteItemProps> = ({
   }, []);
 
   const handleMouseDownHeader = (e: React.MouseEvent) => {
+    if (shouldBailOutItemMouseDown(e)) return;
     if (!canWrite || isLocked) return;
     e.stopPropagation();
     onSelect?.();
@@ -218,6 +220,7 @@ export const StickyNoteItem: React.FC<StickyNoteItemProps> = ({
         color: currentColorConfig.text,
       }}
       onMouseDown={(e) => {
+        if (shouldBailOutItemMouseDown(e)) return;
         e.stopPropagation();
         onSelect?.(hasMultiSelectModifier(e));
       }}
@@ -312,7 +315,10 @@ export const StickyNoteItem: React.FC<StickyNoteItemProps> = ({
           onChange={(e) => handleTextChange(e.target.value)}
           onFocus={() => canWrite && !isLocked && setIsEditing(true)}
           onBlur={handleTextBlur}
-          onMouseDown={(e) => e.stopPropagation()}
+          onMouseDown={(e) => {
+            if (shouldBailOutItemMouseDown(e)) return;
+            e.stopPropagation();
+          }}
           onClick={(e) => e.stopPropagation()}
           onKeyDown={(e) => e.stopPropagation()}
           placeholder={canWrite && !isLocked ? "Type your note here..." : "Locked — unlock to edit"}

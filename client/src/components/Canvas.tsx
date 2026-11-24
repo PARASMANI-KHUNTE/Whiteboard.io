@@ -48,6 +48,7 @@ import { getElementBounds, getElementAnchors, routeDraftWire } from '../utils/wi
 import { reorderZIndex, getElementZ } from '../utils/zOrder';
 import { toggleSelection } from '../utils/selection';
 import { isStrokeHit, computeStrokeHitTolerance } from '../utils/hitTesting';
+import { isPanInteraction, isWorldLayerPointerEventsDisabled } from '../utils/canvasPan';
 import { getTouchClientPoint, isScrollableTextInput } from '../utils/touchInteractions';
 import { SpatialIndex, IndexedElement } from '../utils/spatialIndex';
 import { writeClipboard, readClipboard, cloneElementsForPaste, hasClipboardContent } from '../utils/clipboard';
@@ -1478,11 +1479,13 @@ export const Canvas: React.FC<CanvasProps> = ({
     }
 
     // Check if Middle Mouse Button (button === 1), Hand Tool, or Spacebar Pan
-    const isMiddleClick = 'button' in e && e.button === 1;
-    const isHandTool = currentTool === 'hand';
-    const isSpacePan = spacePressed;
+    const isPan = isPanInteraction({
+      button: 'button' in e ? e.button : undefined,
+      tool: currentTool,
+      isSpacePressed: spacePressed,
+    });
 
-    if (isMiddleClick || isHandTool || isSpacePan) {
+    if (isPan) {
       if ('preventDefault' in e && typeof (e as any).preventDefault === 'function') {
         e.preventDefault();
       }
@@ -2095,7 +2098,7 @@ export const Canvas: React.FC<CanvasProps> = ({
           transformOrigin: '0 0',
         }}
         className={`absolute inset-0 pointer-events-none ${
-          currentTool === 'eraser' || currentTool === 'wire' ? '[&_*]:pointer-events-none' : ''
+          isWorldLayerPointerEventsDisabled(currentTool, spacePressed) ? '[&_*]:pointer-events-none' : ''
         }`}
       >
         {/* Wires Layer (Line & Curve Connectors) */}

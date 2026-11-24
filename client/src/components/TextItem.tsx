@@ -16,6 +16,7 @@ import {
   ChevronDown,
 } from 'lucide-react';
 import { getAdaptiveDisplayColor } from '../utils/themeColors';
+import { shouldBailOutItemMouseDown } from '../utils/canvasPan';
 import { hasMultiSelectModifier } from '../utils/selection';
 
 interface TextItemProps {
@@ -176,6 +177,7 @@ export const TextItem: React.FC<TextItemProps> = ({
   }, [showControls]);
 
   const handleMouseDownHeader = (e: React.MouseEvent) => {
+    if (shouldBailOutItemMouseDown(e)) return;
     if (!canWrite || isLocked) return;
     e.stopPropagation();
     onSelect?.();
@@ -347,6 +349,7 @@ export const TextItem: React.FC<TextItemProps> = ({
         transform: `translate(${localPos.x}px, ${localPos.y}px)`,
       }}
       onMouseDown={(e) => {
+        if (shouldBailOutItemMouseDown(e)) return;
         e.stopPropagation();
         onSelect?.(hasMultiSelectModifier(e));
       }}
