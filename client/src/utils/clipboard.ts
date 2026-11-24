@@ -1,4 +1,4 @@
-import { CanvasElement, WireElement } from '../types';
+import { CanvasElement, DrawingStroke, WireElement } from '../types';
 
 /**
  * Canvas clipboard shared through localStorage so a selection can be copied in
@@ -21,15 +21,47 @@ const isStoredClipboard = (value: unknown): value is StoredClipboard => {
   return candidate.version === 1 && Array.isArray(candidate.elements);
 };
 
+export function isValidClipboardElement(el: unknown): el is CanvasElement {
+  if (!el || typeof el !== 'object') return false;
+  const candidate = el as Record<string, unknown>;
+  if (typeof candidate.id !== 'string' || !candidate.id || typeof candidate.type !== 'string') {
+    return false;
+  }
+  if (candidate.type === 'stroke') {
+    if (!Array.isArray(candidate.points) || candidate.points.length === 0) return false;
+    return candidate.points.some(
+      (p) =>
+        p &&
+        typeof p === 'object' &&
+        typeof (p as { x?: unknown }).x === 'number' &&
+        Number.isFinite((p as { x: number }).x) &&
+        typeof (p as { y?: unknown }).y === 'number' &&
+        Number.isFinite((p as { y: number }).y)
+    );
+  }
+  if (candidate.type === 'wire') {
+    return typeof candidate.fromId === 'string' && typeof candidate.toId === 'string';
+  }
+  return (
+    typeof candidate.x === 'number' &&
+    Number.isFinite(candidate.x) &&
+    typeof candidate.y === 'number' &&
+    Number.isFinite(candidate.y)
+  );
+}
+
 export function writeClipboard(elements: CanvasElement[]): void {
-  if (elements.length === 0) return;
+  const validElements = elements.filter(isValidClipboardElement);
+  if (validElements.length === 0) return;
   const payload: StoredClipboard = {
     version: 1,
-    elements,
+    elements: validElements,
     copiedAt: Date.now(),
   };
   try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+    if (typeof window !== 'undefined' && window.localStorage) {
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+    }
   } catch {
     // Storage can be unavailable (private mode / quota); copying still works
     // for the current session through the caller's fallback if needed.
@@ -38,11 +70,12 @@ export function writeClipboard(elements: CanvasElement[]): void {
 
 export function readClipboard(): CanvasElement[] {
   try {
+    if (typeof window === 'undefined' || !window.localStorage) return [];
     const raw = window.localStorage.getItem(STORAGE_KEY);
     if (!raw) return [];
     const parsed: unknown = JSON.parse(raw);
     if (!isStoredClipboard(parsed)) return [];
-    return parsed.elements.filter((el) => el && typeof el.id === 'string' && typeof el.type === 'string');
+    return parsed.elements.filter(isValidClipboardElement);
   } catch {
     return [];
   }
@@ -65,14 +98,16 @@ export function cloneElementsForPaste(
   const idMap = new Map<string, string>();
   const baseTime = Date.now();
 
-  for (const el of elements) {
+  const validElements = elements.filter(isValidClipboardElement);
+
+  for (const el of validElements) {
     if (el.type === 'wire') continue;
     idMap.set(el.id, generateId(el.type));
   }
 
   const cloned: CanvasElement[] = [];
 
-  elements.forEach((el, index) => {
+  validElements.forEach((el, index) => {
     if (el.type === 'wire') {
       const wire = el as WireElement;
       const fromId = idMap.get(wire.fromId);
@@ -92,20 +127,34 @@ export function cloneElementsForPaste(
     if (!newId) return;
 
     if (el.type === 'stroke') {
+      const stroke = el as DrawingStroke;
+      const points = Array.isArray(stroke.points) ? stroke.points : [];
       cloned.push({
-        ...el,
+        ...stroke,
         id: newId,
-        points: el.points.map((p) => ({ x: p.x + dx, y: p.y + dy })),
+        points: points
+          .filter(
+            (p) =>
+              p &&
+              typeof p.x === 'number' &&
+              Number.isFinite(p.x) &&
+              typeof p.y === 'number' &&
+              Number.isFinite(p.y)
+          )
+          .map((p) => ({ x: p.x + dx, y: p.y + dy })),
         createdAt: baseTime + index,
       });
       return;
     }
 
+    const posX = typeof (el as { x?: number }).x === 'number' ? (el as { x: number }).x + dx : dx;
+    const posY = typeof (el as { y?: number }).y === 'number' ? (el as { y: number }).y + dy : dy;
+
     cloned.push({
       ...el,
       id: newId,
-      x: el.x + dx,
-      y: el.y + dy,
+      x: posX,
+      y: posY,
       updatedAt: baseTime + index,
       // Keep pasted objects above existing objects of the same type.
       zIndex: baseTime + index,
