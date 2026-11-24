@@ -42,12 +42,12 @@ Most existing whiteboards force compromises: either you pay heavy per-seat month
 | Capability | Whiteboard.io | Miro | Excalidraw | FigJam | Google Jamboard |
 | :--- | :---: | :---: | :---: | :---: | :---: |
 | **Integrated AI Diagrams (Cloud & Local)** | ✅ **Free & Built-In** (Gemini 3.8/3.6, local Ollama llama3.2, offline procedural) | 💰 Paid Add-on | ⚠️ Limited / External Plugin | 💰 Paid / Credit Capped | ❌ Deprecated / Dead |
-| **AI Failover Chain & Rate-Limit Shield** | ✅ **Guaranteed 100% Uptime** (Failover chain, queue pacing, 2hr cache, procedural fallback) | ❌ Standard 429 errors | ❌ N/A | ❌ Hard caps | ❌ No AI |
+| **AI Failover Chain & Rate-Limit Shield** | ✅ **High-Availability Resilience** (Failover chain, queue pacing, 2hr cache, procedural fallback) | ❌ Standard 429 errors | ❌ N/A | ❌ Hard caps | ❌ No AI |
 | **Interactive AI Follow-up Chat** | ✅ **In-Canvas Conversational Drawer** (Iterate, refine, and diff diagrams with natural language) | ❌ Static generation | ❌ None | ⚠️ Basic text | ❌ None |
 | **Built-in Peer-to-Peer Voice Mesh** | ✅ **Native WebRTC Audio** with Live Waveform Visualizer | 💰 Enterprise Only | ❌ Requires Zoom/Discord | ⚠️ Basic Audio | ❌ Requires Google Meet |
 | **Consensus Vote-to-Clear Protection** | ✅ **Democratic 15s Countdown** (Prevents accidental/troll board wipes) | ❌ Host wipe or undo | ❌ Anyone can clear | ❌ Anyone can clear | ❌ Anyone can clear |
 | **Host Moderation & Governance** | ✅ **Lock Room, Toggle User Drawing Privileges, Kick Users** | 💰 Team/Enterprise Tier | ❌ Basic / None | 💰 Paid Tier | ❌ Minimal |
-| **Self-Hostable & 100% Open Source** | ✅ **MIT License** (Run on Render, Docker, Railway, or VPS) | ❌ Proprietary SaaS | ⚠️ Client only (Backend custom) | ❌ Proprietary SaaS | ❌ Shut Down |
+| **Self-Hostable & 100% Open Source** | ✅ **MIT License** (Run on Render, Railway, or VPS) | ❌ Proprietary SaaS | ⚠️ Client only (Backend custom) | ❌ Proprietary SaaS | ❌ Shut Down |
 | **Frictionless Identity & Persistence** | ✅ **Solo Autosave, Persistent Guest Profiles, Recent Rooms & MongoDB** | ⚠️ Requires account for full tools | ⚠️ Ephemeral / LocalStorage | ⚠️ Requires Figma account | ⚠️ Requires Google account |
 
 ### Key Differentiators Explained
@@ -76,7 +76,7 @@ Most existing whiteboards force compromises: either you pay heavy per-seat month
   * 4 Specialized styles: 🧠 **Mind Maps** (radial hubs), 🔀 **Flowcharts** (decision diamonds & step boxes), 📋 **Sticky Boards** (SWOT / Kanban columns), and 🏗️ **System Architectures**.
   * **Model Failover Chain**: Automatically fails over across Gemini models, local Ollama, and offline procedural synthesis when demand spikes or networks degrade.
   * **Interactive AI Chat Drawer**: Refine, expand, and reshape diagrams iteratively with natural language follow-up instructions.
-  * **5-Layer Rate-Limit Shield**: Outbound request throttling queue (3s spacing), in-memory response cache (2hr TTL), exponential backoff retries, and offline procedural fallback engine.
+  * **5-Layer Rate-Limit Shield**: Inbound IP rate limiter, in-memory LRU response cache (2hr TTL), outbound request pacing queue (3s spacing), multi-model failover with exponential backoff retries, and offline procedural fallback engine.
 * **⚡ Real-Time Collaboration**: Sub-50ms drawing synchronization across unlimited concurrent users powered by Socket.io and optimistic rendering.
 * **🚀 2D Spatial Acceleration**: Uniform grid spatial index cuts viewport culling, bounding-box selection, and hit tests to $O(\log N + K)$ complexity.
 * **🖌️ Infinite Canvas Engine**: Smooth pan, pinch-to-zoom, high-DPI Retina scaling, and Ramer-Douglas-Peucker (RDP) stroke simplification.
@@ -116,7 +116,7 @@ Most existing whiteboards force compromises: either you pay heavy per-seat month
 | **Backend** | Node.js (ESM), Express 4, Socket.io Server |
 | **Database** | MongoDB 7 / MongoDB Atlas Native Node Driver (required) |
 | **Security** | PBKDF2-SHA512 Password Hashing (100,000 iterations), 32-byte Random Bearer Tokens, Rate Limiting, CORS Allowlist |
-| **Hosting & CI/CD** | Render, Railway, Docker, Vercel |
+| **Hosting & CI/CD** | Render, Railway, Vercel |
 
 ---
 

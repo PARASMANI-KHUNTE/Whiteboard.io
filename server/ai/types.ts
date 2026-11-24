@@ -117,10 +117,14 @@ export function coerceDiagramType(value: unknown): DiagramType {
 }
 
 export function coerceDetailLevel(value: unknown): DetailLevel {
+  if (value === "standard" || value === "balanced" || value === "concise") return "standard";
+  if (value === "detailed") return "detailed";
   return DETAIL_LEVELS.includes(value as DetailLevel) ? (value as DetailLevel) : "detailed";
 }
 
 export function coerceDirection(value: unknown): DiagramDirection {
+  if (value === "horizontal") return "horizontal";
+  if (value === "vertical" || value === "radial" || value === "free") return "vertical";
   return DIAGRAM_DIRECTIONS.includes(value as DiagramDirection)
     ? (value as DiagramDirection)
     : "vertical";

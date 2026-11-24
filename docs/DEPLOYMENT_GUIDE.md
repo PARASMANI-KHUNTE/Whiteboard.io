@@ -170,6 +170,11 @@ VITE_TURN_PASSWORD=your_turn_password
 | `ALLOWED_ORIGINS` | Additional comma-separated origins allowed for CORS and OAuth `postMessage` | No | Local dev origins |
 | `SERVER_URL` | Public backend origin used to build the Google OAuth callback URL behind proxies | No | Request protocol/host |
 | `MONGODB_URI` | MongoDB connection URI (required; startup fails if MongoDB is unreachable) | Yes | `mongodb://127.0.0.1:27017/whiteboard` |
+| `TRUST_PROXY` | Only trust X-Forwarded-For when deployed behind a known number of reverse proxies (e.g. 1 on Render/Railway/nginx) | No | Unset (`false`) |
+| `HTTP_REQUEST_TIMEOUT_MS` | Maximum duration in milliseconds for completing incoming HTTP requests | No | `60000` |
+| `HTTP_HEADERS_TIMEOUT_MS` | Maximum duration in milliseconds to receive complete HTTP headers (must exceed request timeout) | No | `65000` |
+| `AI_QUEUE_MAX_DEPTH` | Maximum pending AI requests in the pacing queue before returning HTTP 429 | No | `24` |
+| `AI_CACHE_MAX_ENTRIES` | Maximum LRU cache entries for generated diagrams | No | `256` |
 | `AI_PROVIDER` | Which AI engine to use: `gemini`, `ollama`, or `fallback`. Unset auto-picks Gemini when `GEMINI_API_KEY` exists, otherwise Ollama when configured | No | auto |
 | `GEMINI_API_KEY` | Google Gemini API key for AI diagram generation | No (optional; uses Ollama or procedural fallback if unset) | `""` |
 | `GEMINI_MODEL` | Gemini model id (first link in the failover chain) | No | `gemini-3.8-flash` |

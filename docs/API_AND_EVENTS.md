@@ -175,7 +175,7 @@ The callback always clears `wb_oauth_nonce` and verifies that the returned `stat
 
 #### `POST /api/rooms/create`
 Creates a new persistent collaborative session room.
-* **Headers**: `Authorization: Bearer <token>` (optional for guest hosts)
+* **Headers**: `Authorization: Bearer <token>` (Required. Guest accounts must provide their token obtained from `/api/auth/guest`)
 * **Request Body**:
   ```json
   {
@@ -280,7 +280,7 @@ Generates structured canvas elements from natural language prompts using Gemini 
   {
     "prompt": "User Authentication & OAuth 2.0 Flow with opaque bearer tokens",
     "type": "flowchart",
-    "detail": "balanced",
+    "detail": "standard",
     "direction": "horizontal",
     "canvasCenter": {
       "x": 450,
@@ -291,8 +291,8 @@ Generates structured canvas elements from natural language prompts using Gemini 
   ```
   * `prompt` (*string, required*): The natural language concept or architecture to visualize (up to 1200 characters).
   * `type` (*string, optional*): One of `"mindmap"`, `"flowchart"`, `"brainstorm"`, `"architecture"`. Defaults to `"mindmap"`.
-  * `detail` (*string, optional*): Level of detail: `"concise"` (4-6 nodes), `"balanced"` (8-12 nodes), `"detailed"` (15+ nodes). Defaults to `"balanced"`.
-  * `direction` (*string, optional*): Flow orientation: `"horizontal"`, `"vertical"`, `"radial"`, or `"free"`.
+  * `detail` (*string, optional*): Level of detail: `"standard"` (overview) or `"detailed"` (comprehensive breakdown). Defaults to `"detailed"`. For backward compatibility, `"balanced"` and `"concise"` alias to `"standard"`.
+  * `direction` (*string, optional*): Flow orientation: `"vertical"` or `"horizontal"`. Defaults to `"vertical"`. For backward compatibility, `"radial"` and `"free"` alias to `"vertical"`.
   * `canvasCenter` (*object, optional*): World coordinate `{ x: number, y: number }` indicating where the diagram should be anchored.
   * `sessionId` (*string, optional*): Client-generated session identifier used to namespace elements and link follow-up revisions.
 
@@ -302,7 +302,7 @@ Generates structured canvas elements from natural language prompts using Gemini 
     "success": true,
     "sessionId": "ai_1725705600000_abc",
     "type": "flowchart",
-    "detail": "balanced",
+    "detail": "standard",
     "direction": "horizontal",
     "graph": {
       "summary": "OAuth 2.0 authorization code grant flow with server-issued bearer tokens",
@@ -338,11 +338,8 @@ Generates structured canvas elements from natural language prompts using Gemini 
         "text": "Client Application"
       }
     ],
-    "engine": {
-      "provider": "gemini",
-      "model": "gemini-3.8-flash",
-      "label": "Gemini 3.8 Flash"
-    },
+    "provider": "gemini",
+    "model": "gemini-3.8-flash",
     "isFallback": false,
     "fromCache": false,
     "notice": null
@@ -370,7 +367,7 @@ Stateless endpoint for iteratively revising an existing diagram from follow-up u
       { "role": "assistant", "content": "Generated microservice architecture with API Gateway and PostgreSQL" }
     ],
     "type": "architecture",
-    "detail": "balanced",
+    "detail": "standard",
     "direction": "horizontal",
     "canvasCenter": { "x": 500, "y": 300 },
     "sessionId": "ai_1725705600000_abc"
@@ -388,11 +385,8 @@ Stateless endpoint for iteratively revising an existing diagram from follow-up u
       "Added Redis Cache node between API Gateway and PostgreSQL",
       "Rerouted query edge through cache layer"
     ],
-    "engine": {
-      "provider": "gemini",
-      "model": "gemini-3.8-flash",
-      "label": "Gemini 3.8 Flash"
-    },
+    "provider": "gemini",
+    "model": "gemini-3.8-flash",
     "notice": null
   }
   ```
