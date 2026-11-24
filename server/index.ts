@@ -24,6 +24,7 @@ import {
   deleteRoom,
   finalizeRoomDeletion,
   flushAllPendingSaves,
+  hasPendingElementSave,
   type RoomPermission,
 } from "./auth";
 import { connectDb, checkDbHealth, disconnectDb } from "./db";
@@ -37,13 +38,14 @@ import {
   setExplicitPermission,
 } from "./roomPermissions";
 import { getOrCreateCached } from "./roomCreation";
+import { SlidingWindowRateLimiter } from "./joinRateLimiter";
 import {
   canUpdateElement,
   filterDeletableIds,
   hasLockedElement,
   isElementLocked,
 } from "./elementLocks";
-import { RoomLifecycleManager } from "./roomLifecycle";
+import { RoomCapacityError, RoomLifecycleManager } from "./roomLifecycle";
 import {
   isRecord,
   readBoolean,
@@ -183,6 +185,25 @@ const rooms = new Map<string, RoomData>();
 const roomCreations = new Map<string, Promise<RoomData>>();
 const roomLifecycle = new RoomLifecycleManager(rooms);
 
+/** Bounds live room cache growth and socket-driven DB query volume (#74). */
+const MAX_LIVE_ROOMS = positiveEnvInt("MAX_LIVE_ROOMS", 500);
+const JOIN_RATE_LIMIT = positiveEnvInt("JOIN_RATE_LIMIT", 20);
+const JOIN_IP_RATE_LIMIT = positiveEnvInt("JOIN_IP_RATE_LIMIT", 100);
+const JOIN_RATE_WINDOW_MS = positiveEnvInt("JOIN_RATE_WINDOW_MS", 60_000);
+const joinSocketLimiter = new SlidingWindowRateLimiter(JOIN_RATE_LIMIT, JOIN_RATE_WINDOW_MS);
+const joinIpLimiter = new SlidingWindowRateLimiter(JOIN_IP_RATE_LIMIT, JOIN_RATE_WINDOW_MS);
+const ROOM_JOIN_RATE_ERROR = "Too many room join attempts. Please wait a moment and try again.";
+const ROOM_CAPACITY_ERROR = "The server is at room capacity. Please try again shortly.";
+
+/** Never reclaim a room whose element changes are still waiting to be saved. */
+function canEvictCachedRoom(roomId: string): boolean {
+  return !hasPendingElementSave(roomId);
+}
+
+function socketJoinAddress(socket: Socket): string {
+  return socket.handshake.address || socket.request.socket.remoteAddress || "unknown_ip";
+}
+
 async function buildRoom(roomId: string): Promise<RoomData> {
   const meta = await getRoomMeta(roomId);
   // Another join may have populated the cache while the metadata read ran.
@@ -209,9 +230,18 @@ async function buildRoom(roomId: string): Promise<RoomData> {
   };
 }
 
-/** All callers share one in-flight creation, so no RoomData is orphaned (#71). */
+/**
+ * All callers share one in-flight creation, so no RoomData is orphaned (#71).
+ * Admission happens before the two MongoDB reads, so a full cache cannot be
+ * turned into an unbounded query flood by joining random codes (#74).
+ */
 async function getOrCreateRoom(roomId: string): Promise<RoomData> {
-  return getOrCreateCached(roomId, rooms, roomCreations, () => buildRoom(roomId));
+  if (!roomLifecycle.ensureCapacity(roomId, MAX_LIVE_ROOMS, roomCreations.size, Date.now(), canEvictCachedRoom)) {
+    throw new RoomCapacityError();
+  }
+  const room = await getOrCreateCached(roomId, rooms, roomCreations, () => buildRoom(roomId));
+  roomLifecycle.touch(roomId);
+  return room;
 }
 
 /** Fire-and-forget persistence of a room's moderation state. */
@@ -334,6 +364,8 @@ setInterval(() => {
       authRateLimitMap.delete(key);
     }
   }
+  joinSocketLimiter.prune();
+  joinIpLimiter.prune();
 }, 10 * 60 * 1000);
 
 function authRateLimiter(maxRequests = 30, windowMs = 60000, bucket = "default") {
@@ -417,8 +449,7 @@ async function startServer() {
     }
 
     await io.in(roomId).socketsLeave(roomId);
-    roomLifecycle.cancelCleanup(roomId);
-    rooms.delete(roomId);
+    roomLifecycle.forget(roomId);
     finalizeRoomDeletion(roomId);
   };
 
@@ -885,7 +916,7 @@ async function startServer() {
   });
 
   // Session Room Creation & Management Routes
-  app.post("/api/rooms/create", async (req, res) => {
+  app.post("/api/rooms/create", authRateLimiter(10, 60_000, "rooms-create"), async (req, res) => {
     try {
       const authHeader = req.headers.authorization;
       const token = authHeader?.replace("Bearer ", "")?.trim();
@@ -899,6 +930,12 @@ async function startServer() {
       const { name, customCode, isLocked } = req.body;
       let roomId = customCode ? customCode.trim().toUpperCase().replace(/[^A-Z0-9_-]/g, "-") : generateRoomCode();
       if (!roomId || roomId.length < 2) roomId = generateRoomCode();
+
+      // Reject before the metadata write when the live cache is full (#74).
+      if (!roomLifecycle.ensureCapacity(roomId, MAX_LIVE_ROOMS, roomCreations.size, Date.now(), canEvictCachedRoom)) {
+        res.status(503).json({ success: false, error: ROOM_CAPACITY_ERROR });
+        return;
+      }
 
       // Ownership always comes from the server-issued session. Guest accounts
       // use the same endpoint after obtaining a server-issued guest token.
@@ -926,6 +963,10 @@ async function startServer() {
 
       res.json({ success: true, room: roomMeta });
     } catch (err: any) {
+      if (err instanceof RoomCapacityError) {
+        res.status(503).json({ success: false, error: ROOM_CAPACITY_ERROR });
+        return;
+      }
       res.status(400).json({ success: false, error: err.message || "Could not create session room" });
     }
   });
@@ -1088,6 +1129,27 @@ async function startServer() {
         return;
       }
 
+      // Admission control runs before token/DB work so a flood of arbitrary
+      // codes cannot turn into DB queries or rate-limit state of its own (#74).
+      const addressLimit = joinIpLimiter.check(socketJoinAddress(socket));
+      if (!addressLimit.allowed) {
+        socket.emit("room-error", {
+          message: ROOM_JOIN_RATE_ERROR,
+          code: "ROOM_JOIN_RATE_LIMIT",
+          retryAfterMs: addressLimit.retryAfterMs,
+        });
+        return;
+      }
+      const socketLimit = joinSocketLimiter.check(socket.id);
+      if (!socketLimit.allowed) {
+        socket.emit("room-error", {
+          message: ROOM_JOIN_RATE_ERROR,
+          code: "ROOM_JOIN_RATE_LIMIT",
+          retryAfterMs: socketLimit.retryAfterMs,
+        });
+        return;
+      }
+
       // Every participant must have a server-issued identity. The id broadcast
       // in room presence is public, so accepting a client-supplied id would let
       // any guest claim the host's moderation rights.
@@ -1106,7 +1168,16 @@ async function startServer() {
       const actualName = identity.name;
       const actualColor = identity.color;
 
-      const room = await getOrCreateRoom(roomId);
+      let room: RoomData;
+      try {
+        room = await getOrCreateRoom(roomId);
+      } catch (err) {
+        if (err instanceof RoomCapacityError) {
+          socket.emit("room-error", { message: ROOM_CAPACITY_ERROR, code: "ROOM_CAPACITY" });
+          return;
+        }
+        throw err;
+      }
 
       // Verify if user was kicked by the host
       if (room.kickedUserIds.has(actualUserId)) {
@@ -1876,6 +1947,7 @@ async function startServer() {
     // Disconnect
     safeOn("disconnect", () => {
       clearLiveStrokes();
+      joinSocketLimiter.clear(socket.id);
       if (!currentRoomId || !currentUser) return;
       const room = rooms.get(currentRoomId);
       if (!room) return;
