@@ -1,9 +1,8 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
+import React, { useEffect, useState } from 'react';
 import { X, Plus, Lock, Unlock, Hash, ArrowRight, Trash2, Clock } from 'lucide-react';
 import { SessionRoom } from '../types';
 import { getRecentRooms, RecentRoom } from '../utils/recentRooms';
-import { useModalA11y } from '../hooks/useModalA11y';
+import { ModalShell } from './ui/ModalShell';
 
 interface CreateRoomModalProps {
   isOpen: boolean;
@@ -50,11 +49,6 @@ export const CreateRoomModal: React.FC<CreateRoomModalProps> = ({
     }
   }, [isOpen]);
 
-  const dialogRef = useRef<HTMLDivElement>(null);
-  useModalA11y({ isOpen, onClose, dialogRef });
-
-  if (!isOpen) return null;
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!roomName.trim()) {
@@ -79,23 +73,15 @@ export const CreateRoomModal: React.FC<CreateRoomModalProps> = ({
     }
   };
 
-  return createPortal(
-    <div
-      id="create-room-modal-overlay"
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 dark:bg-black/75 backdrop-blur-sm animate-in fade-in duration-150"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
+  return (
+    <ModalShell
+      isOpen={isOpen}
+      onClose={onClose}
+      titleId="create-room-modal-title"
+      overlayId="create-room-modal-overlay"
+      dialogId="create-room-modal-dialog"
+      panelClassName="w-full max-w-lg bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden text-slate-900 dark:text-slate-100"
     >
-      <div
-        ref={dialogRef}
-        id="create-room-modal-dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="create-room-modal-title"
-        tabIndex={-1}
-        className="w-full max-w-lg bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden text-slate-900 dark:text-slate-100"
-      >
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/40">
           <div className="flex items-center gap-2">
@@ -321,8 +307,6 @@ export const CreateRoomModal: React.FC<CreateRoomModalProps> = ({
             </div>
           )}
         </div>
-      </div>
-    </div>,
-    document.body
+    </ModalShell>
   );
 };

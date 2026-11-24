@@ -1,8 +1,7 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
+import React, { useEffect, useState } from 'react';
 import { X, Lock, Mail, User as UserIcon, Check, Eye, EyeOff, Sparkles, LogIn, UserPlus, Chrome, LogOut } from 'lucide-react';
 import { AuthUser } from '../types';
-import { useModalA11y } from '../hooks/useModalA11y';
+import { ModalShell } from './ui/ModalShell';
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -65,11 +64,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       setIsGoogleLoading(false);
     }
   }, [isOpen]);
-
-  const dialogRef = useRef<HTMLDivElement>(null);
-  useModalA11y({ isOpen, onClose, dialogRef });
-
-  if (!isOpen) return null;
 
   const handleGoogleSignIn = async () => {
     if (!onGoogleLogin) return;
@@ -146,23 +140,17 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     }
   };
 
-  return createPortal(
-    <div
-      id="auth-modal-overlay"
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 dark:bg-black/75 backdrop-blur-sm animate-in fade-in duration-150"
-      onClick={(e) => {
-        if (e.target === e.currentTarget && currentUser) onClose();
+  return (
+    <ModalShell
+      isOpen={isOpen}
+      onClose={() => {
+        if (currentUser) onClose();
       }}
+      closeOnBackdrop={Boolean(currentUser)}
+      titleId="auth-modal-title"
+      overlayId="auth-modal-overlay"
+      dialogId="auth-modal-dialog"
     >
-      <div
-        ref={dialogRef}
-        id="auth-modal-dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="auth-modal-title"
-        tabIndex={-1}
-        className="w-full max-w-md bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden text-slate-900 dark:text-slate-100"
-      >
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/40">
           <div className="flex items-center gap-2">
@@ -529,14 +517,12 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   disabled={isSubmitting}
                   className="w-full mt-2 py-2.5 bg-slate-900 dark:bg-blue-600 hover:bg-slate-800 dark:hover:bg-blue-700 text-white font-medium text-xs rounded-xl shadow-xs transition-colors cursor-pointer"
                 >
-                  {isSubmitting ? 'Joining...' : 'Continue as Guest'}
+                  <span>{isSubmitting ? 'Joining...' : 'Continue as Guest'}</span>
                 </button>
               </form>
             )}
           </div>
         )}
-      </div>
-    </div>,
-    document.body
+    </ModalShell>
   );
 };

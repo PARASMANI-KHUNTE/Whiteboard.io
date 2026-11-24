@@ -1,7 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
 import { X, Copy, Check, Share2, Users, Shield, Globe } from 'lucide-react';
-import { useModalA11y } from '../hooks/useModalA11y';
+import { ModalShell } from './ui/ModalShell';
 
 interface ShareRoomModalProps {
   isOpen: boolean;
@@ -34,11 +33,6 @@ export const ShareRoomModal: React.FC<ShareRoomModalProps> = ({
       if (linkTimerRef.current) clearTimeout(linkTimerRef.current);
     };
   }, []);
-
-  const dialogRef = useRef<HTMLDivElement>(null);
-  useModalA11y({ isOpen, onClose, dialogRef });
-
-  if (!isOpen) return null;
 
   const activeRoomId = roomCode || 'offline';
   const roomUrl = `${window.location.origin}?room=${encodeURIComponent(activeRoomId)}`;
@@ -92,23 +86,14 @@ export const ShareRoomModal: React.FC<ShareRoomModalProps> = ({
     if (copied) resetCopiedLinkLater();
   };
 
-  return createPortal(
-    <div
-      id="share-room-modal-overlay"
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 dark:bg-black/75 backdrop-blur-sm animate-in fade-in duration-150"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
+  return (
+    <ModalShell
+      isOpen={isOpen}
+      onClose={onClose}
+      titleId="share-room-modal-title"
+      overlayId="share-room-modal-overlay"
+      dialogId="share-room-modal-dialog"
     >
-      <div
-        ref={dialogRef}
-        id="share-room-modal-dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="share-room-modal-title"
-        tabIndex={-1}
-        className="w-full max-w-md bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden text-slate-900 dark:text-slate-100"
-      >
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/40">
           <div className="flex items-center gap-2">
@@ -229,8 +214,6 @@ export const ShareRoomModal: React.FC<ShareRoomModalProps> = ({
             Done
           </button>
         </div>
-      </div>
-    </div>,
-    document.body
+    </ModalShell>
   );
 };

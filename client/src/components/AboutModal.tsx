@@ -1,5 +1,4 @@
-import React, { useRef } from 'react';
-import { createPortal } from 'react-dom';
+import React from 'react';
 import {
   X,
   Sparkles,
@@ -10,7 +9,7 @@ import {
   XCircle,
   Heart,
 } from 'lucide-react';
-import { useModalA11y } from '../hooks/useModalA11y';
+import { ModalShell } from './ui/ModalShell';
 
 interface AboutModalProps {
   isOpen: boolean;
@@ -23,26 +22,14 @@ export const AboutModal: React.FC<AboutModalProps> = ({
   onClose,
   onOpenAiModal,
 }) => {
-  const dialogRef = useRef<HTMLDivElement>(null);
-  useModalA11y({ isOpen, onClose, dialogRef });
-
-  if (!isOpen) return null;
-
-  return createPortal(
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/60 dark:bg-black/80 backdrop-blur-md animate-in fade-in duration-200"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
+  return (
+    <ModalShell
+      isOpen={isOpen}
+      onClose={onClose}
+      titleId="about-modal-title"
+      overlayClassName="z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/60 dark:bg-black/80 backdrop-blur-md animate-in fade-in duration-200"
+      panelClassName="bg-white dark:bg-slate-900 rounded-3xl w-full max-w-2xl max-h-[90vh] flex flex-col border border-slate-200/80 dark:border-slate-800 shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 text-slate-900 dark:text-slate-100"
     >
-      <div
-        ref={dialogRef}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="about-modal-title"
-        tabIndex={-1}
-        className="bg-white dark:bg-slate-900 rounded-3xl w-full max-w-2xl max-h-[90vh] flex flex-col border border-slate-200/80 dark:border-slate-800 shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 text-slate-900 dark:text-slate-100"
-      >
         {/* Modal Header */}
         <div className="px-6 py-5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-slate-50/50 dark:bg-slate-900/50">
           <div className="flex items-center gap-3">
@@ -232,8 +219,6 @@ export const AboutModal: React.FC<AboutModalProps> = ({
             </button>
           </div>
         </div>
-      </div>
-    </div>,
-    document.body
+    </ModalShell>
   );
 };

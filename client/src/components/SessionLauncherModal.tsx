@@ -1,8 +1,7 @@
-import React, { useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
+import React, { useState } from 'react';
 import { AuthUser, SessionRoom } from '../types';
 import { Users, Palette, Sparkles, ArrowRight, Hash, LogIn } from 'lucide-react';
-import { useModalA11y } from '../hooks/useModalA11y';
+import { ModalShell } from './ui/ModalShell';
 
 interface SessionLauncherModalProps {
   isOpen: boolean;
@@ -25,10 +24,6 @@ export const SessionLauncherModal: React.FC<SessionLauncherModalProps> = ({
 }) => {
   const [joinCodeInput, setJoinCodeInput] = useState('');
   const [joinError, setJoinError] = useState<string | null>(null);
-  const dialogRef = useRef<HTMLDivElement>(null);
-  useModalA11y({ isOpen, onClose, dialogRef });
-
-  if (!isOpen) return null;
 
   const handleJoinSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -41,20 +36,17 @@ export const SessionLauncherModal: React.FC<SessionLauncherModalProps> = ({
     onJoinRoomByCode(clean);
   };
 
-  return createPortal(
-    <div
-      id="session-launcher-overlay"
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 dark:bg-black/80 backdrop-blur-sm animate-in fade-in duration-200"
+  return (
+    <ModalShell
+      isOpen={isOpen}
+      onClose={onClose}
+      titleId="session-launcher-title"
+      closeOnBackdrop={false}
+      overlayId="session-launcher-overlay"
+      dialogId="session-launcher-dialog"
+      overlayClassName="z-50 flex items-center justify-center p-4 bg-slate-900/60 dark:bg-black/80 backdrop-blur-sm animate-in fade-in duration-200"
+      panelClassName="w-full max-w-2xl bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 text-slate-900 dark:text-slate-100"
     >
-      <div
-        ref={dialogRef}
-        id="session-launcher-dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="session-launcher-title"
-        tabIndex={-1}
-        className="w-full max-w-2xl bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 text-slate-900 dark:text-slate-100"
-      >
         {/* Header Banner */}
         <div className="p-6 sm:p-8 bg-gradient-to-br from-slate-900 via-slate-800 to-blue-950 text-white relative overflow-hidden">
           <div className="absolute top-0 right-0 -mt-8 -mr-8 w-48 h-48 bg-blue-500/10 rounded-full blur-3xl pointer-events-none" />
@@ -192,8 +184,6 @@ export const SessionLauncherModal: React.FC<SessionLauncherModalProps> = ({
             </div>
           )}
         </div>
-      </div>
-    </div>,
-    document.body
+    </ModalShell>
   );
 };

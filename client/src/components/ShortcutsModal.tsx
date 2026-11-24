@@ -1,8 +1,7 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Keyboard, Search, X } from 'lucide-react';
 import { SHORTCUT_SECTIONS } from '../utils/shortcuts';
-import { useModalA11y } from '../hooks/useModalA11y';
+import { ModalShell } from './ui/ModalShell';
 
 interface ShortcutsModalProps {
   isOpen: boolean;
@@ -14,16 +13,9 @@ const MOD_HINT = 'On macOS use ⌘ instead of Ctrl';
 export const ShortcutsModal: React.FC<ShortcutsModalProps> = ({ isOpen, onClose }) => {
   const [query, setQuery] = useState('');
 
-  const dialogRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!isOpen) setQuery('');
   }, [isOpen]);
-  useModalA11y({
-    isOpen,
-    onClose,
-    dialogRef,
-    initialFocusSelector: 'input[type="text"]',
-  });
 
   const filteredSections = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -40,23 +32,16 @@ export const ShortcutsModal: React.FC<ShortcutsModalProps> = ({ isOpen, onClose 
     })).filter((section) => section.shortcuts.length > 0);
   }, [query]);
 
-  if (!isOpen) return null;
-
-  return createPortal(
-    <div
-      className="fixed inset-0 z-[90] flex items-end sm:items-center justify-center p-0 sm:p-6 bg-slate-950/45 backdrop-blur-sm animate-fade-in"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget) onClose();
-      }}
+  return (
+    <ModalShell
+      isOpen={isOpen}
+      onClose={onClose}
+      titleId="shortcuts-modal-title"
+      initialFocusSelector='input[type="text"]'
+      backdropDismissEvent="mousedown"
+      overlayClassName="z-[90] flex items-end sm:items-center justify-center p-0 sm:p-6 bg-slate-950/45 backdrop-blur-sm animate-fade-in"
+      panelClassName="w-full sm:max-w-3xl max-h-[88vh] sm:max-h-[82vh] flex flex-col bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-t-3xl sm:rounded-3xl shadow-2xl animate-slide-up"
     >
-      <div
-        ref={dialogRef}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="shortcuts-modal-title"
-        tabIndex={-1}
-        className="w-full sm:max-w-3xl max-h-[88vh] sm:max-h-[82vh] flex flex-col bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-t-3xl sm:rounded-3xl shadow-2xl animate-slide-up"
-      >
         {/* Header */}
         <div className="flex items-center gap-3 px-5 sm:px-6 pt-5 pb-4 border-b border-slate-100 dark:border-slate-800">
           <div className="w-10 h-10 rounded-2xl bg-blue-50 dark:bg-blue-950/70 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0">
@@ -157,8 +142,6 @@ export const ShortcutsModal: React.FC<ShortcutsModalProps> = ({ isOpen, onClose 
           <span>Tip: use <kbd className="kbd-inline">?</kbd> anywhere to reopen this panel.</span>
           <span className="hidden sm:inline">{MOD_HINT}</span>
         </div>
-      </div>
-    </div>,
-    document.body
+    </ModalShell>
   );
 };
