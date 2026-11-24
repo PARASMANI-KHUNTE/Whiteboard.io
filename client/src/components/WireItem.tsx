@@ -4,6 +4,7 @@ import { WireElement, CanvasElement, WireStyle } from '../types';
 import { routeWire } from '../utils/wireGeometry';
 import { getAdaptiveDisplayColor } from '../utils/themeColors';
 import { computeWireHitStrokeWidth } from '../utils/hitTesting';
+import { hasMultiSelectModifier } from '../utils/selection';
 import {
   Spline,
   Minus,
@@ -41,7 +42,7 @@ export interface WireItemProps {
   theme?: 'light' | 'dark';
   canWrite?: boolean;
   isSelected?: boolean;
-  onSelect?: () => void;
+  onSelect?: (isMulti?: boolean) => void;
   onUpdate: (updated: WireElement) => void;
   onDelete: (id: string) => void;
 }
@@ -161,11 +162,10 @@ export const WireItem: React.FC<WireItemProps> = ({
         style={{ pointerEvents: 'stroke', cursor: 'pointer' }}
         onMouseDown={(e) => {
           e.stopPropagation();
-          onSelect?.();
+          onSelect?.(hasMultiSelectModifier(e));
         }}
         onClick={(e) => {
           e.stopPropagation();
-          onSelect?.();
         }}
       />
     </g>
