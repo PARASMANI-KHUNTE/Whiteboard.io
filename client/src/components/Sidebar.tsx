@@ -7,29 +7,19 @@ import {
 } from 'react';
 import {
   Download,
-  Hand,
-  Highlighter,
   Info,
   Keyboard,
   ListChecks,
   LogIn,
-  MousePointer,
   PanelLeftClose,
   PanelLeftOpen,
-  Pencil,
   Redo2,
   Share2,
   Shield,
-  Smile,
-  Spline,
-  StickyNote,
   Trash2,
-  Type,
   Undo2,
   UserRound,
   Users,
-  Eraser,
-  Shapes,
   Menu,
   type LucideIcon,
 } from 'lucide-react';
@@ -38,6 +28,7 @@ import type { ToolType } from '../types';
 import { getThemeToggleMeta } from './ui/ThemeToggle';
 import { getVoiceConnectionMeta, getVoiceMuteMeta } from './ui/voiceActions';
 import { getAiChatActionMeta, getAiDiagramActionMeta } from './ui/aiActions';
+import { CANVAS_TOOL_DEFINITIONS } from './ui/toolActions';
 
 type IconComponent = LucideIcon;
 
@@ -236,23 +227,7 @@ export default function Sidebar({
     [runAction]
   );
 
-  const toolButtons: Array<{
-    tool: ToolType;
-    label: string;
-    icon: IconComponent;
-    needsWrite: boolean;
-  }> = [
-    { tool: 'select', label: 'Select', icon: MousePointer, needsWrite: false },
-    { tool: 'hand', label: 'Pan / Hand', icon: Hand, needsWrite: false },
-    { tool: 'pen', label: 'Pen', icon: Pencil, needsWrite: true },
-    { tool: 'highlighter', label: 'Highlighter', icon: Highlighter, needsWrite: true },
-    { tool: 'eraser', label: 'Eraser', icon: Eraser, needsWrite: true },
-    { tool: 'shape', label: 'Shapes', icon: Shapes, needsWrite: true },
-    { tool: 'icon', label: 'Icons & stickers', icon: Smile, needsWrite: true },
-    { tool: 'sticky', label: 'Sticky note', icon: StickyNote, needsWrite: true },
-    { tool: 'text', label: 'Text', icon: Type, needsWrite: true },
-    { tool: 'wire', label: 'Wire connector', icon: Spline, needsWrite: true },
-  ];
+  const toolButtons = CANVAS_TOOL_DEFINITIONS;
 
   return (
     <>

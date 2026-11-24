@@ -22,6 +22,7 @@ import { WireItem, WireOverlay } from './WireItem';
 import { ZoomControls } from './ZoomControls';
 import { ContextMenu, ContextMenuEntry } from './ContextMenu';
 import { ShortcutsLauncherButton } from './ui/ShortcutsLauncherButton';
+import { getHandFallbackTool } from './ui/toolActions';
 import {
   CheckSquare,
   Copy,
@@ -2351,7 +2352,12 @@ export const Canvas: React.FC<CanvasProps> = ({
         onZoomOut={zoomOut}
         onResetZoom={resetView}
         isHandTool={currentTool === 'hand'}
-        onToggleHand={onSelectTool ? () => onSelectTool(currentTool === 'hand' ? 'pen' : 'hand') : undefined}
+        canWrite={canWrite}
+        onToggleHand={
+          onSelectTool
+            ? () => onSelectTool(currentTool === 'hand' ? getHandFallbackTool(canWrite) : 'hand')
+            : undefined
+        }
       />
 
       {/* Shortcut cheat-sheet launcher */}
