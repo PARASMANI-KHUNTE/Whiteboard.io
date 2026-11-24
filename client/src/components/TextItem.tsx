@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { getAdaptiveDisplayColor } from '../utils/themeColors';
 import { shouldBailOutItemMouseDown } from '../utils/canvasPan';
+import { hasMultiSelectModifier } from '../utils/selection';
 
 interface TextItemProps {
   element: TextElement;
@@ -350,16 +351,15 @@ export const TextItem: React.FC<TextItemProps> = ({
       onMouseDown={(e) => {
         if (shouldBailOutItemMouseDown(e)) return;
         e.stopPropagation();
-        onSelect?.(e.shiftKey || e.ctrlKey || e.metaKey);
+        onSelect?.(hasMultiSelectModifier(e));
       }}
       onClick={(e) => {
         e.stopPropagation();
-        onSelect?.(e.shiftKey || e.ctrlKey || e.metaKey);
         textareaRef.current?.focus();
       }}
       onTouchStart={(e) => {
         e.stopPropagation();
-        onSelect?.(e.shiftKey || e.ctrlKey || e.metaKey);
+        onSelect?.(hasMultiSelectModifier(e));
         textareaRef.current?.focus();
       }}
       className={`group absolute top-0 left-0 min-w-[120px] max-w-lg rounded-xl transition-shadow z-20 pointer-events-auto ${
@@ -668,7 +668,6 @@ export const TextItem: React.FC<TextItemProps> = ({
       <div
         className={`p-1.5 ${isLocked ? 'cursor-default' : 'cursor-text'}`}
         onClick={() => {
-          onSelect?.();
           if (!isLocked) textareaRef.current?.focus();
         }}
       >
@@ -678,20 +677,15 @@ export const TextItem: React.FC<TextItemProps> = ({
           readOnly={!canWrite || isLocked}
           onChange={(e) => handleTextChange(e.target.value)}
           onFocus={() => {
-            if (canWrite && !isLocked) {
-              setIsEditing(true);
-              onSelect?.();
-            }
+            if (canWrite && !isLocked) setIsEditing(true);
           }}
           onBlur={handleTextBlur}
           onMouseDown={(e) => {
-            if (shouldBailOutItemMouseDown(e)) return;
             e.stopPropagation();
-            onSelect?.();
+            onSelect?.(hasMultiSelectModifier(e));
           }}
           onClick={(e) => {
             e.stopPropagation();
-            onSelect?.();
           }}
           onKeyDown={handleKeyDown}
           placeholder={canWrite && !isLocked ? "Type text here..." : "Locked — unlock to edit"}

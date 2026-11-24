@@ -15,6 +15,7 @@ import {
 import { getAdaptiveDisplayColor } from '../utils/themeColors';
 import { computeRotatedResize, getRotatedResizeCursor } from '../utils/shapeResize';
 import { shouldBailOutItemMouseDown } from '../utils/canvasPan';
+import { hasMultiSelectModifier } from '../utils/selection';
 
 interface ShapeItemProps {
   element: ShapeElement;
@@ -682,15 +683,14 @@ export const ShapeItem: React.FC<ShapeItemProps> = ({
       onMouseDown={(e) => {
         if (shouldBailOutItemMouseDown(e)) return;
         e.stopPropagation();
-        onSelect?.(e.shiftKey || e.ctrlKey || e.metaKey);
+        onSelect?.(hasMultiSelectModifier(e));
       }}
       onClick={(e) => {
         e.stopPropagation();
-        onSelect?.(e.shiftKey || e.ctrlKey || e.metaKey);
       }}
       onTouchStart={(e) => {
         e.stopPropagation();
-        onSelect?.(e.shiftKey || e.ctrlKey || e.metaKey);
+        onSelect?.(hasMultiSelectModifier(e));
       }}
       onDoubleClick={(e) => {
         if (!canWrite || isLocked) return;

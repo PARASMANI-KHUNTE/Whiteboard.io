@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { AVAILABLE_ICONS } from '../constants/icons';
 import { shouldBailOutItemMouseDown } from '../utils/canvasPan';
+import { hasMultiSelectModifier } from '../utils/selection';
 
 interface IconItemProps {
   element: IconElement;
@@ -457,15 +458,14 @@ export const IconItem: React.FC<IconItemProps> = ({
       onMouseDown={(e) => {
         if (shouldBailOutItemMouseDown(e)) return;
         e.stopPropagation();
-        onSelect?.(e.shiftKey || e.ctrlKey || e.metaKey);
+        onSelect?.(hasMultiSelectModifier(e));
       }}
       onClick={(e) => {
         e.stopPropagation();
-        onSelect?.(e.shiftKey || e.ctrlKey || e.metaKey);
       }}
       onTouchStart={(e) => {
         e.stopPropagation();
-        onSelect?.(e.shiftKey || e.ctrlKey || e.metaKey);
+        onSelect?.(hasMultiSelectModifier(e));
       }}
       className={`absolute top-0 left-0 select-none z-20 group flex items-center justify-center pointer-events-auto ${
         isDragging ? 'cursor-grabbing' : ''
