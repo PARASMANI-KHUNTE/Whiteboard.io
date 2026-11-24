@@ -9,6 +9,7 @@ interface StickyNoteItemProps {
   zoom?: number;
   isSelected?: boolean;
   isMultiSelection?: boolean;
+  autoFocus?: boolean;
   onSelect?: (isMulti?: boolean) => void;
   onUpdate: (updated: StickyNote) => void;
   onDelete: (id: string) => void;
@@ -32,6 +33,7 @@ export const StickyNoteItem: React.FC<StickyNoteItemProps> = ({
   zoom = 1,
   isSelected = false,
   isMultiSelection = false,
+  autoFocus = false,
   onSelect,
   onUpdate,
   onDelete,
@@ -57,12 +59,12 @@ export const StickyNoteItem: React.FC<StickyNoteItemProps> = ({
   });
   const isLocked = Boolean(note.isLocked);
 
-  // Auto-focus empty note when created so user can immediately type into it
+  // Auto-focus empty note ONLY when explicitly requested (e.g. freshly created in this session)
   useEffect(() => {
-    if (canWrite && !isLocked && note.text === '' && textareaRef.current) {
+    if (autoFocus && canWrite && !isLocked && note.text === '' && textareaRef.current) {
       textareaRef.current.focus();
     }
-  }, []);
+  }, [autoFocus, canWrite, isLocked, note.text]);
 
   // Keep localText in sync with incoming note updates when not actively editing
   useEffect(() => {

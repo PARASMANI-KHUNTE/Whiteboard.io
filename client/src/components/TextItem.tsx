@@ -25,6 +25,7 @@ interface TextItemProps {
   theme?: 'light' | 'dark';
   isSelected?: boolean;
   isMultiSelection?: boolean;
+  autoFocus?: boolean;
   onSelect?: (isMulti?: boolean) => void;
   onUpdate: (updated: TextElement) => void;
   onDelete: (id: string) => void;
@@ -68,6 +69,7 @@ export const TextItem: React.FC<TextItemProps> = ({
   theme = 'light',
   isSelected = false,
   isMultiSelection = false,
+  autoFocus = false,
   onSelect,
   onUpdate,
   onDelete,
@@ -111,14 +113,14 @@ export const TextItem: React.FC<TextItemProps> = ({
   const isLocked = Boolean(element.isLocked);
   const showControls = canWrite && !isLocked && (isEditing || (isSelected && !isMultiSelection));
 
-  // Auto-focus empty text item when freshly created
+  // Auto-focus empty text item ONLY when explicitly requested (e.g. freshly created in this session)
   useEffect(() => {
-    if (canWrite && !isLocked && element.text === '' && textareaRef.current) {
+    if (autoFocus && canWrite && !isLocked && element.text === '' && textareaRef.current) {
       setTimeout(() => {
         textareaRef.current?.focus();
       }, 50);
     }
-  }, []);
+  }, [autoFocus, canWrite, isLocked, element.text]);
 
   // Auto-resize textarea dimensions
   useEffect(() => {

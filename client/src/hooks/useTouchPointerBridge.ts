@@ -119,7 +119,7 @@ export function useTouchPointerBridge(): void {
     };
 
     const onPointerUp = (event: PointerEvent) => end(event);
-    const onPointerCancel = (event: PointerEvent) => end(event, false);
+    const onPointerCancel = (event: PointerEvent) => end(event);
 
     document.addEventListener('pointerdown', onPointerDown, { capture: true, passive: false });
     window.addEventListener('pointermove', onPointerMove, { capture: true, passive: false });
