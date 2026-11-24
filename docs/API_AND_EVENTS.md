@@ -151,10 +151,10 @@ Validates an active session token and returns the current user profile.
   }
   ```
 
-#### `GET /api/auth/google/url`
-Generates Google OAuth 2.0 authorization URL.
+#### `GET /api/auth/google/url` and `GET /api/auth/google/start`
+Generates the Google OAuth 2.0 authorization URL as JSON (`/url`) or redirects straight to Google (`/start`, used by the popup).
 * **Query Parameters**: `?origin=https://your-frontend.com`
-* **Side effect**: Sets the `HttpOnly`, `SameSite=Lax` cookie `wb_oauth_nonce` (also `Secure` on HTTPS) with a 10-minute lifetime. The cookie nonce is embedded in the base64url-encoded `state` value together with the redirect URI and trusted return origin. The client must call this endpoint with `credentials: 'include'`, and the frontend origin must be in the server's CORS allowlist.
+* **Side effect**: Sets an `HttpOnly` cookie named `wb_oauth_nonce` with a 10-minute lifetime. It is `SameSite=Lax` for same-host frontends and `SameSite=None; Secure` for split deployments. The nonce is embedded in the base64url-encoded `state` value together with the redirect URI and trusted return origin. The frontend origin must be in the server's CORS/trusted-origin allowlist.
 * **Response (`200 OK`)**:
   ```json
   {

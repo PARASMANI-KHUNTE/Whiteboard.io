@@ -368,42 +368,32 @@ export function useAuth() {
     message?: string;
   }> => {
     try {
-      const urlRes = await fetch(`${BACKEND_URL}/api/auth/google/url?origin=${encodeURIComponent(window.location.origin)}`, {
-        // The server sets an HttpOnly nonce cookie that the callback verifies.
-        credentials: 'include',
-      });
-      const urlData = await urlRes.json();
+      // Start the flow with a top-level navigation to the backend so the nonce
+      // cookie is set first-party, even when the frontend is on a separate site.
+      const startUrl = `${BACKEND_URL}/api/auth/google/start?origin=${encodeURIComponent(window.location.origin)}`;
+      const width = 520;
+      const height = 640;
+      const left = window.screenX + (window.outerWidth - width) / 2;
+      const top = window.screenY + (window.outerHeight - height) / 2;
+      const popup = window.open(
+        startUrl,
+        'google_oauth_popup',
+        `width=${width},height=${height},left=${left},top=${top},scrollbars=yes,resizable=yes`
+      );
 
-      if (urlData.configured && urlData.url) {
-        const width = 520;
-        const height = 640;
-        const left = window.screenX + (window.outerWidth - width) / 2;
-        const top = window.screenY + (window.outerHeight - height) / 2;
-        const popup = window.open(
-          urlData.url,
-          'google_oauth_popup',
-          `width=${width},height=${height},left=${left},top=${top},scrollbars=yes,resizable=yes`
-        );
-
-        if (!popup) {
-          return { success: false, error: 'Popup blocked. Please allow popups for this site to sign in with Google.' };
-        }
-
-        popupRef.current = popup;
-        // The shared listener above resolves this promise; there is no second
-        // listener that could saveAuth twice or race with /auth/me.
-        return new Promise<OAuthResult>((resolve) => {
-          oauthResolveRef.current = resolve;
-          oauthTimeoutRef.current = setTimeout(() => {
-            finishOAuth({ success: false, error: 'Google sign-in timed out or was closed.' });
-          }, 120000);
-        });
-      } else {
-        return {
-          success: false,
-          error: urlData.message || 'Google OAuth is not configured on the server. Please verify GOOGLE_CLIENT_ID in server/.env.',
-        };
+      if (!popup) {
+        return { success: false, error: 'Popup blocked. Please allow popups for this site to sign in with Google.' };
       }
+
+      popupRef.current = popup;
+      // The shared listener above resolves this promise; there is no second
+      // listener that could saveAuth twice or race with /auth/me.
+      return new Promise<OAuthResult>((resolve) => {
+        oauthResolveRef.current = resolve;
+        oauthTimeoutRef.current = setTimeout(() => {
+          finishOAuth({ success: false, error: 'Google sign-in timed out or was closed.' });
+        }, 120000);
+      });
     } catch (err: any) {
       return { success: false, error: err.message || 'Network error during Google sign-in' };
     }
