@@ -27,6 +27,7 @@ import { CreateRoomModal } from './components/CreateRoomModal';
 import { ShareRoomModal } from './components/ShareRoomModal';
 import { AdminPanelModal } from './components/AdminPanelModal';
 import { SessionLauncherModal } from './components/SessionLauncherModal';
+import { ShortcutsModal } from './components/ShortcutsModal';
 import { ConfirmModal } from './components/ConfirmModal';
 import { AiGenerateModal } from './components/AiGenerateModal';
 import { AiChatPanel } from './components/AiChatPanel';
@@ -110,6 +111,7 @@ export default function App() {
   const [showShareModal, setShowShareModal] = useState<boolean>(false);
   const [showAdminModal, setShowAdminModal] = useState<boolean>(false);
   const [showAiModal, setShowAiModal] = useState<boolean>(false);
+  const [showShortcutsModal, setShowShortcutsModal] = useState<boolean>(false);
   const [aiSession, setAiSession] = useState<AiSessionState | null>(null);
   const [isAiChatOpen, setIsAiChatOpen] = useState<boolean>(false);
 
@@ -1485,6 +1487,7 @@ export default function App() {
           isVoiceConnected ? leaveVoiceChat() : handleJoinVoiceWithSoloCheck()
         }
         onToggleMute={toggleMute}
+        onOpenShortcuts={() => setShowShortcutsModal(true)}
       />
 
       {/* Main Interactive Canvas Area */}
@@ -1496,6 +1499,9 @@ export default function App() {
         currentUserName={currentUser.name}
         canWrite={canWrite}
         shortcutsBlocked={isBlockingOverlayOpen}
+        isShortcutsOpen={showShortcutsModal}
+        onOpenShortcuts={() => setShowShortcutsModal(true)}
+        onCloseShortcuts={() => setShowShortcutsModal(false)}
         theme={theme}
         onRestrictedAttempt={() =>
           addNotification('Drawing is restricted by room admin', 'warning')
@@ -1664,6 +1670,12 @@ export default function App() {
         variant={confirmModalState.variant}
         onConfirm={confirmModalState.onConfirm}
         onCancel={() => setConfirmModalState((prev) => ({ ...prev, isOpen: false }))}
+      />
+
+      {/* Keyboard Shortcuts Cheat Sheet Modal */}
+      <ShortcutsModal
+        isOpen={showShortcutsModal}
+        onClose={() => setShowShortcutsModal(false)}
       />
 
       {/* Gemini AI Diagram Generator Modal */}

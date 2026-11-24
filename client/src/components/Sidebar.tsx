@@ -69,6 +69,7 @@ export interface SidebarProps {
   onToggleAiChat: () => void;
   onToggleVoice: () => void;
   onToggleMute: () => void;
+  onOpenShortcuts: () => void;
 }
 
 interface SidebarButtonProps {
@@ -162,6 +163,7 @@ export default function Sidebar({
   onToggleAiChat,
   onToggleVoice,
   onToggleMute,
+  onOpenShortcuts,
 }: SidebarProps) {
   const [isOpen, setIsOpen] = useState(false);
   const sidebarRef = useRef<HTMLElement>(null);
@@ -426,7 +428,7 @@ export default function Sidebar({
               icon={Keyboard}
               label="Keyboard shortcuts"
               expanded={isOpen}
-              onClick={() => clickHeaderControl('shortcuts-btn')}
+              onClick={() => runAction(onOpenShortcuts)}
             />
             {(() => {
               const themeMeta = getThemeToggleMeta(theme);
