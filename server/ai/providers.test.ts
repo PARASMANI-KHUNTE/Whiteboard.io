@@ -1,6 +1,14 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { callAiModel } from './providers';
+import {
+  callAiModel,
+  clearModelHealth,
+  geminiProviderChain,
+  isModelHealthy,
+  recordModelFailure,
+  recordModelSuccess,
+  setCachedDiscoveredModels,
+} from './providers';
 
 const originalFetch = globalThis.fetch;
 const originalEnv = { ...process.env };
@@ -8,6 +16,8 @@ const originalEnv = { ...process.env };
 test.afterEach(() => {
   globalThis.fetch = originalFetch;
   process.env = { ...originalEnv };
+  clearModelHealth();
+  setCachedDiscoveredModels(null);
 });
 
 test('callGemini sends apiKey via x-goog-api-key header and never in URL query string (#101)', async () => {
@@ -136,4 +146,43 @@ test('callOllama does not retry fatal 404 errors (#101)', async () => {
       return true;
     }
   );
+});
+
+test('circuit breaker permanently excludes HTTP 404 retired models from rotation (#179)', () => {
+  process.env.NODE_ENV = 'test';
+  process.env.GEMINI_MODEL = 'gemini-retired-model';
+  process.env.GEMINI_FALLBACK_MODELS = 'gemini-healthy-model';
+
+  assert.equal(isModelHealthy('gemini-retired-model'), true);
+  recordModelFailure('gemini-retired-model', 404);
+  assert.equal(isModelHealthy('gemini-retired-model'), false);
+
+  const chain = geminiProviderChain();
+  const models = chain.map((p) => p.model);
+  assert.ok(!models.includes('gemini-retired-model'));
+  assert.ok(models.includes('gemini-healthy-model'));
+});
+
+test('circuit breaker temporarily demotes HTTP 503 models below healthy models (#179)', () => {
+  process.env.NODE_ENV = 'test';
+  process.env.GEMINI_MODEL = 'gemini-primary';
+  process.env.GEMINI_FALLBACK_MODELS = 'gemini-secondary';
+
+  // Initially, primary is first
+  let chain = geminiProviderChain();
+  assert.equal(chain[0].model, 'gemini-primary');
+
+  // After 503, primary is placed on cooldown and demoted
+  recordModelFailure('gemini-primary', 503);
+  assert.equal(isModelHealthy('gemini-primary'), false);
+
+  chain = geminiProviderChain();
+  assert.equal(chain[0].model, 'gemini-secondary');
+  assert.equal(chain[1].model, 'gemini-primary');
+
+  // After success, primary is restored
+  recordModelSuccess('gemini-primary');
+  assert.equal(isModelHealthy('gemini-primary'), true);
+  chain = geminiProviderChain();
+  assert.equal(chain[0].model, 'gemini-primary');
 });
