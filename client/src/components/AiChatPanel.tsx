@@ -27,10 +27,16 @@ import {
 
 interface AiChatPanelProps {
   isOpen: boolean;
+  /** Room code (or "solo") the current session belongs to. */
+  boardKey: string;
   session: AiSessionState | null;
   onClose: () => void;
   onNewDiagram: () => void;
-  onApplyTurn: (payload: AiDiagramPayload, instruction: string) => void;
+  onApplyTurn: (
+    payload: AiDiagramPayload,
+    instruction: string,
+    context: { boardKey: string; sessionId: string }
+  ) => void;
   authToken?: string | null;
 }
 
@@ -124,6 +130,7 @@ function toApiHistory(messages: AiChatMessage[]): AiChatTurn[] {
 
 export const AiChatPanel: React.FC<AiChatPanelProps> = ({
   isOpen,
+  boardKey,
   session,
   onClose,
   onNewDiagram,
@@ -136,6 +143,10 @@ export const AiChatPanel: React.FC<AiChatPanelProps> = ({
   const [error, setError] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+
+  // A room/session change (or unmount) invalidates any in-flight revision.
+  useEffect(() => () => abortRef.current?.abort(), [boardKey, session?.sessionId]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -160,6 +171,14 @@ export const AiChatPanel: React.FC<AiChatPanelProps> = ({
     const trimmed = instruction.trim();
     if (!trimmed || isBusy) return;
 
+    // Freeze the board/session identity before awaiting. The App re-checks
+    // these refs before touching state, so a late response cannot leak into a
+    // room opened during the request (#68).
+    const requestBoardKey = boardKey;
+    const requestSessionId = session.sessionId;
+    const controller = new AbortController();
+    abortRef.current = controller;
+
     setIsBusy(true);
     setPendingInstruction(trimmed);
     setError(null);
@@ -173,16 +192,20 @@ export const AiChatPanel: React.FC<AiChatPanelProps> = ({
         detail: session.detail,
         direction: directionOverride ?? session.direction,
         canvasCenter: session.origin,
-        sessionId: session.sessionId,
+        sessionId: requestSessionId,
         authToken,
+        signal: controller.signal,
       });
 
-      onApplyTurn(payload, trimmed);
+      if (controller.signal.aborted) return;
+      onApplyTurn(payload, trimmed, { boardKey: requestBoardKey, sessionId: requestSessionId });
       setInput('');
     } catch (err: any) {
+      if (controller.signal.aborted) return;
       console.error('[AI Revision Error]:', err);
       setError(err.message || 'Could not update the diagram. Please try again.');
     } finally {
+      if (abortRef.current === controller) abortRef.current = null;
       setIsBusy(false);
       setPendingInstruction(null);
     }
