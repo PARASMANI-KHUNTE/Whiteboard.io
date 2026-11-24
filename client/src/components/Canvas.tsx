@@ -21,7 +21,7 @@ import { IconItem } from './IconItem';
 import { WireItem, WireOverlay } from './WireItem';
 import { ZoomControls } from './ZoomControls';
 import { ContextMenu, ContextMenuEntry } from './ContextMenu';
-import { ShortcutsModal } from './ShortcutsModal';
+import { ShortcutsLauncherButton } from './ui/ShortcutsLauncherButton';
 import {
   CheckSquare,
   Copy,
@@ -103,6 +103,9 @@ interface CanvasProps {
   onRegisterNavigateToElements?: (fn: (elements: CanvasElement[]) => void) => void;
   onRegisterGetWorldCenter?: (fn: () => { x: number; y: number }) => void;
   onRegisterGetViewport?: (fn: () => { pan: { x: number; y: number }; zoom: number }) => void;
+  isShortcutsOpen?: boolean;
+  onOpenShortcuts?: () => void;
+  onCloseShortcuts?: () => void;
 }
 
 // Distance from point to line segment
@@ -155,6 +158,9 @@ export const Canvas: React.FC<CanvasProps> = ({
   onRegisterNavigateToElements,
   onRegisterGetWorldCenter,
   onRegisterGetViewport,
+  isShortcutsOpen = false,
+  onOpenShortcuts,
+  onCloseShortcuts,
 }) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -186,9 +192,6 @@ export const Canvas: React.FC<CanvasProps> = ({
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   const longPressTimerRef = useRef<number | null>(null);
   const longPressStartRef = useRef<{ x: number; y: number } | null>(null);
-
-  // Keyboard shortcut cheat sheet
-  const [shortcutsOpen, setShortcutsOpen] = useState(false);
 
   // Marquee selection box state
   const [marqueeRect, setMarqueeRect] = useState<{ startX: number; startY: number; currentX: number; currentY: number } | null>(null);
@@ -703,7 +706,7 @@ export const Canvas: React.FC<CanvasProps> = ({
         label: 'Keyboard shortcuts',
         shortcut: '?',
         icon: <Keyboard className="w-3.5 h-3.5" />,
-        onSelect: () => setShortcutsOpen(true),
+        onSelect: () => onOpenShortcuts?.(),
       },
     ];
   }, [
@@ -719,6 +722,7 @@ export const Canvas: React.FC<CanvasProps> = ({
     handleSetSelectionLock,
     handleDeleteSelected,
     handleZOrder,
+    onOpenShortcuts,
   ]);
 
   // When user picks a color in Toolbar while elements are selected, apply to them immediately
@@ -923,7 +927,7 @@ export const Canvas: React.FC<CanvasProps> = ({
       // The Canvas owns the shortcut sheet and must still be able to close it
       // with Escape, but no other blocking dialog may let keys reach the board.
       const dialogCount = document.querySelectorAll('[aria-modal="true"]').length;
-      const blockingDialogOpen = shortcutsBlocked || dialogCount > (shortcutsOpen ? 1 : 0);
+      const blockingDialogOpen = shortcutsBlocked || dialogCount > (isShortcutsOpen ? 1 : 0);
       if (blockingDialogOpen) return;
 
       const target = e.target as HTMLElement | null;
@@ -937,13 +941,13 @@ export const Canvas: React.FC<CanvasProps> = ({
       // Shortcut cheat sheet
       if (e.key === '?' || (e.shiftKey && e.key === '/')) {
         e.preventDefault();
-        setShortcutsOpen(true);
+        onOpenShortcuts?.();
         return;
       }
 
       if (e.key === 'Escape') {
-        if (shortcutsOpen) {
-          setShortcutsOpen(false);
+        if (isShortcutsOpen) {
+          onCloseShortcuts?.();
           return;
         }
         if (contextMenu) {
@@ -956,7 +960,7 @@ export const Canvas: React.FC<CanvasProps> = ({
         return;
       }
 
-      if (shortcutsOpen) return;
+      if (isShortcutsOpen) return;
 
       const mod = e.ctrlKey || e.metaKey;
       const key = e.key.toLowerCase();
@@ -1098,7 +1102,9 @@ export const Canvas: React.FC<CanvasProps> = ({
     zoomIn,
     zoomOut,
     resetView,
-    shortcutsOpen,
+    isShortcutsOpen,
+    onOpenShortcuts,
+    onCloseShortcuts,
     shortcutsBlocked,
     contextMenu,
   ]);
@@ -2349,18 +2355,10 @@ export const Canvas: React.FC<CanvasProps> = ({
       />
 
       {/* Shortcut cheat-sheet launcher */}
-      <button
+      <ShortcutsLauncherButton
         id="shortcuts-btn"
-        type="button"
-        onClick={() => setShortcutsOpen(true)}
-        title="Keyboard shortcuts (?)"
-        aria-label="Open keyboard shortcuts"
-        className="fixed right-3 bottom-[calc(env(safe-area-inset-bottom,0px)+8.75rem)] sm:bottom-6 z-40 flex items-center gap-1.5 px-2.5 sm:px-3 py-2 rounded-2xl bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border border-slate-200/90 dark:border-slate-800 shadow-lg text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors cursor-pointer"
-      >
-        <Keyboard className="w-4 h-4" />
-        <span className="hidden sm:inline text-xs font-semibold">Shortcuts</span>
-        <kbd className="hidden sm:inline-flex kbd-chip">?</kbd>
-      </button>
+        onOpen={() => onOpenShortcuts?.()}
+      />
 
       {/* Floating Selection Action Bar (single and multi-selection) */}
       {selectedElementIds.size > 0 && (
@@ -2459,8 +2457,6 @@ export const Canvas: React.FC<CanvasProps> = ({
           }
         />
       )}
-
-      <ShortcutsModal isOpen={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
     </div>
   );
 };

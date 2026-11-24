@@ -26,7 +26,6 @@ test('sidebar actions reuse existing controls instead of duplicating logic (#147
   const sidebar = source('components/Sidebar.tsx');
 
   for (const id of [
-    'shortcuts-btn',
     'user-profile-btn',
     'sign-in-prompt-btn',
     'about-app-btn',
@@ -34,6 +33,8 @@ test('sidebar actions reuse existing controls instead of duplicating logic (#147
     assert.ok(sidebar.includes(id), `sidebar must reuse #${id}`);
   }
 
+  assert.match(sidebar, /onClick=\{\(\) => runAction\(onOpenShortcuts\)\}/);
+  assert.doesNotMatch(sidebar, /clickHeaderControl\('shortcuts-btn'\)/);
   assert.match(sidebar, /onSelectTool\(tool\)/);
   assert.match(sidebar, /disabled=\{needsWrite && !canWrite\}/);
   assert.match(sidebar, /isVoiceConnected \? 'Leave voice' : 'Join voice'/);
@@ -53,6 +54,7 @@ test('App mounts the sidebar with all grouped actions wired (#147)', () => {
     'onOpenAi=',
     'onToggleAiChat=',
     'onToggleVoice=',
+    'onOpenShortcuts=',
   ]) {
     assert.ok(app.includes(prop), `Sidebar missing ${prop}`);
   }
