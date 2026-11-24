@@ -30,6 +30,7 @@ import {
   CheckSquare,
   Spline,
   Minus,
+  Palette,
 } from 'lucide-react';
 
 interface ToolbarProps {
@@ -63,6 +64,8 @@ const COLORS = [
   { label: 'Ocean Blue', hex: '#3b82f6' },
   { label: 'Forest Green', hex: '#10b981' },
   { label: 'Amber Sun', hex: '#f59e0b' },
+  { label: 'Royal Violet', hex: '#8b5cf6' },
+  { label: 'Electric Cyan', hex: '#06b6d4' },
 ];
 
 const SIZES = [
@@ -174,7 +177,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
 
       {/* Floating Popover for Shapes with Search */}
       {showShapePicker && canWrite && (
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xl rounded-2xl p-3 flex flex-col gap-2.5 animate-in fade-in zoom-in-95 duration-150 mb-1 z-50 w-72 sm:w-80">
+        <div className="wb-card-glass rounded-2xl p-3 flex flex-col gap-2.5 animate-in fade-in zoom-in-95 duration-150 mb-1 z-50 w-72 sm:w-80 shadow-2xl">
           <div className="flex items-center justify-between px-0.5">
             <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
               Shapes ({filteredShapes.length})
@@ -186,7 +189,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
                 setShowShapePicker(false);
                 setShapeSearchQuery('');
               }}
-              className="text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-200 p-1.5 min-w-[36px] min-h-[36px] rounded-lg cursor-pointer flex items-center justify-center"
+              className="text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-200 p-1.5 min-w-[36px] min-h-[36px] rounded-lg cursor-pointer flex items-center justify-center btn-press"
             >
               <X className="w-3.5 h-3.5" />
             </button>
@@ -225,10 +228,10 @@ export const Toolbar: React.FC<ToolbarProps> = ({
                   <button
                     key={s.type}
                     onClick={() => handleShapeSelect(s.type)}
-                    className={`p-2.5 rounded-xl border flex flex-col items-center gap-1.5 transition-all cursor-pointer ${
+                    className={`p-2.5 rounded-xl border flex flex-col items-center gap-1.5 transition-all cursor-pointer btn-press ${
                       isCurrent
-                        ? 'bg-blue-50 dark:bg-blue-950 border-blue-500 text-blue-600 dark:text-blue-400 font-bold shadow-xs'
-                        : 'bg-white dark:bg-slate-800/80 hover:bg-slate-50 dark:hover:bg-slate-700/80 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200'
+                        ? 'bg-blue-50 dark:bg-blue-950/70 border-blue-500 text-blue-600 dark:text-blue-400 font-bold shadow-xs ring-1 ring-blue-400/40'
+                        : 'bg-white/80 dark:bg-slate-800/80 hover:bg-slate-50 dark:hover:bg-slate-700/80 border-slate-200/80 dark:border-slate-700 text-slate-700 dark:text-slate-200'
                     }`}
                     title={`${s.label} (${s.keywords.slice(0, 3).join(', ')})`}
                   >
@@ -248,7 +251,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
 
       {/* Floating Popover for Icons with Search */}
       {showIconPicker && canWrite && (
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xl rounded-2xl p-3 flex flex-col gap-2.5 animate-in fade-in zoom-in-95 duration-150 mb-1 z-50 w-80 sm:w-96">
+        <div className="wb-card-glass rounded-2xl p-3 flex flex-col gap-2.5 animate-in fade-in zoom-in-95 duration-150 mb-1 z-50 w-80 sm:w-96 shadow-2xl">
           <div className="flex items-center justify-between px-0.5">
             <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
               Icons &amp; Stickers ({filteredIcons.length})
@@ -260,7 +263,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
                 setShowIconPicker(false);
                 setIconSearchQuery('');
               }}
-              className="text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-200 p-1.5 min-w-[36px] min-h-[36px] rounded-lg cursor-pointer flex items-center justify-center"
+              className="text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-200 p-1.5 min-w-[36px] min-h-[36px] rounded-lg cursor-pointer flex items-center justify-center btn-press"
             >
               <X className="w-3.5 h-3.5" />
             </button>
@@ -299,10 +302,10 @@ export const Toolbar: React.FC<ToolbarProps> = ({
                   <button
                     key={key}
                     onClick={() => handleIconSelect(key)}
-                    className={`p-2 rounded-xl border flex flex-col items-center justify-center transition-all cursor-pointer ${
+                    className={`p-2 rounded-xl border flex flex-col items-center justify-center transition-all cursor-pointer btn-press ${
                       isCurrent
-                        ? 'bg-blue-50 dark:bg-blue-950 border-blue-500 text-blue-600 dark:text-blue-400 ring-2 ring-blue-500/20 shadow-xs'
-                        : 'bg-white dark:bg-slate-800/80 hover:bg-slate-50 dark:hover:bg-slate-700/80 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200'
+                        ? 'bg-blue-50 dark:bg-blue-950/70 border-blue-500 text-blue-600 dark:text-blue-400 ring-2 ring-blue-500/30 shadow-xs'
+                        : 'bg-white/80 dark:bg-slate-800/80 hover:bg-slate-50 dark:hover:bg-slate-700/80 border-slate-200/80 dark:border-slate-700 text-slate-700 dark:text-slate-200'
                     }`}
                     title={`${config.label} (${config.keywords?.slice(0, 3).join(', ')})`}
                   >
@@ -319,10 +322,9 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         </div>
       )}
 
-
       {/* Floating Popover for Wire / Connector Type */}
       {showWirePicker && canWrite && (
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xl rounded-2xl p-3 flex flex-col gap-2.5 animate-in fade-in zoom-in-95 duration-150 mb-1 z-50 w-64">
+        <div className="wb-card-glass rounded-2xl p-3 flex flex-col gap-2.5 animate-in fade-in zoom-in-95 duration-150 mb-1 z-50 w-64 shadow-2xl">
           <div className="flex items-center justify-between px-0.5">
             <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
               Wire Connector Type
@@ -331,7 +333,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
               type="button"
               aria-label="Close wire picker"
               onClick={() => setShowWirePicker(false)}
-              className="text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-200 p-1.5 min-w-[36px] min-h-[36px] rounded-lg cursor-pointer flex items-center justify-center"
+              className="text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-200 p-1.5 min-w-[36px] min-h-[36px] rounded-lg cursor-pointer flex items-center justify-center btn-press"
             >
               <X className="w-3.5 h-3.5" />
             </button>
@@ -344,10 +346,10 @@ export const Toolbar: React.FC<ToolbarProps> = ({
                 onSelectTool('wire');
                 setShowWirePicker(false);
               }}
-              className={`p-3 rounded-xl border flex flex-col items-center gap-2 transition-all cursor-pointer ${
+              className={`p-3 rounded-xl border flex flex-col items-center gap-2 transition-all cursor-pointer btn-press ${
                 selectedWireStyle === 'curve' && currentTool === 'wire'
-                  ? 'bg-blue-50 dark:bg-blue-950 border-blue-500 text-blue-600 dark:text-blue-400 font-bold shadow-xs ring-1 ring-blue-400'
-                  : 'bg-white dark:bg-slate-800/80 hover:bg-slate-50 dark:hover:bg-slate-700 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200'
+                  ? 'bg-blue-50 dark:bg-blue-950/70 border-blue-500 text-blue-600 dark:text-blue-400 font-bold shadow-xs ring-1 ring-blue-400'
+                  : 'bg-white/80 dark:bg-slate-800/80 hover:bg-slate-50 dark:hover:bg-slate-700 border-slate-200/80 dark:border-slate-700 text-slate-700 dark:text-slate-200'
               }`}
             >
               <Spline className="w-5 h-5 text-blue-500" />
@@ -363,10 +365,10 @@ export const Toolbar: React.FC<ToolbarProps> = ({
                 onSelectTool('wire');
                 setShowWirePicker(false);
               }}
-              className={`p-3 rounded-xl border flex flex-col items-center gap-2 transition-all cursor-pointer ${
+              className={`p-3 rounded-xl border flex flex-col items-center gap-2 transition-all cursor-pointer btn-press ${
                 selectedWireStyle === 'line' && currentTool === 'wire'
-                  ? 'bg-blue-50 dark:bg-blue-950 border-blue-500 text-blue-600 dark:text-blue-400 font-bold shadow-xs ring-1 ring-blue-400'
-                  : 'bg-white dark:bg-slate-800/80 hover:bg-slate-50 dark:hover:bg-slate-700 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200'
+                  ? 'bg-blue-50 dark:bg-blue-950/70 border-blue-500 text-blue-600 dark:text-blue-400 font-bold shadow-xs ring-1 ring-blue-400'
+                  : 'bg-white/80 dark:bg-slate-800/80 hover:bg-slate-50 dark:hover:bg-slate-700 border-slate-200/80 dark:border-slate-700 text-slate-700 dark:text-slate-200'
               }`}
             >
               <Minus className="w-5 h-5 text-blue-500" />
@@ -382,7 +384,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
       {/* Main Floating Toolbar */}
       <div
         id="whiteboard-floating-toolbar"
-        className={`bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border border-slate-200 dark:border-slate-800 shadow-xl rounded-2xl p-1.5 sm:p-2 flex items-center gap-1 sm:gap-2 max-w-[98vw] overflow-x-auto scrollbar-none [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] transition-all ${
+        className={`wb-surface-glass rounded-2xl p-1.5 sm:p-2 flex items-center gap-1 sm:gap-2 max-w-[98vw] overflow-x-auto scrollbar-none [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] transition-all shadow-xl ${
           !canWrite ? 'opacity-80 bg-slate-50/90 dark:bg-slate-900/90' : ''
         }`}
       >
@@ -397,9 +399,9 @@ export const Toolbar: React.FC<ToolbarProps> = ({
               setShowWirePicker(false);
             }}
             title="Select tool (V) — Click to select, move, and edit shapes or stickers"
-            className={`min-h-[40px] min-w-[40px] p-2 sm:p-2.5 rounded-xl flex items-center justify-center gap-1.5 text-xs font-medium transition-colors cursor-pointer ${
+            className={`min-h-[40px] min-w-[40px] p-2 sm:p-2.5 rounded-xl flex items-center justify-center gap-1.5 text-xs font-medium transition-colors cursor-pointer btn-press ${
               currentTool === 'select'
-                ? 'bg-blue-50 dark:bg-blue-950 text-blue-600 dark:text-blue-400 font-semibold ring-1 ring-blue-400'
+                ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400 font-semibold ring-1.5 ring-blue-500 shadow-xs'
                 : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800'
             }`}
           >
@@ -412,7 +414,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
               id="tool-select-all"
               onClick={onSelectAll}
               title="Select All (Ctrl+A) — Select all elements on the canvas"
-              className="min-h-[40px] px-2.5 rounded-xl flex items-center justify-center gap-1.5 text-xs font-semibold bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900/50 border border-blue-200 dark:border-blue-800/60 transition-colors cursor-pointer animate-in fade-in zoom-in-95 duration-150"
+              className="min-h-[40px] px-2.5 rounded-xl flex items-center justify-center gap-1.5 text-xs font-semibold bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900/50 border border-blue-200 dark:border-blue-800/60 transition-colors cursor-pointer animate-in fade-in zoom-in-95 duration-150 btn-press"
             >
               <CheckSquare className="w-3.5 h-3.5" />
               <span className="hidden sm:inline">Select All</span>
@@ -428,9 +430,9 @@ export const Toolbar: React.FC<ToolbarProps> = ({
               setShowWirePicker(false);
             }}
             title="Hand / Pan tool (H) — Or use Middle Mouse Button / hold Space"
-            className={`min-h-[40px] min-w-[40px] p-2 sm:p-2.5 rounded-xl flex items-center justify-center gap-1.5 text-xs font-medium transition-colors cursor-pointer ${
+            className={`min-h-[40px] min-w-[40px] p-2 sm:p-2.5 rounded-xl flex items-center justify-center gap-1.5 text-xs font-medium transition-colors cursor-pointer btn-press ${
               currentTool === 'hand'
-                ? 'bg-blue-50 dark:bg-blue-950 text-blue-600 dark:text-blue-400 font-semibold ring-1 ring-blue-400'
+                ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400 font-semibold ring-1.5 ring-blue-500 shadow-xs'
                 : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800'
             }`}
           >
@@ -448,9 +450,9 @@ export const Toolbar: React.FC<ToolbarProps> = ({
               setShowWirePicker(false);
             }}
             title={canWrite ? "Pen (P) — Freehand drawing" : "Drawing restricted"}
-            className={`min-h-[40px] min-w-[40px] p-2 sm:p-2.5 rounded-xl flex items-center justify-center gap-1.5 text-xs font-medium transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
+            className={`min-h-[40px] min-w-[40px] p-2 sm:p-2.5 rounded-xl flex items-center justify-center gap-1.5 text-xs font-medium transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed btn-press ${
               currentTool === 'pen' && canWrite
-                ? 'bg-blue-50 dark:bg-blue-950 text-blue-600 dark:text-blue-400 font-semibold ring-1 ring-blue-400'
+                ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400 font-semibold ring-1.5 ring-blue-500 shadow-xs'
                 : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800'
             }`}
           >
@@ -468,9 +470,9 @@ export const Toolbar: React.FC<ToolbarProps> = ({
               setShowWirePicker(false);
             }}
             title={canWrite ? "Highlighter (Y)" : "Drawing restricted"}
-            className={`min-h-[40px] min-w-[40px] p-2 sm:p-2.5 rounded-xl flex items-center justify-center gap-1.5 text-xs font-medium transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
+            className={`min-h-[40px] min-w-[40px] p-2 sm:p-2.5 rounded-xl flex items-center justify-center gap-1.5 text-xs font-medium transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed btn-press ${
               currentTool === 'highlighter' && canWrite
-                ? 'bg-blue-50 dark:bg-blue-950 text-blue-600 dark:text-blue-400 font-semibold ring-1 ring-blue-400'
+                ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400 font-semibold ring-1.5 ring-blue-500 shadow-xs'
                 : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800'
             }`}
           >
@@ -488,9 +490,9 @@ export const Toolbar: React.FC<ToolbarProps> = ({
               setShowWirePicker(false);
             }}
             title={canWrite ? "Eraser (E)" : "Drawing restricted"}
-            className={`min-h-[40px] min-w-[40px] p-2 sm:p-2.5 rounded-xl flex items-center justify-center gap-1.5 text-xs font-medium transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
+            className={`min-h-[40px] min-w-[40px] p-2 sm:p-2.5 rounded-xl flex items-center justify-center gap-1.5 text-xs font-medium transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed btn-press ${
               currentTool === 'eraser' && canWrite
-                ? 'bg-blue-50 dark:bg-blue-950 text-blue-600 dark:text-blue-400 font-semibold ring-1 ring-blue-400'
+                ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400 font-semibold ring-1.5 ring-blue-500 shadow-xs'
                 : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800'
             }`}
           >
@@ -510,9 +512,9 @@ export const Toolbar: React.FC<ToolbarProps> = ({
               if (!showShapePicker) onSelectTool('shape');
             }}
             title={canWrite ? "Add Shapes (R) — Rectangle, Circle, Triangle..." : "Drawing restricted"}
-            className={`min-h-[40px] min-w-[40px] p-2 sm:p-2.5 rounded-xl flex items-center justify-center gap-1.5 text-xs font-medium transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
+            className={`min-h-[40px] min-w-[40px] p-2 sm:p-2.5 rounded-xl flex items-center justify-center gap-1.5 text-xs font-medium transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed btn-press ${
               (currentTool === 'shape' || showShapePicker) && canWrite
-                ? 'bg-blue-50 dark:bg-blue-950 text-blue-600 dark:text-blue-400 font-semibold ring-1 ring-blue-400'
+                ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400 font-semibold ring-1.5 ring-blue-500 shadow-xs'
                 : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800'
             }`}
           >
@@ -532,9 +534,9 @@ export const Toolbar: React.FC<ToolbarProps> = ({
               if (!showIconPicker) onSelectTool('icon');
             }}
             title={canWrite ? "Add Icons & Stickers (I)" : "Drawing restricted"}
-            className={`min-h-[40px] min-w-[40px] p-2 sm:p-2.5 rounded-xl flex items-center justify-center gap-1.5 text-xs font-medium transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
+            className={`min-h-[40px] min-w-[40px] p-2 sm:p-2.5 rounded-xl flex items-center justify-center gap-1.5 text-xs font-medium transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed btn-press ${
               (currentTool === 'icon' || showIconPicker) && canWrite
-                ? 'bg-blue-50 dark:bg-blue-950 text-blue-600 dark:text-blue-400 font-semibold ring-1 ring-blue-400'
+                ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400 font-semibold ring-1.5 ring-blue-500 shadow-xs'
                 : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800'
             }`}
           >
@@ -552,9 +554,9 @@ export const Toolbar: React.FC<ToolbarProps> = ({
               setShowWirePicker(false);
             }}
             title={canWrite ? "Add Sticky Note (S) — Hold Alt while dragging to duplicate" : "Drawing restricted"}
-            className={`min-h-[40px] min-w-[40px] p-2 sm:p-2.5 rounded-xl flex items-center justify-center gap-1.5 text-xs font-medium transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
+            className={`min-h-[40px] min-w-[40px] p-2 sm:p-2.5 rounded-xl flex items-center justify-center gap-1.5 text-xs font-medium transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed btn-press ${
               currentTool === 'sticky' && canWrite
-                ? 'bg-blue-50 dark:bg-blue-950 text-blue-600 dark:text-blue-400 font-semibold ring-1 ring-blue-400'
+                ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400 font-semibold ring-1.5 ring-blue-500 shadow-xs'
                 : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800'
             }`}
           >
@@ -572,9 +574,9 @@ export const Toolbar: React.FC<ToolbarProps> = ({
               setShowWirePicker(false);
             }}
             title={canWrite ? "Add Text (T)" : "Drawing restricted"}
-            className={`min-h-[40px] min-w-[40px] p-2 sm:p-2.5 rounded-xl flex items-center justify-center gap-1.5 text-xs font-medium transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
+            className={`min-h-[40px] min-w-[40px] p-2 sm:p-2.5 rounded-xl flex items-center justify-center gap-1.5 text-xs font-medium transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed btn-press ${
               currentTool === 'text' && canWrite
-                ? 'bg-blue-50 dark:bg-blue-950 text-blue-600 dark:text-blue-400 font-semibold ring-1 ring-blue-400'
+                ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400 font-semibold ring-1.5 ring-blue-500 shadow-xs'
                 : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800'
             }`}
           >
@@ -598,9 +600,9 @@ export const Toolbar: React.FC<ToolbarProps> = ({
               setShowIconPicker(false);
             }}
             title={canWrite ? `Wire Connector (W) (${selectedWireStyle === 'line' ? 'Straight Line' : 'Smooth Curve'}) — Click or drag to connect 2 objects` : "Drawing restricted"}
-            className={`min-h-[40px] min-w-[40px] p-2 sm:p-2.5 rounded-xl flex items-center justify-center gap-1.5 text-xs font-medium transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
+            className={`min-h-[40px] min-w-[40px] p-2 sm:p-2.5 rounded-xl flex items-center justify-center gap-1.5 text-xs font-medium transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed btn-press ${
               (currentTool === 'wire' || showWirePicker) && canWrite
-                ? 'bg-blue-50 dark:bg-blue-950 text-blue-600 dark:text-blue-400 font-semibold ring-1 ring-blue-400'
+                ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400 font-semibold ring-1.5 ring-blue-500 shadow-xs'
                 : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800'
             }`}
           >
@@ -620,7 +622,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
           id="toolbar-slide-toggle-btn"
           onClick={() => setIsExpanded((prev) => !prev)}
           title={isExpanded ? "Collapse tool options" : "Slide to expand colors, stroke & options"}
-          className={`min-h-[40px] px-2 sm:px-2.5 py-1.5 rounded-xl flex items-center gap-1.5 text-xs font-medium transition-all cursor-pointer shrink-0 border ${
+          className={`min-h-[40px] px-2 sm:px-2.5 py-1.5 rounded-xl flex items-center gap-1.5 text-xs font-medium transition-all cursor-pointer shrink-0 border btn-press ${
             isExpanded
               ? 'bg-blue-50 dark:bg-blue-950 text-blue-600 dark:text-blue-400 border-blue-200 dark:border-blue-800 shadow-xs'
               : 'bg-slate-50 dark:bg-slate-800/80 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700'
@@ -628,7 +630,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         >
           <SlidersHorizontal className="w-3.5 h-3.5" />
           <span
-            className="w-2.5 h-2.5 rounded-full border border-slate-300 dark:border-slate-600 shrink-0"
+            className="w-2.5 h-2.5 rounded-full border border-slate-300 dark:border-slate-600 shrink-0 shadow-2xs"
             style={{ backgroundColor: currentColor }}
           />
           <ChevronRight className={`w-3.5 h-3.5 transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`} />
@@ -651,7 +653,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
                     onClick={() => onSelectColor(c.hex)}
                     title={c.label}
                     style={{ backgroundColor: c.hex }}
-                    className={`w-6 h-6 sm:w-6.5 sm:h-6.5 rounded-full cursor-pointer border border-slate-300 dark:border-slate-600 transition-all shrink-0 disabled:opacity-30 disabled:cursor-not-allowed ${
+                    className={`w-6 h-6 sm:w-6.5 sm:h-6.5 rounded-full cursor-pointer border border-slate-300 dark:border-slate-600 transition-all shrink-0 disabled:opacity-30 disabled:cursor-not-allowed btn-press ${
                       isSelected
                         ? 'ring-2 ring-blue-500 scale-110 shadow-xs opacity-100'
                         : 'opacity-70 hover:opacity-100 hover:scale-105'
@@ -659,6 +661,23 @@ export const Toolbar: React.FC<ToolbarProps> = ({
                   />
                 );
               })}
+
+              {/* Custom native color picker button */}
+              <label
+                title="Choose custom color"
+                className={`relative w-6 h-6 sm:w-6.5 sm:h-6.5 rounded-full cursor-pointer border border-slate-300 dark:border-slate-600 flex items-center justify-center bg-gradient-to-tr from-pink-500 via-amber-400 to-indigo-500 hover:scale-110 transition-transform shrink-0 btn-press ${
+                  !canWrite ? 'opacity-30 pointer-events-none' : ''
+                }`}
+              >
+                <Palette className="w-3.5 h-3.5 text-white drop-shadow" />
+                <input
+                  type="color"
+                  value={currentColor}
+                  disabled={!canWrite}
+                  onChange={(e) => onSelectColor(e.target.value)}
+                  className="sr-only"
+                />
+              </label>
             </div>
 
             <div className="h-6 w-[1px] bg-slate-200 dark:bg-slate-800 mx-0.5 sm:mx-1 shrink-0" />
@@ -672,9 +691,9 @@ export const Toolbar: React.FC<ToolbarProps> = ({
                   disabled={!canWrite}
                   onClick={() => onSelectSize(s.value)}
                   title={`Stroke width: ${s.label}`}
-                  className={`w-7 h-7 sm:w-8 sm:h-8 rounded-lg flex items-center justify-center transition-all cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed ${
+                  className={`w-7 h-7 sm:w-8 sm:h-8 rounded-lg flex items-center justify-center transition-all cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed btn-press ${
                     currentSize === s.value
-                      ? 'bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-white font-bold'
+                      ? 'bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-white font-bold ring-1 ring-slate-300 dark:ring-slate-700'
                       : 'text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800'
                   }`}
                 >
@@ -701,7 +720,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
             onClick={onUndo}
             disabled={!canUndo || !canWrite}
             title="Undo (Ctrl+Z)"
-            className="p-2 sm:p-2.5 min-h-[38px] min-w-[38px] flex items-center justify-center text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800 rounded-xl disabled:opacity-20 disabled:pointer-events-none transition-colors cursor-pointer"
+            className="p-2 sm:p-2.5 min-h-[38px] min-w-[38px] flex items-center justify-center text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800 rounded-xl disabled:opacity-20 disabled:pointer-events-none transition-colors cursor-pointer btn-press"
           >
             <Undo2 className="w-4 h-4" />
           </button>
@@ -712,7 +731,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
               onClick={onRedo}
               disabled={!canRedo || !canWrite}
               title="Redo (Ctrl+Shift+Z)"
-              className="p-2 sm:p-2.5 min-h-[38px] min-w-[38px] flex items-center justify-center text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800 rounded-xl disabled:opacity-20 disabled:pointer-events-none transition-colors cursor-pointer"
+              className="p-2 sm:p-2.5 min-h-[38px] min-w-[38px] flex items-center justify-center text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800 rounded-xl disabled:opacity-20 disabled:pointer-events-none transition-colors cursor-pointer btn-press"
             >
               <Redo2 className="w-4 h-4" />
             </button>
@@ -722,7 +741,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
             id="export-btn"
             onClick={onExport}
             title="Export whiteboard as PNG"
-            className="p-2 sm:p-2.5 min-h-[38px] min-w-[38px] flex items-center justify-center text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
+            className="p-2 sm:p-2.5 min-h-[38px] min-w-[38px] flex items-center justify-center text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800 rounded-xl transition-colors cursor-pointer btn-press"
           >
             <Download className="w-4 h-4" />
           </button>
@@ -738,7 +757,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
                 ? 'Vote to clear whiteboard with room'
                 : 'Clear whiteboard'
             }
-            className="p-2 sm:p-2.5 min-h-[38px] text-slate-500 dark:text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-xl transition-colors cursor-pointer flex items-center gap-1.5 disabled:opacity-20 disabled:pointer-events-none font-medium text-xs"
+            className="p-2 sm:p-2.5 min-h-[38px] text-slate-500 dark:text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-xl transition-colors cursor-pointer flex items-center gap-1.5 disabled:opacity-20 disabled:pointer-events-none font-medium text-xs btn-press"
           >
             <Trash2 className="w-4 h-4" />
             <span>

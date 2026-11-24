@@ -272,14 +272,14 @@ export const StickyNoteItem: React.FC<StickyNoteItemProps> = ({
               {showColorPicker && (
                 <div
                   onClick={(e) => e.stopPropagation()}
-                  className="absolute right-0 top-6 bg-white rounded-lg shadow-lg border border-slate-200 p-1 flex gap-1 z-30"
+                  className="absolute right-0 top-6 wb-card-glass rounded-xl shadow-xl border border-slate-200/80 dark:border-slate-700 p-1.5 flex gap-1.5 z-30"
                 >
                   {STICKY_COLORS.map((c) => (
                     <button
                       key={c.name}
                       onClick={() => handleColorSelect(c.bg)}
                       style={{ backgroundColor: c.bg }}
-                      className="w-5 h-5 rounded-full border border-slate-300 hover:scale-110 transition-transform cursor-pointer"
+                      className="w-5 h-5 rounded-full border border-slate-300 dark:border-slate-600 hover:scale-110 transition-transform cursor-pointer btn-press"
                       title={c.name}
                     />
                   ))}
