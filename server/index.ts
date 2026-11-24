@@ -28,6 +28,7 @@ import { connectDb, checkDbHealth } from "./db";
 import { resolveSocketIdentity } from "./socketIdentity";
 import { chooseReplacementHost } from "./roomHost";
 import { canDirectClearBoard } from "./boardClear";
+import { getEligibleVoterIds, pruneVoteEligibility, tallyVote } from "./voteEligibility";
 import {
   isRecord,
   readBoolean,
@@ -248,6 +249,14 @@ function migrateRoomHost(io: SocketIOServer, room: RoomData, departingUserId: st
   }
 
   return true;
+}
+
+/** Re-broadcast a vote after presence or permissions change (#69). */
+function syncVoteEligibility(io: SocketIOServer, room: RoomData): void {
+  const vote = room.voteToClear;
+  if (!vote?.active) return;
+  pruneVoteEligibility(vote, room);
+  io.to(room.id).emit("vote-clear-updated", vote);
 }
 
 const ALLOWED_ORIGIN_SET = new Set([
@@ -1080,6 +1089,7 @@ async function startServer() {
       if (currentUser && currentUser.id !== actualUserId && currentRoomId === roomId) {
         delete room.users[currentUser.id];
         socket.to(roomId).emit("user-left", { userId: currentUser.id });
+        syncVoteEligibility(io, room);
       }
 
       // Leave the previously joined room when switching rooms. Host migration
@@ -1095,6 +1105,7 @@ async function startServer() {
           if (wasPreviousRoomHost) {
             migrateRoomHost(io, previousRoom, currentUser.id);
           }
+          syncVoteEligibility(io, previousRoom);
         }
         socket.leave(currentRoomId);
       }
@@ -1215,6 +1226,7 @@ async function startServer() {
         room.users[targetUserId].canWrite = canWrite;
         room.users[targetUserId].role = role;
       }
+      syncVoteEligibility(io, room);
 
       // Notify the target user specifically
       const targetUser = room.users[targetUserId];
@@ -1272,6 +1284,7 @@ async function startServer() {
       }
 
       delete room.users[targetUserId];
+      syncVoteEligibility(io, room);
 
       io.to(currentRoomId).emit("user-kicked", {
         userId: targetUserId,
@@ -1308,6 +1321,7 @@ async function startServer() {
           room.userPermissions[u.id] = { canWrite: nextCanWrite, role: nextRole };
         }
       });
+      syncVoteEligibility(io, room);
 
       io.to(currentRoomId).emit("room-lock-changed", {
         isLocked: room.isLocked,
@@ -1591,9 +1605,10 @@ async function startServer() {
       const targetRoomId = currentRoomId;
       const room = rooms.get(targetRoomId);
       if (!room) return;
-      const userIds = Object.keys(room.users);
+      // Viewers cannot vote, so they are not part of the quorum (#69).
+      const userIds = getEligibleVoterIds(room);
 
-      // If only 1 user, clear immediately
+      // If only 1 eligible user, clear immediately
       if (userIds.length <= 1) {
         room.elements = {};
         clearLiveStrokes();
@@ -1632,10 +1647,11 @@ async function startServer() {
         const currentRoom = rooms.get(targetRoomId);
         if (!currentRoom || !currentRoom.voteToClear) return;
 
-        // Check votes at expiration
-        const yesCount = Object.values(currentRoom.voteToClear.votes).filter(Boolean).length;
-        const total = Object.keys(currentRoom.users).length;
-        const passed = yesCount > total / 2;
+        // Check votes at expiration against the current eligible voter set.
+        const { yesCount, totalEligible, passed } = tallyVote(
+          currentRoom,
+          currentRoom.voteToClear
+        );
 
         if (passed) {
           currentRoom.elements = {};
@@ -1650,7 +1666,7 @@ async function startServer() {
         io.to(targetRoomId).emit("vote-clear-ended", {
           passed,
           yesCount,
-          totalEligible: total,
+          totalEligible,
           reason: "timed_out",
         });
 
@@ -1669,15 +1685,14 @@ async function startServer() {
 
       room.voteToClear.votes[currentUser.id] = vote;
 
-      const userIds = Object.keys(room.users);
-      const yesCount = Object.values(room.voteToClear.votes).filter(Boolean).length;
-      const totalEligible = userIds.length;
+      const { yesCount, totalEligible, passed } = tallyVote(room, room.voteToClear);
+      room.voteToClear.totalEligible = totalEligible;
 
       // Broadcast updated votes
       io.to(currentRoomId).emit("vote-clear-updated", room.voteToClear);
 
       // If majority yes reached early
-      if (yesCount > totalEligible / 2) {
+      if (passed) {
         if (room.voteTimer) clearTimeout(room.voteTimer);
         room.elements = {};
         clearLiveStrokes();
@@ -1711,7 +1726,7 @@ async function startServer() {
       io.to(currentRoomId).emit("vote-clear-ended", {
         passed: false,
         yesCount: 0,
-        totalEligible: Object.keys(room.users).length,
+        totalEligible: getEligibleVoterIds(room).length,
         reason: "cancelled_by_initiator",
       });
     });
@@ -1758,7 +1773,7 @@ async function startServer() {
         io.to(currentRoomId).emit("vote-clear-ended", {
           passed: false,
           yesCount: 0,
-          totalEligible: Object.keys(room.users).length,
+          totalEligible: getEligibleVoterIds(room).length,
           reason: "cancelled_by_direct_clear",
         });
       }
@@ -1797,17 +1812,14 @@ async function startServer() {
       delete room.users[currentUser.id];
       socket.to(currentRoomId).emit("user-left", { userId: currentUser.id });
 
-      // If active vote, update total
-      if (room.voteToClear && room.voteToClear.active) {
-        delete room.voteToClear.votes[currentUser.id];
-        room.voteToClear.totalEligible = Object.keys(room.users).length;
-        io.to(currentRoomId).emit("vote-clear-updated", room.voteToClear);
-      }
-
       // Host Migration: If the host left and other participants remain, promote next active user
       if (wasHost) {
         migrateRoomHost(io, room, currentUser.id);
       }
+
+      // Prune the departing user's vote after migration so a newly promoted
+      // host is counted correctly (#69).
+      syncVoteEligibility(io, room);
 
       const remainingUserIds = Object.keys(room.users);
 
