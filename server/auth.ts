@@ -255,23 +255,70 @@ export async function createGuestUser(name?: string, color?: string): Promise<{ 
   return { token, user: sanitizeUser(guestUser) };
 }
 
-export async function findOrCreateGoogleUser(googleProfile: {
+export interface GoogleProfileForAuth {
   id: string;
   email: string;
   name?: string;
   picture?: string;
-}): Promise<{ token: string; user: SanitizedUser }> {
+  /** Google's UserInfo endpoint reports whether the email is verified. */
+  verified_email?: boolean;
+}
+
+/** An unverified Google email must never be used to claim an existing account. */
+export function isVerifiedGoogleProfile(profile: Pick<GoogleProfileForAuth, 'verified_email'>): boolean {
+  return profile.verified_email === true;
+}
+
+/**
+ * Only an account already bound to this Google identity may be linked.
+ * Matching on email alone lets anyone pre-register a victim's address and
+ * receive the victim's Google-authenticated session (#64).
+ */
+export function findLinkedGoogleUser<T extends { id?: string; googleId?: string }>(
+  candidates: Array<T | null | undefined>,
+  googleId: string
+): T | null {
+  if (!googleId) return null;
+  return (
+    candidates.find(
+      (user) =>
+        user != null && (user.googleId === googleId || user.id === `google_${googleId}`)
+    ) ?? null
+  );
+}
+
+/**
+ * Google accounts whose email is already claimed by another account get a
+ * unique local email so the global email index cannot turn an email match
+ * into an implicit link. The real address is still used for display/name.
+ */
+export function googleAccountEmail(emailLower: string, userId: string, emailClaimed: boolean): string {
+  if (!emailLower || emailClaimed) return `${userId}@google.local`;
+  return emailLower;
+}
+
+export async function findOrCreateGoogleUser(
+  googleProfile: GoogleProfileForAuth
+): Promise<{ token: string; user: SanitizedUser }> {
+  const googleId = sanitizeString(googleProfile.id);
+  if (!googleId) {
+    throw new Error('Google profile is missing an identity.');
+  }
+  if (!isVerifiedGoogleProfile(googleProfile)) {
+    throw new Error('Google account email is not verified.');
+  }
+
   const emailLower = (googleProfile.email || '').toLowerCase().trim();
   const users = getUsersCollection();
   const tokens = getTokensCollection();
 
-  let existingUser = await users.findOne({
-    $or: [
-      { email: emailLower },
-      { googleId: googleProfile.id },
-      { id: `google_${googleProfile.id}` },
+  let existingUser = findLinkedGoogleUser(
+    [
+      await users.findOne({ googleId }),
+      await users.findOne({ id: `google_${googleId}` }),
     ],
-  });
+    googleId
+  );
 
   if (existingUser) {
     // Update name or picture if previously missing
@@ -282,8 +329,8 @@ export async function findOrCreateGoogleUser(googleProfile: {
     if (googleProfile.picture && !existingUser.picture) {
       updates.picture = googleProfile.picture;
     }
-    if (!existingUser.googleId && googleProfile.id) {
-      updates.googleId = googleProfile.id;
+    if (!existingUser.googleId) {
+      updates.googleId = googleId;
     }
 
     if (Object.keys(updates).length > 0) {
@@ -297,7 +344,7 @@ export async function findOrCreateGoogleUser(googleProfile: {
     return { token, user: sanitizeUser(existingUser) };
   }
 
-  const userId = `google_${googleProfile.id || crypto.randomBytes(5).toString('hex')}`;
+  const userId = `google_${googleId}`;
   const baseUsername = emailLower.split('@')[0].replace(/[^a-zA-Z0-9_]/g, '') || `user_${userId.slice(-6)}`;
   let username = baseUsername;
   let suffix = 0;
@@ -311,11 +358,14 @@ export async function findOrCreateGoogleUser(googleProfile: {
     }
   }
   const displayName = googleProfile.name || emailLower.split('@')[0] || 'Google User';
+  // An email already held by a password account is never proof of identity.
+  const emailOwner = emailLower ? await users.findOne({ email: emailLower }) : null;
+  const email = googleAccountEmail(emailLower, userId, Boolean(emailOwner));
 
   const newUser: StoredUserDoc = {
     id: userId,
     username,
-    email: emailLower || `${userId}@google.local`,
+    email,
     passwordHash: '',
     salt: '',
     name: displayName,
@@ -323,7 +373,7 @@ export async function findOrCreateGoogleUser(googleProfile: {
     createdAt: Date.now(),
     createdRooms: [],
     isGuest: false,
-    googleId: googleProfile.id,
+    googleId,
     picture: googleProfile.picture,
   };
 

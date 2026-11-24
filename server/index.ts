@@ -748,6 +748,7 @@ async function startServer() {
         email: profile.email,
         name: profile.name,
         picture: profile.picture,
+        verified_email: profile.verified_email === true,
       });
 
       // Send postMessage to main window with validated targetOrigin and close popup
