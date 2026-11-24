@@ -180,16 +180,33 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
     }
   }, [authUser, authToken, roomId]);
 
+  const notificationTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+
   const dismissNotification = useCallback((id: string) => {
+    const timer = notificationTimersRef.current.get(id);
+    if (timer) {
+      clearTimeout(timer);
+      notificationTimersRef.current.delete(id);
+    }
     setNotifications((prev) => prev.filter((n) => n.id !== id));
   }, []);
 
   const addNotification = useCallback((text: string, type: 'info' | 'success' | 'warning' = 'info') => {
     const id = Math.random().toString(36).substring(2, 9);
     setNotifications((prev) => [...prev.slice(-3), { id, text, type }]);
-    setTimeout(() => {
+    const timer = setTimeout(() => {
+      notificationTimersRef.current.delete(id);
       setNotifications((prev) => prev.filter((n) => n.id !== id));
     }, 4000);
+    notificationTimersRef.current.set(id, timer);
+  }, []);
+
+  useEffect(() => {
+    const timers = notificationTimersRef.current;
+    return () => {
+      timers.forEach((t) => clearTimeout(t));
+      timers.clear();
+    };
   }, []);
 
   const elementsRef = useRef<Record<string, CanvasElement>>(elements);
@@ -428,7 +445,11 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
         const next: typeof prev = {};
         let changed = false;
         Object.entries(prev).forEach(([id, stroke]) => {
-          if (stroke.userId === data.userId) changed = true;
+          if (stroke.userId === data.userId) {
+            changed = true;
+            activeStrokeIdsRef.current.delete(id);
+            pendingLivePoints.delete(id);
+          }
           else next[id] = stroke;
         });
         return changed ? next : prev;
