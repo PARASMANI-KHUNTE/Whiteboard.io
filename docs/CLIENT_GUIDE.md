@@ -141,7 +141,8 @@ Whiteboard.io guarantees session continuity through a multi-tier client persiste
 
 ### 1. Solo Mode Autosave (`soloStorage.ts`)
 - For offline or local sketching without joining a multiplayer room.
-- Automatically persists the complete whiteboard state to browser `localStorage` with a debounced 300ms writer.
+- Automatically persists the complete whiteboard state to IndexedDB (with a `localStorage` fallback) using a debounced 450ms writer.
+- Cross-tab saves are announced over `BroadcastChannel`, with `storage` events as a fallback. A tab with no unsaved edits adopts the newer board; a tab with local edits merges both snapshots per element by `updatedAt` and shows a warning for conflicting elements. Pending debounce timers are cancelled when another tab saves, so stale snapshots cannot overwrite newer work.
 - Supports snapshot recovery, last-saved timestamps, and safe board wipes.
 
 ### 2. Guest Identity Continuity (`guestIdentity.ts`)

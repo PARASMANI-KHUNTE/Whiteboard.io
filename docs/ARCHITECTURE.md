@@ -138,7 +138,8 @@ Whiteboard.io provides end-to-end data durability across cloud and local storage
    - Handled via `server/db.ts` with connection pooling and automated index creation.
    - `MONGODB_URI` is required: the server awaits this connection before listening and throws if it cannot connect. Room state is cached in memory for real-time fan-out, but there is no in-memory database replacement.
 2. **Solo Whiteboard Storage (`soloStorage.ts`)**:
-   - Autosaves offline canvas work directly to browser `localStorage` with a 300ms debounce.
+   - Autosaves offline canvas work to IndexedDB (with a `localStorage` fallback) using a 450ms debounce.
+   - Broadcasts completed saves across tabs via `BroadcastChannel` with a `storage`-event fallback. Clean tabs reload the remote board; tabs with unsaved edits merge per element by `updatedAt` and warn about conflicting elements, so neither tab silently discards the other's work.
    - Restores user work upon page reload without requiring room creation.
 3. **Guest Identity Persistence (`guestIdentity.ts`)**:
    - Assigns a stable UUID, animal handle, and color to guest users.
