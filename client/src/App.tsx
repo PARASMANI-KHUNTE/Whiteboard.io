@@ -23,6 +23,7 @@ import { Toolbar } from './components/Toolbar';
 import { Canvas } from './components/Canvas';
 import { VoteToClearModal } from './components/VoteToClearModal';
 import { AuthModal } from './components/AuthModal';
+import { ProfileModal } from './components/AccountPanel';
 import { CreateRoomModal } from './components/CreateRoomModal';
 import { ShareRoomModal } from './components/ShareRoomModal';
 import { AdminPanelModal } from './components/AdminPanelModal';
@@ -107,6 +108,7 @@ export default function App() {
   const [hasChosenSessionMode, setHasChosenSessionMode] = useState<boolean>(false);
 
   const [showAuthModal, setShowAuthModal] = useState<boolean>(false);
+  const [showProfileModal, setShowProfileModal] = useState<boolean>(false);
   const [showCreateRoomModal, setShowCreateRoomModal] = useState<boolean>(false);
   const [showShareModal, setShowShareModal] = useState<boolean>(false);
   const [showAdminModal, setShowAdminModal] = useState<boolean>(false);
@@ -1392,6 +1394,7 @@ export default function App() {
   const isBlockingOverlayOpen =
     !authUser ||
     showAuthModal ||
+    showProfileModal ||
     showCreateRoomModal ||
     showShareModal ||
     showAdminModal ||
@@ -1423,6 +1426,7 @@ export default function App() {
         isLocked={isLocked}
         authUser={authUser}
         onOpenAuthModal={() => setShowAuthModal(true)}
+        onOpenProfile={() => setShowProfileModal(true)}
         onOpenCreateRoomModal={() => setShowCreateRoomModal(true)}
         onOpenShareModal={() => setShowShareModal(true)}
         onShareAndGoLive={handleShareAndGoLive}
@@ -1430,10 +1434,7 @@ export default function App() {
         onOpenAiModal={() => setShowAiModal(true)}
         onToggleAiChat={() => setIsAiChatOpen((open) => !open)}
         isAiChatOpen={isAiChatOpen}
-        onUpdateUserName={updateUserName}
-        onUpdateUserColor={updateUserColor}
         onSwitchRoom={switchRoom}
-        onLogout={handleLogout}
         theme={theme}
         onToggleTheme={handleToggleTheme}
         isVoiceConnected={isVoiceConnected}
@@ -1488,6 +1489,8 @@ export default function App() {
         }
         onToggleMute={toggleMute}
         onOpenShortcuts={() => setShowShortcutsModal(true)}
+        onOpenProfile={() => setShowProfileModal(true)}
+        onOpenAuth={() => setShowAuthModal(true)}
       />
 
       {/* Main Interactive Canvas Area */}
@@ -1591,7 +1594,23 @@ export default function App() {
           onRegister={register}
           onContinueAsGuest={continueAsGuest}
           onGoogleLogin={signInWithGoogle}
-          onLogout={logout}
+          onLogout={handleLogout}
+        />
+      </ErrorBoundary>
+
+      {/* Account Profile & Identity Modal */}
+      <ErrorBoundary fallbackTitle="Profile Dialog">
+        <ProfileModal
+          isOpen={showProfileModal}
+          onClose={() => setShowProfileModal(false)}
+          currentUser={currentUser}
+          authUser={authUser}
+          theme={theme}
+          onToggleTheme={handleToggleTheme}
+          onUpdateUserName={updateUserName}
+          onUpdateUserColor={updateUserColor}
+          onOpenAuthModal={() => setShowAuthModal(true)}
+          onLogout={handleLogout}
         />
       </ErrorBoundary>
 

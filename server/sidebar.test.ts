@@ -26,12 +26,13 @@ test('sidebar actions reuse existing controls instead of duplicating logic (#147
   const sidebar = source('components/Sidebar.tsx');
 
   for (const id of [
-    'user-profile-btn',
-    'sign-in-prompt-btn',
     'about-app-btn',
   ]) {
     assert.ok(sidebar.includes(id), `sidebar must reuse #${id}`);
   }
+  assert.doesNotMatch(sidebar, /user-profile-btn|sign-in-prompt-btn/);
+  assert.match(sidebar, /onOpenProfile/);
+  assert.match(sidebar, /onOpenAuth/);
 
   assert.match(sidebar, /onClick=\{\(\) => runAction\(onOpenShortcuts\)\}/);
   assert.doesNotMatch(sidebar, /clickHeaderControl\('shortcuts-btn'\)/);

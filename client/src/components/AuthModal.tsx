@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { X, Lock, Mail, User as UserIcon, Check, Eye, EyeOff, Sparkles, LogIn, UserPlus, Chrome, LogOut } from 'lucide-react';
+import { X, Lock, Mail, User as UserIcon, Check, Eye, EyeOff, Sparkles, LogIn, UserPlus, Chrome } from 'lucide-react';
 import { AuthUser } from '../types';
 import { ModalShell } from './ui/ModalShell';
+import { AccountIdentityCard, SignOutButton } from './AccountPanel';
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -183,24 +184,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         {/* If already signed in with full account */}
         {currentUser && !currentUser.isGuest ? (
           <div className="p-6 space-y-5">
-            <div className="flex items-center gap-3.5 p-4 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/80">
-              <div
-                className="w-12 h-12 rounded-full flex items-center justify-center text-white font-bold text-base shadow-xs"
-                style={{ backgroundColor: currentUser.color }}
-              >
-                {currentUser.name.charAt(0).toUpperCase()}
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                  <h3 className="font-semibold text-slate-900 dark:text-white text-sm truncate">{currentUser.name}</h3>
-                  <span className="px-2 py-0.5 text-[10px] font-medium bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-400 rounded-full">
-                    Active
-                  </span>
-                </div>
-                <p className="text-xs text-slate-500 dark:text-slate-400 truncate">@{currentUser.username}</p>
-                <p className="text-xs text-slate-400 dark:text-slate-500 truncate">{currentUser.email}</p>
-              </div>
-            </div>
+            <AccountIdentityCard
+              user={currentUser}
+              statusLabel="Active"
+              density="comfortable"
+            />
 
             <div className="space-y-2">
               <div className="text-xs font-semibold text-slate-700 dark:text-slate-300">Account Benefits</div>
@@ -219,17 +207,14 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               >
                 Close
               </button>
-              <button
-                type="button"
-                onClick={() => {
+              <SignOutButton
+                variant="outline"
+                label="Sign Out"
+                onSignOut={() => {
                   onLogout();
                   onClose();
                 }}
-                className="flex-1 px-4 py-2.5 text-xs font-semibold text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 border border-rose-200 dark:border-rose-900/50 rounded-xl transition-colors cursor-pointer flex items-center justify-center gap-1.5"
-              >
-                <LogOut className="w-4 h-4" />
-                <span>Sign Out</span>
-              </button>
+              />
             </div>
           </div>
         ) : (

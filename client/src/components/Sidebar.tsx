@@ -70,6 +70,8 @@ export interface SidebarProps {
   onToggleVoice: () => void;
   onToggleMute: () => void;
   onOpenShortcuts: () => void;
+  onOpenProfile: () => void;
+  onOpenAuth: () => void;
 }
 
 interface SidebarButtonProps {
@@ -164,6 +166,8 @@ export default function Sidebar({
   onToggleVoice,
   onToggleMute,
   onOpenShortcuts,
+  onOpenProfile,
+  onOpenAuth,
 }: SidebarProps) {
   const [isOpen, setIsOpen] = useState(false);
   const sidebarRef = useRef<HTMLElement>(null);
@@ -448,9 +452,7 @@ export default function Sidebar({
               icon={isSignedIn ? UserRound : LogIn}
               label={isSignedIn ? 'Profile' : 'Sign in'}
               expanded={isOpen}
-              onClick={() =>
-                clickHeaderControl(isSignedIn ? 'user-profile-btn' : 'sign-in-prompt-btn')
-              }
+              onClick={() => runAction(isSignedIn ? onOpenProfile : onOpenAuth)}
             />
             <SidebarButton
               icon={Info}
