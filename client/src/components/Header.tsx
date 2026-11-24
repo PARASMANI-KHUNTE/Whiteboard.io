@@ -4,9 +4,6 @@ import { AuthUser } from '../hooks/useAuth';
 import { usePopoverDismiss } from '../hooks/usePopoverDismiss';
 import { AudioVisualizerBar } from './AudioVisualizerBar';
 import { AboutModal } from './AboutModal';
-import { ModalShell } from './ui/ModalShell';
-import { USER_PROFILE_PALETTE } from '../constants/palettes';
-import { ColorSwatches } from './ui/ColorSwatches';
 import { ThemeToggle } from './ui/ThemeToggle';
 import {
   Share2,
@@ -16,7 +13,6 @@ import {
   Lock,
   Plus,
   LogIn,
-  LogOut,
   MicOff,
   Sparkles,
   Info,
@@ -38,14 +34,12 @@ interface HeaderProps {
   isLocked?: boolean;
   authUser: AuthUser | null;
   onOpenAuthModal: () => void;
+  onOpenProfile: () => void;
   onOpenCreateRoomModal: () => void;
   onOpenShareModal: () => void;
   onShareAndGoLive?: () => void;
   onOpenAdminModal: () => void;
-  onUpdateUserName: (name: string) => void;
-  onUpdateUserColor: (color: string) => void;
   onSwitchRoom: (newRoomId: string | null) => void;
-  onLogout: () => void;
   theme: 'light' | 'dark';
   onToggleTheme: () => void;
   onOpenAiModal?: () => void;
@@ -88,14 +82,12 @@ export const Header: React.FC<HeaderProps> = ({
   isLocked = false,
   authUser,
   onOpenAuthModal,
+  onOpenProfile,
   onOpenCreateRoomModal,
   onOpenShareModal,
   onShareAndGoLive,
   onOpenAdminModal,
-  onUpdateUserName,
-  onUpdateUserColor,
   onSwitchRoom: _onSwitchRoom,
-  onLogout,
   theme,
   onToggleTheme,
   onOpenAiModal,
@@ -122,10 +114,8 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenInNewTab,
   onAudioLevelChange,
 }) => {
-  const [showProfileModal, setShowProfileModal] = useState(false);
   const [showAboutModal, setShowAboutModal] = useState(false);
   const [showMobileMenu, setShowMobileMenu] = useState(false);
-  const [tempName, setTempName] = useState(currentUser.name);
   const mobileMenuRef = useRef<HTMLDivElement | null>(null);
   const closeMobileMenu = useCallback(() => setShowMobileMenu(false), []);
   usePopoverDismiss(mobileMenuRef, showMobileMenu, closeMobileMenu);
@@ -318,10 +308,7 @@ export const Header: React.FC<HeaderProps> = ({
           id="user-profile-btn"
           type="button"
           aria-label="Open account profile"
-          onClick={() => {
-            setTempName(currentUser.name);
-            setShowProfileModal(true);
-          }}
+          onClick={onOpenProfile}
           title="Account profile & identity"
           className="hidden sm:inline-flex items-center gap-1.5 px-2 py-1.5 sm:px-2.5 sm:py-1.5 min-h-[44px] rounded-xl border border-slate-200/80 dark:border-slate-700/80 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 text-xs font-semibold transition-colors cursor-pointer btn-press shadow-2xs"
         >
@@ -470,12 +457,7 @@ export const Header: React.FC<HeaderProps> = ({
               <button
                 type="button"
                 role="menuitem"
-                onClick={() =>
-                  runMobileAction(() => {
-                    setTempName(currentUser.name);
-                    setShowProfileModal(true);
-                  })
-                }
+                onClick={() => runMobileAction(onOpenProfile)}
                 className="w-full min-h-[44px] px-3 py-2 flex items-center gap-2.5 text-left text-sm font-medium hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
               >
                 <UserRound className="w-4 h-4 text-slate-400" />
@@ -518,162 +500,6 @@ export const Header: React.FC<HeaderProps> = ({
           )}
         </div>
       </div>
-
-      {/* User Profile & Account Settings Dialog mounted through React Portal (Centered, No viewport shift) */}
-      <ModalShell
-        isOpen={showProfileModal}
-        onClose={() => setShowProfileModal(false)}
-        titleId="profile-modal-title"
-        overlayClassName="z-50 flex items-center justify-center p-4 bg-slate-900/50 dark:bg-black/70 backdrop-blur-sm animate-in fade-in duration-150"
-        panelClassName="bg-white dark:bg-slate-900 rounded-2xl p-6 w-full max-w-sm border border-slate-200 dark:border-slate-800 shadow-2xl animate-in zoom-in-95 duration-150 text-slate-900 dark:text-slate-100"
-      >
-              <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800 mb-4">
-                <div className="flex items-center gap-2">
-                  <div className="w-7 h-7 rounded-lg bg-blue-600 text-white flex items-center justify-center text-xs font-bold">
-                    W
-                  </div>
-                  <h3 id="profile-modal-title" className="font-bold text-slate-900 dark:text-white text-base">
-                    Profile & Identity
-                  </h3>
-                </div>
-                <ThemeToggle
-                  variant="compact-icon"
-                  theme={theme}
-                  onToggle={onToggleTheme}
-                />
-              </div>
-
-              {/* Account Status Card */}
-              {authUser && !authUser.isGuest ? (
-                <div className="mb-4 p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/80 flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div
-                      className="w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-sm shadow-xs shrink-0"
-                      style={{ backgroundColor: authUser.color || '#3b82f6' }}
-                    >
-                      {authUser.name.charAt(0).toUpperCase()}
-                    </div>
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-1.5">
-                        <span className="font-semibold text-xs text-slate-900 dark:text-white truncate">
-                          {authUser.name}
-                        </span>
-                        <span className="px-1.5 py-0.2 text-[9px] font-semibold bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-400 rounded-full">
-                          Signed In
-                        </span>
-                      </div>
-                      <p className="text-[11px] text-slate-400 dark:text-slate-500 truncate">@{authUser.username}</p>
-                      <p className="text-[10px] text-slate-500 dark:text-slate-400 truncate">{authUser.email}</p>
-                    </div>
-                  </div>
-                  <button
-                    id="modal-signout-btn"
-                    type="button"
-                    aria-label="Sign out"
-                    onClick={() => {
-                      onLogout();
-                      setShowProfileModal(false);
-                    }}
-                    className="p-2 text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-xl transition-colors cursor-pointer shrink-0"
-                    title="Sign Out"
-                  >
-                    <LogOut className="w-4 h-4" />
-                  </button>
-                </div>
-              ) : (
-                <div className="mb-4 p-3 rounded-xl bg-blue-50 dark:bg-blue-950/40 border border-blue-200/60 dark:border-blue-900/60 flex items-center justify-between">
-                  <div className="text-xs text-blue-700 dark:text-blue-300">
-                    <p className="font-semibold">Guest Session</p>
-                    <p className="text-[11px] text-blue-600/80 dark:text-blue-400">Save rooms by signing in</p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowProfileModal(false);
-                      onOpenAuthModal();
-                    }}
-                    className="px-2.5 py-1 text-xs font-semibold bg-blue-600 text-white hover:bg-blue-700 rounded-lg transition-colors cursor-pointer"
-                  >
-                    Sign In
-                  </button>
-                </div>
-              )}
-
-              {/* Display Name Input */}
-              <div className="mb-4">
-                <label htmlFor="profile-display-name" className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
-                  Display Name
-                </label>
-                <input
-                  id="profile-display-name"
-                  type="text"
-                  value={tempName}
-                  onChange={(e) => setTempName(e.target.value)}
-                  maxLength={20}
-                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors"
-                  placeholder="e.g. Alex Doe"
-                />
-              </div>
-
-              {/* Cursor / Avatar Color */}
-              <div className="mb-5">
-                <div id="profile-color-label" className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
-                  Cursor & Avatar Color
-                </div>
-                <ColorSwatches
-                  colors={USER_PROFILE_PALETTE}
-                  selectedColor={currentUser.color}
-                  onSelect={onUpdateUserColor}
-                  size="md"
-                  ringTone="slate"
-                  ariaLabelledBy="profile-color-label"
-                  ariaLabelPrefix="Use "
-                  ariaLabelSuffix=" cursor and avatar color"
-                  className="gap-2"
-                />
-              </div>
-
-              {/* Action Buttons */}
-              <div className="flex items-center justify-between pt-2 border-t border-slate-100 dark:border-slate-800">
-                {authUser && !authUser.isGuest ? (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      onLogout();
-                      setShowProfileModal(false);
-                    }}
-                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-xl transition-colors cursor-pointer"
-                  >
-                    <LogOut className="w-3.5 h-3.5" />
-                    <span>Log Out</span>
-                  </button>
-                ) : (
-                  <div />
-                )}
-
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setShowProfileModal(false)}
-                    className="px-3 py-1.5 text-xs font-medium text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg cursor-pointer transition-colors"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (tempName.trim()) {
-                        onUpdateUserName(tempName.trim());
-                      }
-                      setShowProfileModal(false);
-                    }}
-                    className="px-4 py-1.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow-sm cursor-pointer transition-colors"
-                  >
-                    Save Changes
-                  </button>
-                </div>
-              </div>
-      </ModalShell>
 
       {/* About & Alternatives Comparison Modal */}
       <AboutModal
