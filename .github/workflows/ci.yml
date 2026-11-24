@@ -49,3 +49,6 @@ jobs:
 
       - name: Validate project report and artifact freshness
         run: npm run docs:validate
+
+      - name: Scan repository for secrets
+        run: npm run secret:scan
