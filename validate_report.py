@@ -1,8 +1,11 @@
 import docx
 import os
 import re
+import sys
+import tempfile
+import build_project_report
 
-def validate():
+def validate(check_freshness=False):
     filename = "Generated_Project_Report.docx"
     assert os.path.exists(filename), f"File {filename} does not exist!"
     doc = docx.Document(filename)
@@ -35,7 +38,27 @@ def validate():
     assert "PBKDF2" in full_text
     assert "The server includes an automated test suite using Node.js's built-in test runner" in full_text
     assert "No formal automated test suite was identified in the analyzed repository." not in full_text
+    assert "v20.19.0" in full_text, "Node.js v20.19.0 must be cited in software prerequisites"
+    assert "v18.0.0" not in full_text, "Found stale reference to Node.js v18.0.0"
     
+    # Check docs/ copy matches root copy
+    docs_copy = os.path.join("docs", "Generated_Project_Report.docx")
+    assert os.path.exists(docs_copy), f"File {docs_copy} does not exist!"
+    docs_doc = docx.Document(docs_copy)
+    docs_full_text = "\n".join([p.text for p in docs_doc.paragraphs])
+    assert docs_full_text == full_text, "docs/Generated_Project_Report.docx differs from root Generated_Project_Report.docx!"
+
+    # Check diagrams exist and have non-trivial size
+    diagrams = [
+        "diagram_architecture.png",
+        "diagram_dataflow.png",
+        "diagram_ai_pipeline.png",
+        "diagram_database_schema.png",
+    ]
+    for d in diagrams:
+        assert os.path.exists(d), f"Diagram {d} is missing!"
+        assert os.path.getsize(d) > 10_000, f"Diagram {d} is empty or corrupted!"
+
     # Check Abstract word count
     abstract_match = re.search(r"ABSTRACT\s+―+\s+(.*?)\s+Keywords:", full_text, re.DOTALL)
     if abstract_match:
@@ -56,8 +79,23 @@ def validate():
     print(f"\nTables Summary ({len(doc.tables)} tables):")
     for i, t in enumerate(doc.tables):
         print(f" Table {i+1}: {len(t.rows)} rows x {len(t.columns)} cols")
+
+    # Verify freshness against generator
+    if check_freshness:
+        print("\nVerifying report freshness against generator...")
+        with tempfile.TemporaryDirectory() as tmpdir:
+            temp_docx = os.path.join(tmpdir, "fresh_report.docx")
+            build_project_report.build_report(output_filename=temp_docx)
+            fresh_doc = docx.Document(temp_docx)
+            fresh_text = "\n".join([p.text for p in fresh_doc.paragraphs])
+            assert fresh_text == full_text, (
+                "Committed Generated_Project_Report.docx is stale relative to build_project_report.py! "
+                "Run 'python build_project_report.py' to regenerate."
+            )
+        print("Freshness check passed: committed report matches generator output.")
         
     print("\nALL VALIDATION CHECKS PASSED PERFECTLY!")
 
 if __name__ == "__main__":
-    validate()
+    check_fresh = "--check-freshness" in sys.argv or os.environ.get("CHECK_DOCS_FRESHNESS") == "1"
+    validate(check_freshness=check_fresh)

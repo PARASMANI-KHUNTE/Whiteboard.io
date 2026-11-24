@@ -47,5 +47,5 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
 
-      - name: Validate project report
+      - name: Validate project report and artifact freshness
         run: npm run docs:validate
