@@ -8,6 +8,11 @@ import {
   shouldTearDownPeer,
   shouldTearDownPeerAfterRecovery,
 } from './voicePeerLifecycle';
+import {
+  captureVoiceSession,
+  invalidateVoiceSession,
+  isVoiceSessionCurrent,
+} from './voiceSessionEpoch';
 
 interface UseVoiceChatProps {
   socket: Socket | null;
@@ -280,7 +285,7 @@ export function useVoiceChat({
 
     if (!changed) return;
 
-    voiceEpochRef.current += 1;
+    invalidateVoiceSession(voiceEpochRef);
     announceVoiceLeft(previousSocket);
     if (previousSocket) expectedDisconnectsRef.current.add(previousSocket);
     cleanupAll();
@@ -295,7 +300,7 @@ export function useVoiceChat({
     if (!socket) return;
     const handleDisconnect = () => {
       if (expectedDisconnectsRef.current.delete(socket)) return;
-      voiceEpochRef.current += 1;
+      invalidateVoiceSession(voiceEpochRef);
       cleanupAll();
       setError(null);
       setIsIframeRestricted(false);
@@ -498,8 +503,7 @@ export function useVoiceChat({
     // The solo→multiplayer flow may call a callback created before the new
     // socket existed; always use the current ones from refs.
     const activeSocket = voiceSocketRef.current;
-    const startEpoch = voiceEpochRef.current;
-    const startRoom = activeRoom;
+    const startSession = captureVoiceSession(voiceEpochRef.current, voiceRoomRef.current);
 
     cleanupAll();
     setError(null);
@@ -522,9 +526,10 @@ export function useVoiceChat({
         },
       });
 
-      // The room/socket may have changed while the permission prompt was open.
-      // Never attach a stream from the old room to the new one.
-      if (voiceEpochRef.current !== startEpoch || voiceRoomRef.current !== startRoom) {
+      // The user may have left or switched rooms while the permission prompt
+      // was open. Never attach a stream from an invalidated session.
+      const currentSession = captureVoiceSession(voiceEpochRef.current, voiceRoomRef.current);
+      if (!isVoiceSessionCurrent(currentSession, startSession)) {
         stream.getTracks().forEach((track) => track.stop());
         return false;
       }
@@ -595,9 +600,10 @@ export function useVoiceChat({
       onNotification?.('Voice Chat Connected! You are now live.', 'success');
       return true;
     } catch (err: any) {
-      // Permission prompts outlive room switches. A late rejection must not
-      // overwrite the new room's clean state or notify the new room.
-      if (voiceEpochRef.current !== startEpoch || voiceRoomRef.current !== startRoom) {
+      // Permission prompts outlive room switches and explicit leave actions.
+      // A late rejection must not overwrite the new voice state.
+      const currentSession = captureVoiceSession(voiceEpochRef.current, voiceRoomRef.current);
+      if (!isVoiceSessionCurrent(currentSession, startSession)) {
         return false;
       }
       console.warn('Microphone activation failed:', err);
@@ -638,6 +644,7 @@ export function useVoiceChat({
 
   // Leave Voice Chat
   const leaveVoiceChat = useCallback(() => {
+    invalidateVoiceSession(voiceEpochRef);
     cleanupAll();
     if (socket) {
       socket.emit('voice-status-update', {
@@ -698,6 +705,9 @@ export function useVoiceChat({
 
   // Interactive Voice Simulation (Audible Harmonic Chime + Waveform)
   const toggleSimulated = useCallback(() => {
+    // Switching modes invalidates a pending real microphone permission prompt
+    // in both directions (simulation -> real and real -> simulation).
+    invalidateVoiceSession(voiceEpochRef);
     if (isSimulated) {
       cleanupAll();
       if (socket) {
@@ -935,6 +945,7 @@ export function useVoiceChat({
   // before useSocket's passive cleanup disconnects the socket.
   useLayoutEffect(() => {
     return () => {
+      invalidateVoiceSession(voiceEpochRef);
       announceVoiceLeft(voiceSocketRef.current);
       cleanupAll();
     };
