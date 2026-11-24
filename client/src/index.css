@@ -142,6 +142,35 @@ html[data-ai-chat-open='true'] .wb-bottom-chat-aware {
   }
 }
 
+/* Sidebar docking: overlay on small screens, docked layout space on desktop. */
+:root {
+  --wb-sidebar-width: 0rem;
+}
+
+@media (min-width: 1024px) {
+  :root {
+    --wb-sidebar-width: 4rem;
+  }
+
+  html[data-sidebar-open='true'] {
+    --wb-sidebar-width: 16rem;
+  }
+
+  #whiteboard-canvas-container {
+    margin-left: var(--wb-sidebar-width);
+    width: calc(100% - var(--wb-sidebar-width));
+  }
+
+  #whiteboard-floating-toolbar,
+  .wb-sidebar-centered {
+    left: calc(50% + var(--wb-sidebar-width) / 2);
+  }
+
+  #whiteboard-zoom-controls {
+    left: calc(1rem + var(--wb-sidebar-width));
+  }
+}
+
 .kbd-chip {
   display: inline-flex;
   align-items: center;

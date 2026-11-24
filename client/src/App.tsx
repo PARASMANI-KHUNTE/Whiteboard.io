@@ -18,6 +18,7 @@ import { useTheme } from './hooks/useTheme';
 import { useModalA11y } from './hooks/useModalA11y';
 import { useTouchPointerBridge } from './hooks/useTouchPointerBridge';
 import { Header } from './components/Header';
+import Sidebar from './components/Sidebar';
 import { Toolbar } from './components/Toolbar';
 import { Canvas } from './components/Canvas';
 import { VoteToClearModal } from './components/VoteToClearModal';
@@ -912,8 +913,11 @@ export default function App() {
   // Export board as PNG (matches the current viewport pan & zoom)
   const handleExport = useCallback(() => {
     const canvas = document.createElement('canvas');
-    const width = window.innerWidth;
-    const height = window.innerHeight;
+    // Export what the user actually sees: the canvas is docked beside the
+    // sidebar on desktop, so its client box can be narrower than the window.
+    const board = document.getElementById('whiteboard-canvas-container');
+    const width = board?.clientWidth || window.innerWidth;
+    const height = board?.clientHeight || window.innerHeight;
     const dpr = 2;
     canvas.width = width * dpr;
     canvas.height = height * dpr;
@@ -1450,6 +1454,37 @@ export default function App() {
         onToggleSimulated={toggleSimulated}
         onOpenInNewTab={openInNewTab}
         onAudioLevelChange={emitAudioLevel}
+      />
+
+      {/* Grouped controls rail — keeps the canvas uncluttered while every action stays reachable. */}
+      <Sidebar
+        currentTool={currentTool}
+        theme={theme}
+        canWrite={canWrite}
+        canUndo={canUndo}
+        canRedo={canRedo}
+        isMultiplayer={isMultiplayer}
+        isHost={isHost}
+        isSignedIn={Boolean(authUser)}
+        isVoiceConnected={isVoiceConnected}
+        isMuted={isMuted}
+        isAiChatOpen={isAiChatOpen}
+        onSelectTool={setCurrentTool}
+        onToggleTheme={handleToggleTheme}
+        onSelectAll={() => selectAllHandlerRef.current?.()}
+        onUndo={handleUndo}
+        onRedo={handleRedo}
+        onExport={handleExport}
+        onRequestClear={handleRequestClear}
+        onOpenRooms={() => setShowCreateRoomModal(true)}
+        onOpenShare={() => setShowShareModal(true)}
+        onOpenAdmin={() => setShowAdminModal(true)}
+        onOpenAi={() => setShowAiModal(true)}
+        onToggleAiChat={() => setIsAiChatOpen((open) => !open)}
+        onToggleVoice={() =>
+          isVoiceConnected ? leaveVoiceChat() : handleJoinVoiceWithSoloCheck()
+        }
+        onToggleMute={toggleMute}
       />
 
       {/* Main Interactive Canvas Area */}
