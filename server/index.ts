@@ -950,6 +950,7 @@ async function startServer() {
       if (rooms.has(roomId)) {
         io.to(roomId).emit("room-deleted", {
           roomId,
+          deletedBy: requesterId,
           message: "This room has been permanently deleted by the host.",
         });
         io.in(roomId).socketsLeave(roomId);
@@ -1357,6 +1358,7 @@ async function startServer() {
 
       io.to(targetRoomId).emit("room-deleted", {
         roomId: targetRoomId,
+        deletedBy: currentUser.id,
         message: "This room has been permanently deleted by the host.",
       });
       io.in(targetRoomId).socketsLeave(targetRoomId);

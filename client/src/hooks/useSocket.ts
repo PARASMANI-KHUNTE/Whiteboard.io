@@ -495,7 +495,10 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
       socket.disconnect();
     });
 
-    socket.on('room-deleted', (data: { roomId: string; message?: string }) => {
+    socket.on('room-deleted', (data: { roomId: string; deletedBy?: string; message?: string }) => {
+      // The deleting host uses the REST path and handles cleanup in the App
+      // success handler. Don't show them the "kicked by host" dialog (#66).
+      if (data.deletedBy && data.deletedBy === currentUserRef.current.id) return;
       setIsKicked(true);
       setKickedReason(data.message || 'This room has been permanently deleted by the host.');
       addNotification(data.message || 'Room was deleted by the host.', 'warning');
@@ -997,12 +1000,6 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
     }
   }, [roomId]);
 
-  const deleteCurrentRoom = useCallback(() => {
-    if (socketRef.current?.connected && roomId) {
-      socketRef.current.emit('admin-delete-room', { roomId });
-    }
-  }, [roomId]);
-
   const resetKickedState = useCallback(() => {
     setIsKicked(false);
     setKickedReason(null);
@@ -1045,7 +1042,6 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
     setParticipantPermission,
     kickParticipant,
     toggleLockBoard,
-    deleteCurrentRoom,
     resetKickedState,
     updateUserName,
     updateUserColor,

@@ -193,7 +193,6 @@ export default function App() {
     setParticipantPermission,
     kickParticipant,
     toggleLockBoard,
-    deleteCurrentRoom,
     resetKickedState,
     updateUserName,
     updateUserColor,
@@ -341,9 +340,9 @@ export default function App() {
 
   const handleDeleteRoom = useCallback(async (targetRoomId: string) => {
     const isCurrent = targetRoomId === roomId;
-    if (isCurrent) {
-      deleteCurrentRoom();
-    }
+    // REST is the single deletion path: it validates ownership, persists the
+    // deletion, broadcasts `room-deleted`, and detaches sockets (#66). Calling
+    // the socket path as well raced it and produced a false failure.
     const res = await deleteRoom(targetRoomId);
     if (res.success) {
       forgetRecentRoom(targetRoomId);
@@ -355,7 +354,7 @@ export default function App() {
       addNotification(res.error || `Failed to delete room ${targetRoomId}.`, 'warning');
     }
     return res;
-  }, [roomId, deleteCurrentRoom, deleteRoom, addNotification, switchRoom]);
+  }, [roomId, deleteRoom, addNotification, switchRoom]);
 
   // Ownership is derived from the server-issued session token, so callers do
   // not send a spoofable creator identity.
