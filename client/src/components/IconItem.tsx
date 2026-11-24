@@ -2,13 +2,6 @@ import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react'
 import { usePopoverDismiss } from '../hooks/usePopoverDismiss';
 import { IconElement } from '../types';
 import {
-  Trash2,
-  Move,
-  Palette,
-  RotateCw,
-  Copy,
-  Lock,
-  Unlock,
   FlipHorizontal,
   FlipVertical,
   Maximize2,
@@ -17,7 +10,8 @@ import {
 } from 'lucide-react';
 import { AVAILABLE_ICONS } from '../constants/icons';
 import { CORE_PALETTE } from '../constants/palettes';
-import { ColorSwatches } from './ui/ColorSwatches';
+import { ItemPalettePopover } from './ui/ItemPalettePopover';
+import { ITEM_OPACITIES, ItemRotationHandle, ItemToolbar } from './ui/ItemToolbar';
 import { SearchablePickerPopover } from './ui/SearchablePickerPopover';
 import { shouldBailOutItemMouseDown } from '../utils/canvasPan';
 import { hasMultiSelectModifier } from '../utils/selection';
@@ -43,13 +37,6 @@ const SIZES = [
   { label: 'M', val: 48 },
   { label: 'L', val: 64 },
   { label: 'XL', val: 96 },
-];
-
-const OPACITIES = [
-  { label: '100%', val: 1.0 },
-  { label: '75%', val: 0.75 },
-  { label: '50%', val: 0.5 },
-  { label: '25%', val: 0.25 },
 ];
 
 export const IconItem: React.FC<IconItemProps> = ({
@@ -466,38 +453,20 @@ export const IconItem: React.FC<IconItemProps> = ({
     >
       {/* Rotation Pin Handle (Hidden in multi-selection to prevent clutter) */}
       {canWrite && !isLocked && isSelected && !isMultiSelection && (
-        <div
-          className="absolute -top-7 left-1/2 -translate-x-1/2 flex flex-col items-center cursor-grab active:cursor-grabbing z-40"
+        <ItemRotationHandle
           onMouseDown={handleMouseDownRotate}
           title="Drag to rotate icon"
-        >
-          <div className="w-3.5 h-3.5 rounded-full bg-white dark:bg-slate-800 border-2 border-blue-500 shadow-sm hover:scale-125 transition-transform" />
-          <div className="w-0.5 h-3 bg-blue-500" />
-        </div>
+        />
       )}
 
       {/* Floating Action Menu on Selection / Hover */}
       {showControls && (
-        <div
-          onMouseDown={(e) => e.stopPropagation()}
-          className="absolute -top-12 left-1/2 -translate-x-1/2 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border border-slate-200 dark:border-slate-800 shadow-xl rounded-xl px-2 py-1 flex items-center gap-1.5 z-50 animate-in fade-in zoom-in-95 duration-100 whitespace-nowrap text-slate-700 dark:text-slate-200"
-          style={{ transform: `translateX(-50%) rotate(-${rotation}deg)` }}
-        >
-          {/* Hover Bridge */}
-          <div className="absolute top-full left-0 right-0 h-3" />
-
-          {/* Move Drag Handle */}
-          {!isLocked && (
-            <div
-              onMouseDown={handleMouseDownDrag}
-              title="Drag to move icon"
-              className="p-1 text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg cursor-grab active:cursor-grabbing"
-            >
-              <Move className="w-3.5 h-3.5" />
-            </div>
-          )}
-          {/* Preset Size Buttons */}
-          {!isLocked && (
+        <ItemToolbar
+          isLocked={isLocked}
+          rotation={rotation}
+          onMoveStart={handleMouseDownDrag}
+          moveTitle="Drag to move icon"
+          afterMove={
             <div className="flex items-center gap-0.5 border-l border-r border-slate-200 dark:border-slate-700 px-1">
               {SIZES.map((s) => (
                 <button
@@ -514,19 +483,17 @@ export const IconItem: React.FC<IconItemProps> = ({
                 </button>
               ))}
             </div>
-          )}
-
-          {/* Quick Rotate 45 deg */}
-          {!isLocked && (
-            <button
-              onClick={handleQuickRotate}
-              title="Rotate 45°"
-              className="p-1.5 min-w-[32px] min-h-[32px] flex items-center justify-center text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg cursor-pointer"
-            >
-              <RotateCw className="w-3.5 h-3.5" />
-            </button>
-          )}
-
+          }
+          onQuickRotate={handleQuickRotate}
+          rotateAriaLabel="Rotate icon 45 degrees"
+          onDuplicate={handleDuplicate}
+          duplicateTitle="Duplicate icon"
+          onToggleLock={handleToggleLock}
+          lockTitle="Lock icon in place"
+          unlockTitle="Unlock icon"
+          onDelete={() => onDelete(element.id)}
+          deleteTitle="Delete icon"
+        >
           {/* Flip Horizontal */}
           {!isLocked && (
             <button
@@ -661,7 +628,7 @@ export const IconItem: React.FC<IconItemProps> = ({
                     Opacity
                   </div>
                   <div className="flex gap-1">
-                    {OPACITIES.map((op) => (
+                    {ITEM_OPACITIES.map((op) => (
                       <button
                         key={op.val}
                         onClick={() => {
@@ -685,69 +652,17 @@ export const IconItem: React.FC<IconItemProps> = ({
 
           {/* Color Picker Toggle */}
           {!isLocked && (
-            <div className="relative">
-              <button
-                type="button"
-                data-popover-trigger
-                aria-label="Change icon color"
-                aria-expanded={showColorPicker}
-                onClick={() => setShowColorPicker(!showColorPicker)}
-                title="Change icon color"
-                className="p-1.5 min-w-[32px] min-h-[32px] flex items-center justify-center text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg cursor-pointer"
-              >
-                <Palette className="w-3.5 h-3.5" />
-              </button>
-
-              {showColorPicker && (
-                <div
-                  onMouseDown={(e) => e.stopPropagation()}
-                  className="absolute left-1/2 -translate-x-1/2 top-8 bg-white dark:bg-slate-900 rounded-xl shadow-xl border border-slate-200 dark:border-slate-800 p-2 z-50"
-                >
-                  <ColorSwatches
-                    colors={CORE_PALETTE}
-                    selectedColor={element.color}
-                    onSelect={handleColorChange}
-                    size="md"
-                    className="gap-1"
-                  />
-                </div>
-              )}
-            </div>
+            <ItemPalettePopover
+              isOpen={showColorPicker}
+              onToggle={() => setShowColorPicker(!showColorPicker)}
+              colors={CORE_PALETTE}
+              selectedColor={element.color}
+              onSelectColor={handleColorChange}
+              ariaLabel="Change icon color"
+              title="Change icon color"
+            />
           )}
-
-          {/* Duplicate Button */}
-          {!isLocked && (
-            <button
-              onClick={handleDuplicate}
-              title="Duplicate icon"
-              className="p-1.5 min-w-[32px] min-h-[32px] flex items-center justify-center text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg cursor-pointer transition-colors"
-            >
-              <Copy className="w-3.5 h-3.5" />
-            </button>
-          )}
-
-          {/* Lock / Unlock Toggle */}
-          <button
-            onClick={handleToggleLock}
-            title={isLocked ? 'Unlock icon' : 'Lock icon in place'}
-            className={`p-1 rounded-lg cursor-pointer transition-colors ${
-              isLocked
-                ? 'text-amber-600 bg-amber-50 dark:bg-amber-950/50 dark:text-amber-400'
-                : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800'
-            }`}
-          >
-            {isLocked ? <Lock className="w-3.5 h-3.5" /> : <Unlock className="w-3.5 h-3.5" />}
-          </button>
-
-          {/* Delete Button */}
-          <button
-            onClick={() => onDelete(element.id)}
-            title="Delete icon"
-            className="p-1 text-slate-500 dark:text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-lg cursor-pointer transition-colors"
-          >
-            <Trash2 className="w-3.5 h-3.5" />
-          </button>
-        </div>
+        </ItemToolbar>
       )}
 
       {/* Rendered Icon with Background Badge and Flip Transformation */}

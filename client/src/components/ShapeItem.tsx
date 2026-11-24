@@ -2,13 +2,6 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { usePopoverDismiss } from '../hooks/usePopoverDismiss';
 import { ShapeElement } from '../types';
 import {
-  Trash2,
-  Move,
-  Palette,
-  RotateCw,
-  Copy,
-  Lock,
-  Unlock,
   Sliders,
   Type,
 } from 'lucide-react';
@@ -17,7 +10,8 @@ import { computeRotatedResize, getRotatedResizeCursor } from '../utils/shapeResi
 import { shouldBailOutItemMouseDown } from '../utils/canvasPan';
 import { hasMultiSelectModifier } from '../utils/selection';
 import { CORE_PALETTE } from '../constants/palettes';
-import { ColorSwatches } from './ui/ColorSwatches';
+import { ItemPalettePopover } from './ui/ItemPalettePopover';
+import { ITEM_OPACITIES, ItemRotationHandle, ItemToolbar } from './ui/ItemToolbar';
 
 interface ShapeItemProps {
   element: ShapeElement;
@@ -40,13 +34,6 @@ const STROKE_WIDTHS = [
   { label: 'Thin', val: 2 },
   { label: 'Medium', val: 4 },
   { label: 'Bold', val: 8 },
-];
-
-const OPACITIES = [
-  { label: '100%', val: 1.0 },
-  { label: '75%', val: 0.75 },
-  { label: '50%', val: 0.5 },
-  { label: '25%', val: 0.25 },
 ];
 
 export const ShapeItem: React.FC<ShapeItemProps> = ({
@@ -697,50 +684,29 @@ export const ShapeItem: React.FC<ShapeItemProps> = ({
     >
       {/* Rotation Stalk and Pin Handle (Visible when selected, unlocked, and not in multi-selection) */}
       {canWrite && !isLocked && isSelected && !isMultiSelection && (
-        <div
-          className="absolute -top-7 left-1/2 -translate-x-1/2 flex flex-col items-center cursor-grab active:cursor-grabbing z-40"
+        <ItemRotationHandle
           onMouseDown={handleMouseDownRotate}
           title="Drag to rotate shape freely"
-        >
-          <div className="w-3.5 h-3.5 rounded-full bg-white dark:bg-slate-800 border-2 border-blue-500 shadow-sm hover:scale-125 transition-transform" />
-          <div className="w-0.5 h-3 bg-blue-500" />
-        </div>
+        />
       )}
 
       {/* Floating Action Menu on Selection / Hover */}
       {showControls && (
-        <div
-          onMouseDown={(e) => e.stopPropagation()}
-          className="absolute -top-12 left-1/2 -translate-x-1/2 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border border-slate-200 dark:border-slate-800 shadow-xl rounded-xl px-2 py-1 flex items-center gap-1.5 z-50 animate-in fade-in zoom-in-95 duration-100 whitespace-nowrap text-slate-700 dark:text-slate-200"
-          style={{ transform: `translateX(-50%) rotate(-${rotation}deg)` }}
+        <ItemToolbar
+          isLocked={isLocked}
+          rotation={rotation}
+          onMoveStart={handleMouseDownDrag}
+          moveTitle="Drag to move shape"
+          onQuickRotate={handleQuickRotate}
+          rotateAriaLabel="Rotate shape 45 degrees"
+          onDuplicate={handleDuplicate}
+          duplicateTitle="Duplicate shape"
+          onToggleLock={handleToggleLock}
+          lockTitle="Lock shape in place"
+          unlockTitle="Unlock shape"
+          onDelete={() => onDelete(element.id)}
+          deleteTitle="Delete shape"
         >
-          {/* Hover Bridge */}
-          <div className="absolute top-full left-0 right-0 h-3" />
-
-          {/* Move Drag Handle */}
-          {!isLocked && (
-            <div
-              onMouseDown={handleMouseDownDrag}
-              title="Drag to move shape"
-              className="p-1 text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg cursor-grab active:cursor-grabbing"
-            >
-              <Move className="w-3.5 h-3.5" />
-            </div>
-          )}
-
-          {/* Quick Rotate 45 deg */}
-          {!isLocked && (
-            <button
-              type="button"
-              aria-label="Rotate shape 45 degrees"
-              onClick={handleQuickRotate}
-              title="Rotate 45°"
-              className="p-1.5 min-w-[32px] min-h-[32px] flex items-center justify-center text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg cursor-pointer"
-            >
-              <RotateCw className="w-3.5 h-3.5" />
-            </button>
-          )}
-
           {/* Fill Mode Button (Cycle None / Tint / Solid) */}
           {!isLocked && (
             <button
@@ -832,7 +798,7 @@ export const ShapeItem: React.FC<ShapeItemProps> = ({
                       Opacity
                     </div>
                     <div className="grid grid-cols-4 gap-1">
-                      {OPACITIES.map((op) => (
+                      {ITEM_OPACITIES.map((op) => (
                         <button
                           key={op.val}
                           onClick={() => handleOpacityChange(op.val)}
@@ -872,69 +838,16 @@ export const ShapeItem: React.FC<ShapeItemProps> = ({
 
           {/* Color Picker Toggle */}
           {!isLocked && (
-            <div className="relative">
-              <button
-                type="button"
-                data-popover-trigger
-                aria-label="Change shape color"
-                aria-expanded={showColorPicker}
-                onClick={() => setShowColorPicker(!showColorPicker)}
-                title="Change color"
-                className="p-1.5 min-w-[32px] min-h-[32px] flex items-center justify-center text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg cursor-pointer"
-              >
-                <Palette className="w-3.5 h-3.5" />
-              </button>
-
-              {showColorPicker && (
-                <div
-                  onMouseDown={(e) => e.stopPropagation()}
-                  className="absolute left-1/2 -translate-x-1/2 top-8 bg-white dark:bg-slate-900 rounded-xl shadow-xl border border-slate-200 dark:border-slate-800 p-2 z-50"
-                >
-                  <ColorSwatches
-                    colors={CORE_PALETTE}
-                    selectedColor={element.color}
-                    onSelect={handleColorChange}
-                    size="md"
-                    className="gap-1"
-                  />
-                </div>
-              )}
-            </div>
+            <ItemPalettePopover
+              isOpen={showColorPicker}
+              onToggle={() => setShowColorPicker(!showColorPicker)}
+              colors={CORE_PALETTE}
+              selectedColor={element.color}
+              onSelectColor={handleColorChange}
+              ariaLabel="Change shape color"
+            />
           )}
-
-          {/* Duplicate Button */}
-          {!isLocked && (
-            <button
-              onClick={handleDuplicate}
-              title="Duplicate shape"
-              className="p-1 text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg cursor-pointer transition-colors"
-            >
-              <Copy className="w-3.5 h-3.5" />
-            </button>
-          )}
-
-          {/* Lock / Unlock Toggle */}
-          <button
-            onClick={handleToggleLock}
-            title={isLocked ? 'Unlock shape' : 'Lock shape in place'}
-            className={`p-1 rounded-lg cursor-pointer transition-colors ${
-              isLocked
-                ? 'text-amber-600 bg-amber-50 dark:bg-amber-950/50 dark:text-amber-400'
-                : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800'
-            }`}
-          >
-            {isLocked ? <Lock className="w-3.5 h-3.5" /> : <Unlock className="w-3.5 h-3.5" />}
-          </button>
-
-          {/* Delete Button */}
-          <button
-            onClick={() => onDelete(element.id)}
-            title="Delete shape"
-            className="p-1 text-slate-500 dark:text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-lg cursor-pointer transition-colors"
-          >
-            <Trash2 className="w-3.5 h-3.5" />
-          </button>
-        </div>
+        </ItemToolbar>
       )}
 
       {/* SVG Canvas for Shape */}
