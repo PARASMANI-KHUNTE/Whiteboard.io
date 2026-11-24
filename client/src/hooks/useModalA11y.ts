@@ -1,4 +1,5 @@
 import { RefObject, useEffect, useRef } from 'react';
+import { modalA11yStack } from './modalA11yStack';
 
 const FOCUSABLE_SELECTOR = [
   'a[href]',
@@ -36,9 +37,10 @@ export function useModalA11y({
     const dialog = dialogRef.current;
     if (!dialog) return;
 
+    const modalId = Symbol('modal');
+    const popModal = modalA11yStack.push(modalId);
+    modalA11yStack.acquireScrollLock(document);
     const previouslyFocused = document.activeElement as HTMLElement | null;
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
 
     const focusable = () =>
       Array.from(dialog.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)).filter(
@@ -54,9 +56,12 @@ export function useModalA11y({
     initial.focus();
 
     const handleKeyDown = (event: KeyboardEvent) => {
+      // Sibling capture listeners all see the same key. Only the topmost modal
+      // may act on it, and it must stop every other listener from doing so.
+      if (!modalA11yStack.isTop(modalId)) return;
       if (event.key === 'Escape') {
         event.preventDefault();
-        event.stopPropagation();
+        event.stopImmediatePropagation();
         onCloseRef.current();
         return;
       }
@@ -85,7 +90,8 @@ export function useModalA11y({
     document.addEventListener('keydown', handleKeyDown, true);
     return () => {
       document.removeEventListener('keydown', handleKeyDown, true);
-      document.body.style.overflow = previousOverflow;
+      modalA11yStack.releaseScrollLock(document);
+      popModal();
       previouslyFocused?.focus?.();
     };
   }, [isOpen, dialogRef, initialFocusSelector]);
