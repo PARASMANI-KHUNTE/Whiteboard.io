@@ -130,6 +130,8 @@ export default function App() {
   const [showShortcutsModal, setShowShortcutsModal] = useState<boolean>(false);
   const [aiSession, setAiSession] = useState<AiSessionState | null>(null);
   const [isAiChatOpen, setIsAiChatOpen] = useState<boolean>(false);
+  const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(false);
+  const sidebarToggleRef = useRef<HTMLButtonElement | null>(null);
 
   // Lets shared CSS lift bottom chrome above the mobile AI chat sheet.
   useEffect(() => {
@@ -1506,6 +1508,7 @@ export default function App() {
     isVoiceConnected,
     isMuted,
     isAiChatOpen,
+    isSidebarOpen,
     onSelectTool: setCurrentTool,
     onToggleTheme: handleToggleTheme,
     onSelectAll: () => selectAllHandlerRef.current?.(),
@@ -1519,6 +1522,7 @@ export default function App() {
     onOpenAdmin: () => setShowAdminModal(true),
     onOpenAiDiagram: openAiDiagram,
     onToggleAiChat: toggleAiChat,
+    onToggleSidebar: () => setIsSidebarOpen((open) => !open),
     onToggleVoice: handleToggleVoice,
     onToggleMute: toggleMute,
     onOpenShortcuts: () => setShowShortcutsModal(true),
@@ -1602,6 +1606,8 @@ export default function App() {
         isLocked={isLocked}
         authUser={authUser}
         actions={whiteboardActions}
+        isSidebarOpen={isSidebarOpen}
+        sidebarToggleRef={sidebarToggleRef}
         onSwitchRoom={switchRoom}
         theme={theme}
         isAiChatOpen={isAiChatOpen}
@@ -1629,6 +1635,9 @@ export default function App() {
         actions={whiteboardActions}
         theme={theme}
         isVoiceConnected={isVoiceConnected}
+        isOpen={isSidebarOpen}
+        onClose={() => setIsSidebarOpen(false)}
+        toggleButtonRef={sidebarToggleRef}
       />
 
       {/* Main Interactive Canvas Area */}

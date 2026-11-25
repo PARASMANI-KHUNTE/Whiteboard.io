@@ -2,15 +2,10 @@ import {
   useCallback,
   useEffect,
   useRef,
-  useState,
   type ReactNode,
+  type RefObject,
 } from 'react';
-import {
-  PanelLeftClose,
-  PanelLeftOpen,
-  Menu,
-  type LucideIcon,
-} from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import type { ThemeMode } from '../hooks/useTheme';
 import type { WhiteboardAction, WhiteboardActionRegistry, WhiteboardToolAction } from '../hooks/useWhiteboardActions';
 
@@ -20,6 +15,9 @@ export interface SidebarProps {
   actions: WhiteboardActionRegistry;
   theme: ThemeMode;
   isVoiceConnected: boolean;
+  isOpen: boolean;
+  onClose: () => void;
+  toggleButtonRef?: RefObject<HTMLButtonElement | null>;
 }
 
 interface SidebarButtonProps {
@@ -118,32 +116,34 @@ function SidebarSection({ title, expanded, children }: SidebarSectionProps) {
 export default function Sidebar({
   actions,
   isVoiceConnected,
+  isOpen,
+  onClose,
+  toggleButtonRef,
 }: SidebarProps) {
-  const [isOpen, setIsOpen] = useState(false);
   const sidebarRef = useRef<HTMLElement>(null);
-  const toggleRef = useRef<HTMLButtonElement>(null);
-  const openButtonRef = useRef<HTMLButtonElement>(null);
   const previousOpenRef = useRef(isOpen);
 
-  // Move focus into the rail when the user opens it, and back to a visible
-  // trigger when it closes so keyboard users never land on an off-screen
-  // control. Comparing against the previous state avoids stealing focus on
-  // the initial render (including StrictMode's development double effect).
+  // Move focus into the drawer when opened and back to the navbar trigger when
+  // closed from inside so keyboard users never land on an off-screen control.
   useEffect(() => {
+    const el = sidebarRef.current;
+    if (el) {
+      el.toggleAttribute('inert', !isOpen);
+    }
+
     const wasOpen = previousOpenRef.current;
     previousOpenRef.current = isOpen;
     if (wasOpen === isOpen) return;
 
     if (isOpen) {
-      toggleRef.current?.focus();
+      const firstControl = el?.querySelector<HTMLButtonElement>('nav button:not([disabled])');
+      firstControl?.focus();
       return;
     }
-    if (sidebarRef.current?.contains(document.activeElement)) {
-      const restoreTo =
-        openButtonRef.current?.getClientRects().length ? openButtonRef.current : toggleRef.current;
-      restoreTo?.focus();
+    if (el?.contains(document.activeElement)) {
+      toggleButtonRef?.current?.focus();
     }
-  }, [isOpen]);
+  }, [isOpen, toggleButtonRef]);
 
   // Shared CSS uses this to dock the canvas and bottom chrome beside the rail.
   useEffect(() => {
@@ -157,27 +157,27 @@ export default function Sidebar({
   useEffect(() => {
     const query = window.matchMedia('(min-width: 1024px)');
     const handleChange = (event: MediaQueryListEvent) => {
-      if (!event.matches) setIsOpen(false);
+      if (!event.matches) onClose();
     };
     query.addEventListener('change', handleChange);
     return () => query.removeEventListener('change', handleChange);
-  }, []);
+  }, [onClose]);
 
   useEffect(() => {
     if (!isOpen) return;
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
       if (document.querySelector('[aria-modal="true"]')) return;
-      setIsOpen(false);
+      onClose();
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen]);
+  }, [isOpen, onClose]);
 
   const runAction = useCallback((action: () => void) => {
     action();
-    if (window.innerWidth < 1024) setIsOpen(false);
-  }, []);
+    if (window.innerWidth < 1024) onClose();
+  }, [onClose]);
 
   return (
     <>
@@ -185,63 +185,23 @@ export default function Sidebar({
         <button
           type="button"
           aria-label="Close sidebar"
-          onClick={() => setIsOpen(false)}
+          onClick={onClose}
           className="fixed inset-0 top-14 z-30 bg-slate-900/40 backdrop-blur-[1px] sm:top-16 lg:hidden"
         />
-      )}
-
-      {!isOpen && (
-        <button
-          ref={openButtonRef}
-          id="sidebar-open-btn"
-          type="button"
-          onClick={() => setIsOpen(true)}
-          aria-label="Open sidebar"
-          aria-controls="whiteboard-sidebar"
-          aria-expanded={false}
-          title="Open sidebar"
-          className="fixed left-3 top-16 z-40 flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200/80 bg-white/95 text-slate-600 shadow-md backdrop-blur-md dark:border-slate-800 dark:bg-slate-900/95 dark:text-slate-300 btn-press cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-        >
-          <Menu className="h-5 w-5" aria-hidden />
-        </button>
       )}
 
       <aside
         ref={sidebarRef}
         id="whiteboard-sidebar"
         aria-label="Whiteboard controls"
-        className={`fixed bottom-0 left-0 top-14 z-40 flex flex-col overflow-hidden border-r border-slate-200 bg-white/95 shadow-xl backdrop-blur-md transition-all duration-200 ease-out sm:top-16 dark:border-slate-800 dark:bg-slate-900/95 ${
-          isOpen ? 'w-64 translate-x-0' : 'w-16 -translate-x-full'
+        aria-hidden={!isOpen || undefined}
+        className={`fixed bottom-0 left-0 top-14 z-40 flex w-64 flex-col overflow-hidden border-r border-slate-200 bg-white/95 shadow-xl backdrop-blur-md transition-transform duration-200 ease-out sm:top-16 dark:border-slate-800 dark:bg-slate-900/95 ${
+          isOpen ? 'translate-x-0' : '-translate-x-full pointer-events-none'
         }`}
       >
-        <div
-          className={`flex h-14 shrink-0 items-center border-b border-slate-200/80 dark:border-slate-800 ${
-            isOpen ? 'justify-between px-3' : 'justify-center'
-          }`}
-        >
-          {isOpen && (
-            <div className="min-w-0">
-              <p className="truncate text-sm font-semibold text-slate-800 dark:text-slate-100">Controls</p>
-              <p className="truncate text-[10px] text-slate-400 dark:text-slate-500">Everything in one place</p>
-            </div>
-          )}
-          <button
-            ref={toggleRef}
-            id="sidebar-toggle-btn"
-            type="button"
-            onClick={() => setIsOpen((open) => !open)}
-            aria-controls="whiteboard-sidebar"
-            aria-expanded={isOpen}
-            aria-label={isOpen ? 'Collapse sidebar' : 'Expand sidebar'}
-            title={isOpen ? 'Collapse sidebar' : 'Expand sidebar'}
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white"
-          >
-            {isOpen ? (
-              <PanelLeftClose className="h-5 w-5" aria-hidden />
-            ) : (
-              <PanelLeftOpen className="h-5 w-5" aria-hidden />
-            )}
-          </button>
+        <div className="flex shrink-0 flex-col justify-center border-b border-slate-200/80 px-3 py-3 dark:border-slate-800">
+          <p className="truncate text-sm font-semibold text-slate-800 dark:text-slate-100">Controls</p>
+          <p className="truncate text-[10px] text-slate-400 dark:text-slate-500">Everything in one place</p>
         </div>
 
         <nav className="flex-1 space-y-3 overflow-y-auto px-2 py-3" aria-label="Whiteboard tools">

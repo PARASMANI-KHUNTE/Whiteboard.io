@@ -26,6 +26,8 @@ interface HeaderProps {
   isLocked?: boolean;
   authUser: AuthUser | null;
   actions: WhiteboardActionRegistry;
+  isSidebarOpen?: boolean;
+  sidebarToggleRef?: React.RefObject<HTMLButtonElement | null>;
   onSwitchRoom: (newRoomId: string | null) => void;
   theme: 'light' | 'dark';
   isAiChatOpen?: boolean;
@@ -62,6 +64,8 @@ export const Header: React.FC<HeaderProps> = ({
   isLocked = false,
   authUser,
   actions,
+  isSidebarOpen = false,
+  sidebarToggleRef,
   onSwitchRoom: _onSwitchRoom,
   theme,
   isAiChatOpen = false,
@@ -94,6 +98,7 @@ export const Header: React.FC<HeaderProps> = ({
   };
 
   const {
+    sidebar: sidebarAction,
     rooms: roomsAction,
     admin: adminAction,
     about: aboutAction,
@@ -107,6 +112,7 @@ export const Header: React.FC<HeaderProps> = ({
     voiceToggle: voiceToggleAction,
     voiceMute: voiceMuteAction,
   } = actions.actions;
+  const SidebarIcon = sidebarAction.icon;
   const AdminIcon = adminAction.icon;
   const AboutIcon = aboutAction.icon;
   const ProfileIcon = profileAction.icon;
@@ -121,10 +127,29 @@ export const Header: React.FC<HeaderProps> = ({
   return (
     <header
       id="whiteboard-header"
-      className="fixed top-0 left-0 right-0 z-40 h-14 sm:h-16 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-b border-slate-200/80 dark:border-slate-800 shadow-xs px-2 sm:px-6 flex items-center justify-between gap-2 sm:gap-4 select-none transition-colors"
+      className="fixed top-0 left-0 right-0 z-40 h-14 sm:h-16 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-b border-slate-200/80 dark:border-slate-800 shadow-xs px-2 sm:px-4 flex items-center justify-between gap-2 sm:gap-4 select-none transition-colors"
     >
-      {/* Brand & Room Info */}
-      <div className="flex items-center gap-2 sm:gap-4 min-w-0">
+      {/* Sidebar Menu, Brand & Room Info */}
+      <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+        <button
+          ref={sidebarToggleRef}
+          id="sidebar-toggle-btn"
+          type="button"
+          onClick={sidebarAction.handler}
+          aria-controls="whiteboard-sidebar"
+          aria-expanded={isSidebarOpen}
+          aria-pressed={sidebarAction.pressed}
+          aria-label={sidebarAction.ariaLabel}
+          title={sidebarAction.title}
+          className={`inline-flex items-center justify-center p-2 min-w-[44px] min-h-[44px] rounded-xl border transition-colors cursor-pointer btn-press shrink-0 ${
+            isSidebarOpen
+              ? 'bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-300 border-blue-200 dark:border-blue-800 shadow-2xs'
+              : 'bg-slate-50/90 dark:bg-slate-800/70 text-slate-600 dark:text-slate-300 border-slate-200/80 dark:border-slate-700/80 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-white shadow-2xs'
+          }`}
+        >
+          <SidebarIcon className="w-5 h-5" aria-hidden />
+        </button>
+
         <div className="hidden sm:flex items-center gap-2">
           <div className="w-8 h-8 bg-gradient-to-tr from-blue-600 via-indigo-600 to-violet-600 rounded-xl flex items-center justify-center text-white font-black text-sm shadow-md ring-1 ring-white/20 tracking-tighter">
             W
