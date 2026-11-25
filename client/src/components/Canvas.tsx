@@ -1176,6 +1176,11 @@ export const Canvas: React.FC<CanvasProps> = ({
         handlePaste();
         return;
       }
+      if (mod && e.shiftKey && key === 'e') {
+        e.preventDefault();
+        actions.actions.exportPng.handler();
+        return;
+      }
       if (mod) return;
 
       // Hold space to pan
