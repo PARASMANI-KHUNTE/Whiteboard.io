@@ -76,6 +76,22 @@
   }
 }
 
+@keyframes wb-shrink-x {
+  from {
+    transform: scaleX(1);
+  }
+  to {
+    transform: scaleX(0);
+  }
+}
+
+.wb-countdown-bar {
+  transform-origin: left;
+  animation-name: wb-shrink-x;
+  animation-timing-function: linear;
+  animation-fill-mode: forwards;
+}
+
 .animate-pop-in {
   animation: wb-pop-in 0.14s cubic-bezier(0.16, 1, 0.3, 1);
 }
@@ -166,6 +182,11 @@ html[data-ai-chat-open='true'] .wb-bottom-chat-aware {
 
   #whiteboard-zoom-controls {
     left: calc(1rem + var(--wb-sidebar-width));
+  }
+
+  #welcome-hint-pill {
+    left: calc(1.5rem + var(--wb-sidebar-width));
+    transition: left 0.2s cubic-bezier(0.16, 1, 0.3, 1);
   }
 }
 
