@@ -25,6 +25,7 @@ server/data/
 *.pptx
 *.xlsx
 
-# Allow artifacts under the consolidated report tooling folder
+# Allow artifacts under the docs and report tooling folders
+!docs/*.pptx
 !docs/report-tooling/*.docx
 !docs/report-tooling/*.pptx
