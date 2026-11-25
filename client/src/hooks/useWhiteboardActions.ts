@@ -5,6 +5,8 @@ import {
   Info,
   Keyboard,
   LogIn,
+  Menu,
+  PanelLeftClose,
   Radio,
   Redo2,
   Share2,
@@ -23,6 +25,7 @@ import { getAiChatActionMeta, getAiDiagramActionMeta } from '../components/ui/ai
 import { CANVAS_TOOL_DEFINITIONS, getHandToggleMeta } from '../components/ui/toolActions';
 
 export type WhiteboardActionId =
+  | 'sidebar'
   | 'selectAll'
   | 'undo'
   | 'redo'
@@ -102,6 +105,7 @@ export interface UseWhiteboardActionsParams {
   isVoiceConnected: boolean;
   isMuted: boolean;
   isAiChatOpen: boolean;
+  isSidebarOpen: boolean;
   onSelectTool: (tool: ToolType) => void;
   onToggleTheme: () => void;
   onSelectAll: () => void;
@@ -115,6 +119,7 @@ export interface UseWhiteboardActionsParams {
   onOpenAdmin: () => void;
   onOpenAiDiagram: () => void;
   onToggleAiChat: () => void;
+  onToggleSidebar: () => void;
   onToggleVoice: () => void;
   onToggleMute: () => void;
   onOpenShortcuts: () => void;
@@ -140,6 +145,7 @@ export function useWhiteboardActions({
   isVoiceConnected,
   isMuted,
   isAiChatOpen,
+  isSidebarOpen,
   onSelectTool,
   onToggleTheme,
   onSelectAll,
@@ -153,6 +159,7 @@ export function useWhiteboardActions({
   onOpenAdmin,
   onOpenAiDiagram,
   onToggleAiChat,
+  onToggleSidebar,
   onToggleVoice,
   onToggleMute,
   onOpenShortcuts,
@@ -222,6 +229,18 @@ export function useWhiteboardActions({
     };
 
     const actions: Record<WhiteboardActionId, WhiteboardAction> = {
+      sidebar: {
+        id: 'sidebar',
+        label: isSidebarOpen ? 'Collapse sidebar' : 'Expand sidebar',
+        shortLabel: isSidebarOpen ? 'Close' : 'Menu',
+        ariaLabel: isSidebarOpen ? 'Collapse sidebar' : 'Expand sidebar',
+        title: isSidebarOpen ? 'Collapse sidebar (Esc)' : 'Open navigation menu',
+        icon: isSidebarOpen ? PanelLeftClose : Menu,
+        active: isSidebarOpen,
+        pressed: isSidebarOpen,
+        disabled: false,
+        handler: onToggleSidebar,
+      },
       selectAll: {
         id: 'selectAll',
         label: 'Select All',
@@ -426,6 +445,7 @@ export function useWhiteboardActions({
     isVoiceConnected,
     isMuted,
     isAiChatOpen,
+    isSidebarOpen,
     onSelectTool,
     onToggleTheme,
     onSelectAll,
@@ -439,6 +459,7 @@ export function useWhiteboardActions({
     onOpenAdmin,
     onOpenAiDiagram,
     onToggleAiChat,
+    onToggleSidebar,
     onToggleVoice,
     onToggleMute,
     onOpenShortcuts,

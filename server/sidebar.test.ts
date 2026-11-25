@@ -6,16 +6,33 @@ function source(path: string): string {
   return readFileSync(new URL(`../client/src/${path}`, import.meta.url), 'utf8');
 }
 
-test('sidebar is a labelled, expandable navigation surface (#147)', () => {
+test('sidebar is a labelled, expandable navigation surface triggered from the navbar (#147, #194)', () => {
   const sidebar = source('components/Sidebar.tsx');
+  const header = source('components/Header.tsx');
+  const actionsHook = source('hooks/useWhiteboardActions.ts');
+  const app = source('App.tsx');
 
   assert.match(sidebar, /<aside\s+ref=\{sidebarRef\}\s+id="whiteboard-sidebar"/);
   assert.match(sidebar, /aria-label="Whiteboard controls"/);
-  assert.match(sidebar, /aria-controls="whiteboard-sidebar"/);
-  assert.match(sidebar, /aria-expanded=\{isOpen\}/);
-  assert.match(sidebar, /aria-label=\{isOpen \? 'Collapse sidebar' : 'Expand sidebar'\}/);
-  assert.match(sidebar, /toggleRef\.current\?\.focus\(\)/);
   assert.match(sidebar, /document\.documentElement\.dataset\.sidebarOpen = String\(isOpen\)/);
+  assert.match(sidebar, /el\.toggleAttribute\('inert', !isOpen\)/);
+  assert.match(sidebar, /toggleButtonRef\?\.current\?\.focus\(\)/);
+  assert.doesNotMatch(sidebar, /id="sidebar-open-btn"/);
+  assert.doesNotMatch(sidebar, /id="sidebar-toggle-btn"/);
+
+  assert.match(header, /<header[\s\S]*?id="whiteboard-header"/);
+  assert.match(header, /sidebar:\s*sidebarAction/);
+  assert.match(header, /ref=\{sidebarToggleRef\}[\s\S]*?id="sidebar-toggle-btn"/);
+  assert.match(header, /aria-controls="whiteboard-sidebar"/);
+  assert.match(header, /aria-expanded=\{isSidebarOpen\}/);
+  assert.match(header, /aria-label=\{sidebarAction\.ariaLabel\}/);
+
+  assert.match(actionsHook, /'sidebar'/);
+  assert.match(actionsHook, /ariaLabel:\s*isSidebarOpen \? 'Collapse sidebar' : 'Expand sidebar'/);
+
+  assert.match(app, /isSidebarOpen=\{isSidebarOpen\}/);
+  assert.match(app, /sidebarToggleRef=\{sidebarToggleRef\}/);
+  assert.match(app, /toggleButtonRef=\{sidebarToggleRef\}/);
 
   for (const group of ['Tools', 'Board', 'Collaborate', 'View', 'Account']) {
     assert.ok(sidebar.includes(`title="${group}"`), `missing ${group} section`);
