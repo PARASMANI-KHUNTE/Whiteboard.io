@@ -1,13 +1,15 @@
+import { formatGlobalContextPrompt } from "./context";
 import type {
   ChatTurn,
   DetailLevel,
   DiagramDirection,
   DiagramGraph,
   DiagramType,
+  GlobalAiContext,
 } from "./types";
 
 /** Bump when the prompt/schema contract changes so cached graphs invalidate. */
-export const AI_SCHEMA_VERSION = 3;
+export const AI_SCHEMA_VERSION = 4;
 
 export const SYSTEM_INSTRUCTION = `You are a senior systems designer who turns a request into a precise whiteboard diagram.
 
@@ -43,7 +45,12 @@ REVISION RULES
 - Apply the instruction to the WHOLE graph and return the complete revised graph, not a patch.
 - Preserve unaffected node ids and content exactly. Add, remove, relabel, regroup or rewire only what the instruction requires.
 - If the instruction changes orientation or detail, keep the same semantic content and let the renderer re-layout.
-- Never drop existing failure paths unless explicitly asked to simplify.`;
+- Never drop existing failure paths unless explicitly asked to simplify.
+
+SESSION & CANVAS CONTEXT
+- When a [GLOBAL SESSION CONTEXT] block is provided, read it as authoritative shared whiteboard memory across all AI models and collaborators.
+- Maintain terminology, node ids, architecture choices, and goals established in prior turns or other AI providers in this session.
+- Account for existing sticky notes, shapes, text boxes, icons, and wire connections already on the canvas so new or revised diagrams fit the user's board seamlessly.`;
 
 const NODE_SCHEMA = {
   type: "OBJECT",
@@ -115,13 +122,16 @@ export function buildInitialUserMessage(
   prompt: string,
   type: DiagramType,
   detail: DetailLevel,
-  direction: DiagramDirection
+  direction: DiagramDirection,
+  globalContext?: GlobalAiContext
 ): string {
+  const globalBlock = formatGlobalContextPrompt(globalContext);
   return [
     `Diagram type: ${type}`,
     `Detail level: ${detail} (${detailRange(detail)})`,
     `Renderer orientation: ${direction}`,
     `Request: ${prompt}`,
+    ...(globalBlock ? ["", globalBlock] : []),
     "",
     typeHint(type),
     "Return the complete graph. Cover the happy path plus realistic failure/retry paths, label branch edges, and put concrete domain specifics in node details.",
@@ -135,8 +145,9 @@ export function buildRevisionUserMessage(params: {
   type: DiagramType;
   detail: DetailLevel;
   direction: DiagramDirection;
+  globalContext?: GlobalAiContext;
 }): string {
-  const { instruction, graph, history, type, detail, direction } = params;
+  const { instruction, graph, history, type, detail, direction, globalContext } = params;
 
   const compactGraph = {
     title: graph.title,
@@ -157,6 +168,7 @@ export function buildRevisionUserMessage(params: {
     })),
   };
 
+  const globalBlock = formatGlobalContextPrompt(globalContext);
   const recentHistory = history
     .slice(-8)
     .map((turn) => `${turn.role === "user" ? "User" : "Assistant"}: ${turn.content.slice(0, 500)}`)
@@ -169,6 +181,7 @@ export function buildRevisionUserMessage(params: {
     "",
     "Current graph:",
     JSON.stringify(compactGraph),
+    ...(globalBlock ? ["", globalBlock] : []),
     "",
     recentHistory ? `Conversation so far:\n${recentHistory}\n` : "",
     `New instruction: ${instruction}`,

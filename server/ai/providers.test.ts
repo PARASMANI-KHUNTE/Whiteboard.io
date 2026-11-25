@@ -5,9 +5,13 @@ import {
   clearModelHealth,
   geminiProviderChain,
   isModelHealthy,
+  ollamaProviderChain,
   recordModelFailure,
   recordModelSuccess,
+  resolveAiProvider,
+  resolveProviderChain,
   setCachedDiscoveredModels,
+  setCachedOllamaModels,
 } from './providers';
 
 const originalFetch = globalThis.fetch;
@@ -18,6 +22,7 @@ test.afterEach(() => {
   process.env = { ...originalEnv };
   clearModelHealth();
   setCachedDiscoveredModels(null);
+  setCachedOllamaModels(null);
 });
 
 test('callGemini sends apiKey via x-goog-api-key header and never in URL query string (#101)', async () => {
@@ -185,4 +190,82 @@ test('circuit breaker temporarily demotes HTTP 503 models below healthy models (
   assert.equal(isModelHealthy('gemini-primary'), true);
   chain = geminiProviderChain();
   assert.equal(chain[0].model, 'gemini-primary');
+});
+
+test('resolveProviderChain includes local Ollama when AI_PROVIDER=gemini unless explicitly disabled (#192)', () => {
+  process.env.AI_PROVIDER = 'gemini';
+  process.env.GEMINI_API_KEY = 'fake-gemini-key';
+  process.env.GEMINI_MODEL = 'gemini-3.8-flash';
+  process.env.GEMINI_FALLBACK_MODELS = 'none';
+  process.env.OLLAMA_MODEL = 'llama3.2';
+  delete process.env.AI_ALLOW_OLLAMA_FALLBACK;
+
+  let chain = resolveProviderChain();
+  assert.deepEqual(
+    chain.map((p) => `${p.name}:${p.model}`),
+    ['gemini:gemini-3.8-flash', 'ollama:llama3.2']
+  );
+
+  // Even without a Gemini key, AI_PROVIDER=gemini falls back to Ollama when enabled
+  delete process.env.GEMINI_API_KEY;
+  assert.equal(resolveAiProvider()?.name, 'ollama');
+  chain = resolveProviderChain();
+  assert.deepEqual(
+    chain.map((p) => `${p.name}:${p.model}`),
+    ['ollama:llama3.2']
+  );
+
+  // Explicit opt-out disables Ollama fallback
+  process.env.GEMINI_API_KEY = 'fake-gemini-key';
+  process.env.AI_ALLOW_OLLAMA_FALLBACK = 'false';
+  chain = resolveProviderChain();
+  assert.deepEqual(
+    chain.map((p) => `${p.name}:${p.model}`),
+    ['gemini:gemini-3.8-flash']
+  );
+});
+
+test('ollamaProviderChain prioritizes installed local models from discovery (#192)', () => {
+  process.env.OLLAMA_MODEL = 'llama3.2';
+  setCachedOllamaModels(['qwen2.5:7b-instruct', 'llama3.2:latest']);
+
+  let chain = ollamaProviderChain();
+  assert.equal(chain[0].model, 'llama3.2:latest');
+  assert.ok(chain.some((p) => p.model === 'qwen2.5:7b-instruct'));
+
+  // When configured default is not pulled locally, use discovered local model instead of failing
+  process.env.OLLAMA_MODEL = 'missing-model';
+  chain = ollamaProviderChain();
+  assert.equal(chain[0].model, 'qwen2.5:7b-instruct');
+});
+
+test('callOllama falls back to json format when model rejects strict schema with HTTP 400 (#192)', async () => {
+  process.env.NODE_ENV = 'test';
+  const sentFormats: unknown[] = [];
+
+  globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+    const parsed = JSON.parse(String(init?.body ?? '{}'));
+    sentFormats.push(parsed.format);
+    if (sentFormats.length === 1) {
+      return new Response('invalid format schema grammar', { status: 400 });
+    }
+    return new Response(
+      JSON.stringify({
+        message: { content: JSON.stringify({ nodes: [{ id: 'n1', label: 'Node' }], edges: [] }) },
+      }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } }
+    );
+  }) as typeof fetch;
+
+  const result = await callAiModel(
+    { name: 'ollama', model: 'qwen2.5:7b', label: 'Ollama' },
+    'generate diagram',
+    0.2,
+    { maxRetries: 2 }
+  );
+
+  assert.equal(sentFormats.length, 2);
+  assert.equal(typeof sentFormats[0], 'object');
+  assert.equal(sentFormats[1], 'json');
+  assert.deepEqual(result, { nodes: [{ id: 'n1', label: 'Node' }], edges: [] });
 });

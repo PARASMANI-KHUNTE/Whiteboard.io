@@ -1,9 +1,35 @@
-import type { DetailLevel, DiagramGraph, DiagramType, GraphEdge, GraphNode } from "./types";
+import type {
+  DetailLevel,
+  DiagramGraph,
+  DiagramType,
+  GlobalAiContext,
+  GraphEdge,
+  GraphNode,
+} from "./types";
 
-function shortTopic(prompt: string): string {
+function shortTopic(prompt: string, globalContext?: GlobalAiContext): string {
   const cleaned = prompt.replace(/\s+/g, " ").trim();
-  if (!cleaned) return "the request";
-  return cleaned.length > 34 ? `${cleaned.slice(0, 33).trimEnd()}…` : cleaned;
+  const looksFollowUp =
+    /^(this|it|that|add|extend|update|refine|expand|connect)\b/i.test(cleaned) ||
+    cleaned.split(/\s+/).length <= 3;
+  const sessionTitle = globalContext?.priorDiagrams?.slice(-1)[0]?.title;
+  const boardSample = globalContext?.boardSummary?.nodes
+    .slice(0, 2)
+    .map((n) => n.label)
+    .filter(Boolean)
+    .join(", ");
+
+  const contextualBase =
+    looksFollowUp && sessionTitle
+      ? `${cleaned} (${sessionTitle})`
+      : looksFollowUp && boardSample
+        ? `${cleaned} (${boardSample})`
+        : cleaned;
+
+  if (!contextualBase) return "the request";
+  return contextualBase.length > 34
+    ? `${contextualBase.slice(0, 33).trimEnd()}…`
+    : contextualBase;
 }
 
 function flowchartGraph(topic: string, detail: DetailLevel): DiagramGraph {
@@ -460,9 +486,10 @@ function architectureGraph(topic: string, detail: DetailLevel): DiagramGraph {
 export function buildFallbackGraph(
   prompt: string,
   type: DiagramType,
-  detail: DetailLevel
+  detail: DetailLevel,
+  globalContext?: GlobalAiContext
 ): DiagramGraph {
-  const topic = shortTopic(prompt);
+  const topic = shortTopic(prompt, globalContext);
   switch (type) {
     case "flowchart":
       return flowchartGraph(topic, detail);

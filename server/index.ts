@@ -77,7 +77,8 @@ import {
 } from "./oauthState";
 import { AiQueueFullError, generateDiagram, reviseDiagram } from "./ai/generate";
 import { bindRequestAbort } from "./ai/abort";
-import { getProviderSummary } from "./ai/providers";
+import { clearStoredBoardContext, sanitizeGlobalContext } from "./ai/context";
+import { getProviderSummary, ollamaFallbackEnabled } from "./ai/providers";
 import {
   coerceDiagramType,
   coerceDetailLevel,
@@ -646,6 +647,7 @@ async function startServer() {
       provider: summary.provider,
       model: summary.model,
       label: summary.label,
+      ollamaFallback: ollamaFallbackEnabled(),
     });
   });
 
@@ -674,6 +676,11 @@ async function startServer() {
           ? { x: Number(body.canvasCenter.x), y: Number(body.canvasCenter.y) }
           : { x: 0, y: 0 };
 
+      const globalContext = sanitizeGlobalContext(
+        body.globalContext,
+        typeof body.boardKey === "string" ? body.boardKey : undefined
+      );
+
       const result = await generateDiagram({
         prompt: prompt.slice(0, 1200),
         type: coerceDiagramType(body.type),
@@ -682,6 +689,7 @@ async function startServer() {
         canvasCenter,
         author,
         sessionId: typeof body.sessionId === "string" ? body.sessionId : undefined,
+        globalContext,
         signal: requestAbort.signal,
       });
 
@@ -743,6 +751,11 @@ async function startServer() {
           ? { x: Number(body.canvasCenter.x), y: Number(body.canvasCenter.y) }
           : { x: 0, y: 0 };
 
+      const globalContext = sanitizeGlobalContext(
+        body.globalContext,
+        typeof body.boardKey === "string" ? body.boardKey : undefined
+      );
+
       const result = await reviseDiagram({
         instruction: instruction.slice(0, 1200),
         graph,
@@ -753,6 +766,7 @@ async function startServer() {
         canvasCenter,
         author,
         sessionId: typeof body.sessionId === "string" ? body.sessionId : undefined,
+        globalContext,
         signal: requestAbort.signal,
       });
 
@@ -1877,6 +1891,7 @@ async function startServer() {
       if (userIds.length <= 1) {
         room.elements = {};
         clearLiveStrokes();
+        clearStoredBoardContext(targetRoomId);
         void saveRoomElements(targetRoomId, {});
         io.to(targetRoomId).emit("board-cleared", {
           initiatorName: currentUser.name,
@@ -1921,6 +1936,7 @@ async function startServer() {
         if (passed) {
           currentRoom.elements = {};
           clearLiveStrokes();
+          clearStoredBoardContext(targetRoomId);
           void saveRoomElements(targetRoomId, {});
           io.to(targetRoomId).emit("board-cleared", {
             initiatorName: currentRoom.voteToClear.initiatorName,
@@ -1961,6 +1977,7 @@ async function startServer() {
         if (room.voteTimer) clearTimeout(room.voteTimer);
         room.elements = {};
         clearLiveStrokes();
+        clearStoredBoardContext(currentRoomId);
         void saveRoomElements(currentRoomId, {});
         io.to(currentRoomId).emit("board-cleared", {
           initiatorName: room.voteToClear.initiatorName,
@@ -2045,6 +2062,7 @@ async function startServer() {
 
       room.elements = {};
       clearLiveStrokes();
+      clearStoredBoardContext(currentRoomId);
       void saveRoomElements(currentRoomId, {});
       io.to(currentRoomId).emit("board-cleared", {
         initiatorName: currentUser.name,

@@ -8,6 +8,7 @@ import type {
   DiagramDirection,
   DiagramGraph,
   DiagramType,
+  GlobalAiContext,
 } from "./types";
 
 interface BaseRequest {
@@ -45,12 +46,16 @@ export async function fetchAiEngine(signal?: AbortSignal): Promise<AiEngineConfi
       provider?: AiEngineConfig["provider"];
       model?: string;
       label?: string;
+      ollamaFallback?: boolean;
     };
     if (!data?.success || !data.provider || !data.label) return null;
     return {
       provider: data.provider,
       model: data.model || "",
       label: data.label,
+      ...(typeof data.ollamaFallback === "boolean"
+        ? { ollamaFallback: data.ollamaFallback }
+        : {}),
     };
   } catch {
     return null;
@@ -63,6 +68,7 @@ export interface GenerateDiagramRequest extends BaseRequest {
   detail: DetailLevel;
   direction: DiagramDirection;
   canvasCenter: { x: number; y: number };
+  globalContext?: GlobalAiContext;
 }
 
 export async function requestDiagram(request: GenerateDiagramRequest): Promise<AiDiagramPayload> {
@@ -78,6 +84,7 @@ export async function requestDiagram(request: GenerateDiagramRequest): Promise<A
       detail: request.detail,
       direction: request.direction,
       canvasCenter: request.canvasCenter,
+      ...(request.globalContext ? { globalContext: request.globalContext } : {}),
     }),
     signal: request.signal,
   });
@@ -94,6 +101,7 @@ export interface ReviseDiagramRequest extends BaseRequest {
   direction: DiagramDirection;
   canvasCenter: { x: number; y: number };
   sessionId: string;
+  globalContext?: GlobalAiContext;
 }
 
 export async function requestRevision(request: ReviseDiagramRequest): Promise<AiDiagramPayload> {
@@ -112,6 +120,7 @@ export async function requestRevision(request: ReviseDiagramRequest): Promise<Ai
       direction: request.direction,
       canvasCenter: request.canvasCenter,
       sessionId: request.sessionId,
+      ...(request.globalContext ? { globalContext: request.globalContext } : {}),
     }),
     signal: request.signal,
   });

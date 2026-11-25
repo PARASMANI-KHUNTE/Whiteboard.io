@@ -1,15 +1,38 @@
-import type { AiSessionState } from '../ai/types';
+import type {
+  AiSessionState,
+  GlobalSessionTurn,
+  SessionDiagramSummary,
+} from '../ai/types';
 
 /**
- * Persistence for the AI diagram chat, scoped to the board it belongs to.
- * Room boards use the room code as key; the personal canvas uses "solo".
+ * Persistence for the AI diagram chat and cross-diagram global session ledger,
+ * scoped to the board it belongs to (room code or "solo").
  */
 
 const PREFIX = 'whiteboard_ai_session:';
+const LEDGER_PREFIX = 'whiteboard_ai_global_ctx:';
 const MAX_MESSAGES = 60;
+const MAX_LEDGER_DIAGRAMS = 6;
+const MAX_LEDGER_TURNS = 16;
+
+export interface BoardAiLedger {
+  diagrams: SessionDiagramSummary[];
+  turns: GlobalSessionTurn[];
+  lastProvider?: string;
+  lastModel?: string;
+}
+
+export const EMPTY_BOARD_AI_LEDGER: BoardAiLedger = {
+  diagrams: [],
+  turns: [],
+};
 
 function storageKey(boardKey: string): string {
   return PREFIX + (boardKey || 'solo');
+}
+
+function ledgerKey(boardKey: string): string {
+  return LEDGER_PREFIX + (boardKey || 'solo');
 }
 
 export function loadAiSession(boardKey: string): AiSessionState | null {
@@ -44,6 +67,44 @@ export function saveAiSession(boardKey: string, session: AiSessionState): void {
 export function clearAiSession(boardKey: string): void {
   try {
     localStorage.removeItem(storageKey(boardKey));
+  } catch {
+    // Ignore.
+  }
+}
+
+export function loadBoardAiLedger(boardKey: string): BoardAiLedger {
+  try {
+    const raw = localStorage.getItem(ledgerKey(boardKey));
+    if (!raw) return EMPTY_BOARD_AI_LEDGER;
+    const parsed = JSON.parse(raw) as Partial<BoardAiLedger>;
+    return {
+      diagrams: Array.isArray(parsed.diagrams) ? parsed.diagrams.slice(-MAX_LEDGER_DIAGRAMS) : [],
+      turns: Array.isArray(parsed.turns) ? parsed.turns.slice(-MAX_LEDGER_TURNS) : [],
+      ...(typeof parsed.lastProvider === 'string' ? { lastProvider: parsed.lastProvider } : {}),
+      ...(typeof parsed.lastModel === 'string' ? { lastModel: parsed.lastModel } : {}),
+    };
+  } catch {
+    return EMPTY_BOARD_AI_LEDGER;
+  }
+}
+
+export function saveBoardAiLedger(boardKey: string, ledger: BoardAiLedger): void {
+  try {
+    const trimmed: BoardAiLedger = {
+      diagrams: ledger.diagrams.slice(-MAX_LEDGER_DIAGRAMS),
+      turns: ledger.turns.slice(-MAX_LEDGER_TURNS),
+      ...(ledger.lastProvider ? { lastProvider: ledger.lastProvider } : {}),
+      ...(ledger.lastModel ? { lastModel: ledger.lastModel } : {}),
+    };
+    localStorage.setItem(ledgerKey(boardKey), JSON.stringify(trimmed));
+  } catch {
+    // Ignore storage quota issues.
+  }
+}
+
+export function clearBoardAiLedger(boardKey: string): void {
+  try {
+    localStorage.removeItem(ledgerKey(boardKey));
   } catch {
     // Ignore.
   }

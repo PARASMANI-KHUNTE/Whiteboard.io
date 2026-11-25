@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import {
   ToolType,
   ShapeType,
@@ -35,12 +35,22 @@ import { ConfirmModal } from './components/ConfirmModal';
 import { AiGenerateModal } from './components/AiGenerateModal';
 import { AiChatPanel } from './components/AiChatPanel';
 import { getAiChatActionMeta } from './components/ui/aiActions';
+import { buildGlobalAiContext } from './ai/sessionContext';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { Info, Sparkles, AlertCircle, CheckCircle2, UserX, X } from 'lucide-react';
 import { isColorBlack, isColorWhite } from './utils/themeColors';
 import { shouldRecolorBoardOnThemeToggle } from './utils/themeBoardEdit';
 import { routeWire } from './utils/wireGeometry';
-import { loadAiSession, saveAiSession, clearAiSession } from './utils/aiSessionStorage';
+import {
+  BoardAiLedger,
+  EMPTY_BOARD_AI_LEDGER,
+  loadAiSession,
+  loadBoardAiLedger,
+  saveAiSession,
+  saveBoardAiLedger,
+  clearAiSession,
+  clearBoardAiLedger,
+} from './utils/aiSessionStorage';
 import { forgetRecentRoom, rememberRecentRoom } from './utils/recentRooms';
 import { subscribeToSessionExpired } from './utils/authSession';
 import type { AiDiagramPayload, AiSessionState } from './ai/types';
@@ -243,6 +253,10 @@ export default function App() {
   const aiSessionRef = useRef<AiSessionState | null>(aiSession);
   aiSessionRef.current = aiSession;
 
+  const [boardAiLedger, setBoardAiLedger] = useState<BoardAiLedger>(EMPTY_BOARD_AI_LEDGER);
+  const boardAiLedgerRef = useRef<BoardAiLedger>(boardAiLedger);
+  boardAiLedgerRef.current = boardAiLedger;
+
   const applyAiSession = useCallback((next: AiSessionState | null) => {
     setAiSession(next);
     const key = aiBoardKeyRef.current;
@@ -252,6 +266,69 @@ export default function App() {
       clearAiSession(key);
     }
   }, []);
+
+  const applyBoardAiLedger = useCallback((next: BoardAiLedger) => {
+    setBoardAiLedger(next);
+    const key = aiBoardKeyRef.current;
+    if (next.diagrams.length === 0 && next.turns.length === 0) {
+      clearBoardAiLedger(key);
+    } else {
+      saveBoardAiLedger(key, next);
+    }
+  }, []);
+
+  const recordBoardAiTurn = useCallback(
+    (
+      payload: AiDiagramPayload,
+      userText: string | undefined,
+      assistantText: string
+    ) => {
+      const prev = boardAiLedgerRef.current;
+      const now = Date.now();
+      const nextDiagrams = [
+        ...prev.diagrams.filter((d) => d.sessionId !== payload.sessionId),
+        {
+          sessionId: payload.sessionId,
+          title: payload.title,
+          type: payload.type,
+          summary: payload.summary,
+          provider: payload.provider,
+          model: payload.model,
+          nodeCount: payload.graph.nodes.length,
+          updatedAt: now,
+        },
+      ].slice(-6);
+
+      const newTurns = [
+        ...(userText
+          ? [
+              {
+                role: 'user' as const,
+                content: userText,
+                diagramTitle: payload.title,
+                at: now,
+              },
+            ]
+          : []),
+        {
+          role: 'assistant' as const,
+          content: assistantText,
+          provider: payload.provider,
+          model: payload.model,
+          diagramTitle: payload.title,
+          at: now + 1,
+        },
+      ];
+
+      applyBoardAiLedger({
+        diagrams: nextDiagrams,
+        turns: [...prev.turns, ...newTurns].slice(-16),
+        lastProvider: payload.provider ?? prev.lastProvider,
+        lastModel: payload.model ?? prev.lastModel,
+      });
+    },
+    [applyBoardAiLedger]
+  );
 
   // An AI "replace board" clears the canvas on purpose and then re-adds the new
   // diagram. The server echoes that clear back to the sender, so guard the
@@ -663,7 +740,7 @@ export default function App() {
     async (
       payload: AiDiagramPayload,
       options: { origin: { x: number; y: number }; replaceBoard: boolean },
-      context: { boardKey: string }
+      context: { boardKey: string; prompt?: string }
     ) => {
       // The modal may have been opened in a different room. Never mutate the
       // room the user switched to while generation was in flight (#68).
@@ -700,6 +777,33 @@ export default function App() {
       applyAiElements(payload.sessionId, payload.elements);
 
       const now = Date.now();
+      const assistantContent =
+        [payload.summary, payload.notice].filter(Boolean).join('\n\n') ||
+        'Your diagram is ready. Tell me what to change.';
+      const initialMessages = [
+        ...(context.prompt
+          ? [
+              {
+                id: `ai-msg-${now}-u`,
+                role: 'user' as const,
+                content: context.prompt,
+                at: now,
+              },
+            ]
+          : []),
+        {
+          id: `ai-msg-${now}-0`,
+          role: 'assistant' as const,
+          content: assistantContent,
+          changes: payload.changes,
+          suggestions: payload.suggestions,
+          notice: payload.notice,
+          provider: payload.provider,
+          model: payload.model,
+          at: now + 1,
+        },
+      ];
+
       applyAiSession({
         sessionId: payload.sessionId,
         type: payload.type,
@@ -710,24 +814,20 @@ export default function App() {
         summary: payload.summary,
         origin: options.origin,
         suggestions: payload.suggestions,
-        messages: [
-          {
-            id: `ai-msg-${now}-0`,
-            role: 'assistant',
-            content:
-              [payload.summary, payload.notice].filter(Boolean).join('\n\n') ||
-              'Your diagram is ready. Tell me what to change.',
-            changes: payload.changes,
-            suggestions: payload.suggestions,
-            notice: payload.notice,
-            at: now,
-          },
-        ],
+        messages: initialMessages,
       });
+      recordBoardAiTurn(payload, context.prompt, payload.summary || assistantContent);
       setIsAiChatOpen(true);
 
+      const engineName =
+        payload.provider === 'ollama'
+          ? `Ollama (${payload.model || 'local'})`
+          : payload.provider === 'fallback'
+            ? 'Local fallback engine'
+            : 'Gemini';
+
       addNotification(
-        `✨ Gemini generated ${payload.elements.length} elements. Use the chat to refine it.`,
+        `✨ ${engineName} generated ${payload.elements.length} elements. Use the chat to refine it.`,
         'success'
       );
 
@@ -741,6 +841,7 @@ export default function App() {
       addNotification,
       applyAiElements,
       applyAiSession,
+      recordBoardAiTurn,
       canDirectClear,
       emitClearBoardDirect,
       recordBoardClearHistory,
@@ -770,16 +871,19 @@ export default function App() {
         content: instruction,
         at: now,
       };
+      const assistantContent =
+        payload.summary && payload.summary !== currentSession.summary
+          ? payload.summary
+          : 'Done — the canvas is updated.';
       const assistantMessage = {
         id: `ai-msg-${now}-a`,
         role: 'assistant' as const,
-        content:
-          payload.summary && payload.summary !== currentSession.summary
-            ? payload.summary
-            : 'Done — the canvas is updated.',
+        content: assistantContent,
         changes: payload.changes,
         suggestions: payload.suggestions,
         notice: payload.notice,
+        provider: payload.provider,
+        model: payload.model,
         at: now + 1,
       };
 
@@ -794,31 +898,36 @@ export default function App() {
         suggestions: payload.suggestions,
         messages: [...currentSession.messages, userMessage, assistantMessage],
       });
+      recordBoardAiTurn(payload, instruction, assistantContent);
 
       addNotification(
         `✨ Applied: ${payload.changes[0] ?? 'diagram updated'}`,
         'success'
       );
     },
-    [canWrite, addNotification, applyAiElements, applyAiSession]
+    [canWrite, addNotification, applyAiElements, applyAiSession, recordBoardAiTurn]
   );
 
-  // Reset undo history and restore the AI chat that belongs to this board.
+  // Reset undo history and restore the AI chat & global session ledger for this board.
   useEffect(() => {
     resetHistory();
-    const stored = loadAiSession(roomId || 'solo');
+    const boardKey = roomId || 'solo';
+    const stored = loadAiSession(boardKey);
+    const storedLedger = loadBoardAiLedger(boardKey);
     setAiSession(stored);
+    setBoardAiLedger(storedLedger);
     setIsAiChatOpen(Boolean(stored));
   }, [roomId, resetHistory]);
 
-  // An explicit board clear ends the diagram conversation it was based on.
+  // An explicit board clear ends the diagram conversation and global session context.
   useEffect(() => {
     if (boardClearCount === 0) return;
     if (Date.now() < aiClearGuardUntilRef.current) return;
     if (Object.keys(elementsRef.current).length > 0) return;
     applyAiSession(null);
+    applyBoardAiLedger(EMPTY_BOARD_AI_LEDGER);
     setIsAiChatOpen(false);
-  }, [boardClearCount, applyAiSession]);
+  }, [boardClearCount, applyAiSession, applyBoardAiLedger]);
 
   // Remember joined rooms so guests can rediscover them later.
   useEffect(() => {
@@ -1418,6 +1527,21 @@ export default function App() {
     onOpenAbout: () => setShowAboutModal(true),
   });
 
+  const globalAiContext = useMemo(
+    () =>
+      buildGlobalAiContext({
+        boardKey: aiBoardKey,
+        roomName,
+        isSoloMode,
+        participantCount: Math.max(1, Object.keys(users).length),
+        theme,
+        elements,
+        activeSession: aiSession,
+        boardLedger: boardAiLedger,
+      }),
+    [aiBoardKey, roomName, isSoloMode, users, theme, elements, aiSession, boardAiLedger]
+  );
+
   useModalA11y({
     isOpen: isKicked,
     onClose: () => {
@@ -1712,7 +1836,7 @@ export default function App() {
         />
       </ErrorBoundary>
 
-      {/* Gemini AI Diagram Generator Modal */}
+      {/* AI Diagram Generator Modal */}
       <AiGenerateModal
         isOpen={showAiModal}
         onClose={() => setShowAiModal(false)}
@@ -1728,6 +1852,7 @@ export default function App() {
         }
         authToken={token}
         canClearBoard={canDirectClear}
+        globalContext={globalAiContext}
       />
 
       {/* Docked follow-up chat for the current session (null session shows an empty state) */}
@@ -1739,6 +1864,7 @@ export default function App() {
         onNewDiagram={openAiDiagram}
         onApplyTurn={handleAiApplyTurn}
         authToken={token}
+        globalContext={globalAiContext}
       />
 
       {/* Reopen the AI chat after it has been minimized */}
