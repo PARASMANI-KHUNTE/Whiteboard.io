@@ -264,15 +264,66 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         </SearchablePickerPopover>
       )}
 
+      {/* Expanded Colors & Stroke Options Pill (floats above toolbar so right utilities never clip) */}
+      {isExpanded && (
+        <div
+          id="toolbar-style-options"
+          className="wb-surface-glass rounded-2xl px-2.5 py-1.5 flex items-center gap-1.5 sm:gap-2 max-w-[96vw] overflow-x-auto scrollbar-none [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] shadow-lg animate-in fade-in slide-in-from-bottom-2 duration-150"
+        >
+          <ColorSwatches
+            colors={TOOLBAR_COLORS}
+            selectedColor={currentColor}
+            onSelect={onSelectColor}
+            disabled={!canWrite}
+            size="sm"
+            showCustomPicker
+            idPrefix="color-"
+            ariaLabelPrefix="Select "
+            ariaLabelSuffix=" color"
+            className="sm:gap-2 px-1 shrink-0"
+          />
+
+          <div className="h-6 w-[1px] bg-slate-200 dark:bg-slate-800 mx-0.5 sm:mx-1 shrink-0" />
+
+          <div className="flex items-center gap-1 shrink-0">
+            {SIZES.map((s) => (
+              <button
+                key={s.value}
+                id={`size-${s.value}`}
+                type="button"
+                disabled={!canWrite}
+                onClick={() => onSelectSize(s.value)}
+                title={`Stroke width: ${s.label}`}
+                aria-label={`Stroke width: ${s.label}`}
+                className={`w-7 h-7 sm:w-8 sm:h-8 rounded-lg flex items-center justify-center transition-all cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed btn-press ${
+                  currentSize === s.value
+                    ? 'bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-white font-bold ring-1 ring-slate-300 dark:ring-slate-700'
+                    : 'text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800'
+                }`}
+              >
+                <span
+                  style={{ width: `${s.dotSize}px`, height: `${s.dotSize}px` }}
+                  className={`rounded-full ${
+                    currentSize === s.value
+                      ? 'bg-slate-900 dark:bg-white'
+                      : 'bg-slate-400 dark:bg-slate-500'
+                  }`}
+                />
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Main Floating Toolbar */}
       <div
         id="whiteboard-floating-toolbar"
-        className={`wb-surface-glass rounded-2xl p-1.5 sm:p-2 flex items-center gap-1 sm:gap-2 max-w-[98vw] overflow-x-auto scrollbar-none [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] transition-all shadow-xl ${
-          !canWrite ? 'opacity-80 bg-slate-50/90 dark:bg-slate-900/90' : ''
+        className={`wb-surface-glass rounded-2xl p-1.5 sm:p-2 flex items-center gap-1 sm:gap-1.5 max-w-[96vw] transition-all shadow-xl ${
+          !canWrite ? 'opacity-85 bg-slate-50/90 dark:bg-slate-900/90' : ''
         }`}
       >
-        {/* Primary Drawing & Navigation Tools */}
-        <div className="flex items-center gap-0.5 sm:gap-1 shrink-0">
+        {/* Primary Drawing Tools + Style Toggle (scrolls only on ultra-narrow viewports) */}
+        <div className="flex items-center gap-0.5 sm:gap-1 min-w-0 flex-1 overflow-x-auto scrollbar-none [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
           {(['select'] as const).map((toolKey) => {
             const toolAction = toolsById[toolKey];
             const ToolIcon = toolAction.icon;
@@ -280,6 +331,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
               <button
                 key={toolKey}
                 id={toolAction.id}
+                type="button"
                 onClick={() => {
                   toolAction.handler();
                   setShowShapePicker(false);
@@ -287,14 +339,15 @@ export const Toolbar: React.FC<ToolbarProps> = ({
                   setShowWirePicker(false);
                 }}
                 title={toolAction.title}
-                className={`min-h-[40px] min-w-[40px] p-2 sm:p-2.5 rounded-xl flex items-center justify-center gap-1.5 text-xs font-medium transition-colors cursor-pointer btn-press ${
+                aria-label={toolAction.label}
+                className={`min-h-[38px] min-w-[38px] sm:min-h-[40px] sm:min-w-[40px] p-2 rounded-xl flex items-center justify-center gap-1.5 text-xs font-medium transition-colors cursor-pointer shrink-0 btn-press ${
                   toolAction.active
                     ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400 font-semibold ring-1.5 ring-blue-500 shadow-xs'
                     : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800'
                 }`}
               >
-                <ToolIcon className="w-4 h-4" />
-                <span className="hidden md:inline">{toolAction.shortLabel}</span>
+                <ToolIcon className="w-4 h-4 shrink-0" />
+                <span className="hidden 2xl:inline whitespace-nowrap">{toolAction.shortLabel}</span>
               </button>
             );
           })}
@@ -305,12 +358,14 @@ export const Toolbar: React.FC<ToolbarProps> = ({
             return (
               <button
                 id="tool-select-all"
+                type="button"
                 onClick={selectAll.handler}
                 title={selectAll.title}
-                className="min-h-[40px] px-2.5 rounded-xl flex items-center justify-center gap-1.5 text-xs font-semibold bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900/50 border border-blue-200 dark:border-blue-800/60 transition-colors cursor-pointer animate-in fade-in zoom-in-95 duration-150 btn-press"
+                aria-label={selectAll.ariaLabel}
+                className="min-h-[38px] sm:min-h-[40px] px-2 sm:px-2.5 rounded-xl flex items-center justify-center gap-1.5 text-xs font-semibold bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900/50 border border-blue-200 dark:border-blue-800/60 transition-colors cursor-pointer shrink-0 animate-in fade-in zoom-in-95 duration-150 btn-press"
               >
-                <SelectAllIcon className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">{selectAll.label}</span>
+                <SelectAllIcon className="w-3.5 h-3.5 shrink-0" />
+                <span className="hidden xl:inline whitespace-nowrap">{selectAll.label}</span>
               </button>
             );
           })()}
@@ -322,6 +377,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
               <button
                 key={toolKey}
                 id={toolAction.id}
+                type="button"
                 disabled={toolAction.disabled}
                 onClick={() => {
                   toolAction.handler();
@@ -330,14 +386,15 @@ export const Toolbar: React.FC<ToolbarProps> = ({
                   setShowWirePicker(false);
                 }}
                 title={toolAction.title}
-                className={`min-h-[40px] min-w-[40px] p-2 sm:p-2.5 rounded-xl flex items-center justify-center gap-1.5 text-xs font-medium transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed btn-press ${
+                aria-label={toolAction.label}
+                className={`min-h-[38px] min-w-[38px] sm:min-h-[40px] sm:min-w-[40px] p-2 rounded-xl flex items-center justify-center gap-1.5 text-xs font-medium transition-colors cursor-pointer shrink-0 disabled:opacity-40 disabled:cursor-not-allowed btn-press ${
                   toolAction.active
                     ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400 font-semibold ring-1.5 ring-blue-500 shadow-xs'
                     : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800'
                 }`}
               >
-                <ToolIcon className="w-4 h-4" />
-                <span className="hidden md:inline">{toolAction.shortLabel}</span>
+                <ToolIcon className="w-4 h-4 shrink-0" />
+                <span className="hidden 2xl:inline whitespace-nowrap">{toolAction.shortLabel}</span>
               </button>
             );
           })}
@@ -349,6 +406,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
             return (
               <button
                 id="tool-shapes"
+                type="button"
                 data-popover-trigger
                 disabled={shapeTool.disabled}
                 onClick={() => {
@@ -358,14 +416,15 @@ export const Toolbar: React.FC<ToolbarProps> = ({
                   if (!showShapePicker) selectTool('shape');
                 }}
                 title={shapeTool.title}
-                className={`min-h-[40px] min-w-[40px] p-2 sm:p-2.5 rounded-xl flex items-center justify-center gap-1.5 text-xs font-medium transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed btn-press ${
+                aria-label={shapeTool.label}
+                className={`min-h-[38px] min-w-[38px] sm:min-h-[40px] sm:min-w-[40px] p-2 rounded-xl flex items-center justify-center gap-1.5 text-xs font-medium transition-colors cursor-pointer shrink-0 disabled:opacity-40 disabled:cursor-not-allowed btn-press ${
                   (currentTool === 'shape' || showShapePicker) && !shapeTool.disabled
                     ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400 font-semibold ring-1.5 ring-blue-500 shadow-xs'
                     : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800'
                 }`}
               >
-                <ShapeIcon className="w-4 h-4" />
-                <span className="hidden md:inline">{shapeTool.shortLabel}</span>
+                <ShapeIcon className="w-4 h-4 shrink-0" />
+                <span className="hidden 2xl:inline whitespace-nowrap">{shapeTool.shortLabel}</span>
               </button>
             );
           })()}
@@ -377,6 +436,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
             return (
               <button
                 id="tool-icons"
+                type="button"
                 data-popover-trigger
                 disabled={iconTool.disabled}
                 onClick={() => {
@@ -386,14 +446,15 @@ export const Toolbar: React.FC<ToolbarProps> = ({
                   if (!showIconPicker) selectTool('icon');
                 }}
                 title={iconTool.title}
-                className={`min-h-[40px] min-w-[40px] p-2 sm:p-2.5 rounded-xl flex items-center justify-center gap-1.5 text-xs font-medium transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed btn-press ${
+                aria-label={iconTool.label}
+                className={`min-h-[38px] min-w-[38px] sm:min-h-[40px] sm:min-w-[40px] p-2 rounded-xl flex items-center justify-center gap-1.5 text-xs font-medium transition-colors cursor-pointer shrink-0 disabled:opacity-40 disabled:cursor-not-allowed btn-press ${
                   (currentTool === 'icon' || showIconPicker) && !iconTool.disabled
                     ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400 font-semibold ring-1.5 ring-blue-500 shadow-xs'
                     : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800'
                 }`}
               >
-                <StickerToolIcon className="w-4 h-4" />
-                <span className="hidden md:inline">{iconTool.shortLabel}</span>
+                <StickerToolIcon className="w-4 h-4 shrink-0" />
+                <span className="hidden 2xl:inline whitespace-nowrap">{iconTool.shortLabel}</span>
               </button>
             );
           })()}
@@ -405,6 +466,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
               <button
                 key={toolKey}
                 id={toolAction.id}
+                type="button"
                 disabled={toolAction.disabled}
                 onClick={() => {
                   toolAction.handler();
@@ -413,14 +475,15 @@ export const Toolbar: React.FC<ToolbarProps> = ({
                   setShowWirePicker(false);
                 }}
                 title={toolAction.title}
-                className={`min-h-[40px] min-w-[40px] p-2 sm:p-2.5 rounded-xl flex items-center justify-center gap-1.5 text-xs font-medium transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed btn-press ${
+                aria-label={toolAction.label}
+                className={`min-h-[38px] min-w-[38px] sm:min-h-[40px] sm:min-w-[40px] p-2 rounded-xl flex items-center justify-center gap-1.5 text-xs font-medium transition-colors cursor-pointer shrink-0 disabled:opacity-40 disabled:cursor-not-allowed btn-press ${
                   toolAction.active
                     ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400 font-semibold ring-1.5 ring-blue-500 shadow-xs'
                     : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800'
                 }`}
               >
-                <ToolIcon className="w-4 h-4" />
-                <span className="hidden md:inline">{toolAction.shortLabel}</span>
+                <ToolIcon className="w-4 h-4 shrink-0" />
+                <span className="hidden 2xl:inline whitespace-nowrap">{toolAction.shortLabel}</span>
               </button>
             );
           })}
@@ -431,6 +494,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
             return (
               <button
                 id="tool-wire"
+                type="button"
                 data-popover-trigger
                 disabled={wireTool.disabled}
                 onClick={() => {
@@ -448,97 +512,52 @@ export const Toolbar: React.FC<ToolbarProps> = ({
                     ? wireTool.title
                     : `Wire Connector (${wireTool.shortcut}) (${selectedWireStyle === 'line' ? 'Straight Line' : 'Smooth Curve'}) — Click or drag to connect 2 objects`
                 }
-                className={`min-h-[40px] min-w-[40px] p-2 sm:p-2.5 rounded-xl flex items-center justify-center gap-1.5 text-xs font-medium transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed btn-press ${
+                aria-label={wireTool.label}
+                className={`min-h-[38px] min-w-[38px] sm:min-h-[40px] sm:min-w-[40px] p-2 rounded-xl flex items-center justify-center gap-1.5 text-xs font-medium transition-colors cursor-pointer shrink-0 disabled:opacity-40 disabled:cursor-not-allowed btn-press ${
                   (currentTool === 'wire' || showWirePicker) && !wireTool.disabled
                     ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400 font-semibold ring-1.5 ring-blue-500 shadow-xs'
                     : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800'
                 }`}
               >
                 {selectedWireStyle === 'line' ? (
-                  <Minus className="w-4 h-4" />
+                  <Minus className="w-4 h-4 shrink-0" />
                 ) : (
-                  <Spline className="w-4 h-4" />
+                  <Spline className="w-4 h-4 shrink-0" />
                 )}
-                <span className="hidden md:inline">{wireTool.shortLabel}</span>
+                <span className="hidden 2xl:inline whitespace-nowrap">{wireTool.shortLabel}</span>
               </button>
             );
           })()}
+
+          <div className="h-6 w-[1px] bg-slate-200 dark:bg-slate-800 mx-0.5 sm:mx-1 shrink-0" />
+
+          {/* Toggle Colors & Stroke Pill */}
+          <button
+            id="toolbar-slide-toggle-btn"
+            type="button"
+            onClick={() => setIsExpanded((prev) => !prev)}
+            aria-expanded={isExpanded}
+            aria-controls="toolbar-style-options"
+            aria-label={isExpanded ? 'Collapse color and stroke options' : 'Expand color and stroke options'}
+            title={isExpanded ? 'Hide color and stroke options' : 'Colors, stroke width & options'}
+            className={`min-h-[38px] sm:min-h-[40px] px-2 sm:px-2.5 py-1.5 rounded-xl flex items-center gap-1.5 text-xs font-medium transition-all cursor-pointer shrink-0 border btn-press ${
+              isExpanded
+                ? 'bg-blue-50 dark:bg-blue-950 text-blue-600 dark:text-blue-400 border-blue-200 dark:border-blue-800 shadow-xs'
+                : 'bg-slate-50 dark:bg-slate-800/80 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700'
+            }`}
+          >
+            <SlidersHorizontal className="w-3.5 h-3.5 shrink-0" />
+            <span
+              className="w-2.5 h-2.5 rounded-full border border-slate-300 dark:border-slate-600 shrink-0 shadow-2xs"
+              style={{ backgroundColor: currentColor }}
+            />
+            <ChevronRight className={`w-3.5 h-3.5 shrink-0 transition-transform duration-200 ${isExpanded ? '-rotate-90' : 'rotate-90'}`} />
+          </button>
         </div>
 
-        <div className="h-6 w-[1px] bg-slate-200 dark:bg-slate-800 mx-0.5 sm:mx-1 shrink-0" />
+        <div className="h-6 w-[1px] bg-slate-200 dark:bg-slate-800 mx-0.5 shrink-0" />
 
-        {/* Slide / Expand Toggle Button */}
-        <button
-          id="toolbar-slide-toggle-btn"
-          onClick={() => setIsExpanded((prev) => !prev)}
-          title={isExpanded ? "Collapse tool options" : "Slide to expand colors, stroke & options"}
-          className={`min-h-[40px] px-2 sm:px-2.5 py-1.5 rounded-xl flex items-center gap-1.5 text-xs font-medium transition-all cursor-pointer shrink-0 border btn-press ${
-            isExpanded
-              ? 'bg-blue-50 dark:bg-blue-950 text-blue-600 dark:text-blue-400 border-blue-200 dark:border-blue-800 shadow-xs'
-              : 'bg-slate-50 dark:bg-slate-800/80 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700'
-          }`}
-        >
-          <SlidersHorizontal className="w-3.5 h-3.5" />
-          <span
-            className="w-2.5 h-2.5 rounded-full border border-slate-300 dark:border-slate-600 shrink-0 shadow-2xs"
-            style={{ backgroundColor: currentColor }}
-          />
-          <ChevronRight className={`w-3.5 h-3.5 transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`} />
-        </button>
-
-        {/* Slidable Options: Colors & Stroke Sizes */}
-        {isExpanded && (
-          <div className="flex items-center gap-1 sm:gap-2 shrink-0 animate-in fade-in slide-in-from-left-2 duration-200">
-            <div className="h-6 w-[1px] bg-slate-200 dark:bg-slate-800 mx-0.5 shrink-0" />
-
-            {/* Color Options */}
-            <ColorSwatches
-              colors={TOOLBAR_COLORS}
-              selectedColor={currentColor}
-              onSelect={onSelectColor}
-              disabled={!canWrite}
-              size="sm"
-              showCustomPicker
-              idPrefix="color-"
-              ariaLabelPrefix="Select "
-              ariaLabelSuffix=" color"
-              className="sm:gap-2 px-1 shrink-0"
-            />
-
-            <div className="h-6 w-[1px] bg-slate-200 dark:bg-slate-800 mx-0.5 sm:mx-1 shrink-0" />
-
-            {/* Stroke Size Selector */}
-            <div className="flex items-center gap-1 shrink-0">
-              {SIZES.map((s) => (
-                <button
-                  key={s.value}
-                  id={`size-${s.value}`}
-                  disabled={!canWrite}
-                  onClick={() => onSelectSize(s.value)}
-                  title={`Stroke width: ${s.label}`}
-                  className={`w-7 h-7 sm:w-8 sm:h-8 rounded-lg flex items-center justify-center transition-all cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed btn-press ${
-                    currentSize === s.value
-                      ? 'bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-white font-bold ring-1 ring-slate-300 dark:ring-slate-700'
-                      : 'text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800'
-                  }`}
-                >
-                  <span
-                    style={{ width: `${s.dotSize}px`, height: `${s.dotSize}px` }}
-                    className={`rounded-full ${
-                      currentSize === s.value
-                        ? 'bg-slate-900 dark:bg-white'
-                        : 'bg-slate-400 dark:bg-slate-500'
-                    }`}
-                  />
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-
-        <div className="h-6 w-[1px] bg-slate-200 dark:bg-slate-800 mx-0.5 sm:mx-1 shrink-0" />
-
-        {/* Action Utilities: Always Visible */}
+        {/* Action Utilities: Pinned & Always Visible (Undo, Redo, Export, Clear/Delete) */}
         <div className="flex items-center gap-0.5 sm:gap-1 shrink-0">
           {([
             { action: actionMap.undo, domId: 'undo-btn' },
@@ -550,13 +569,14 @@ export const Toolbar: React.FC<ToolbarProps> = ({
               <button
                 key={action.id}
                 id={domId}
+                type="button"
                 onClick={action.handler}
                 disabled={action.disabled}
                 title={action.title}
                 aria-label={action.ariaLabel}
-                className="p-2 sm:p-2.5 min-h-[38px] min-w-[38px] flex items-center justify-center text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800 rounded-xl disabled:opacity-20 disabled:pointer-events-none transition-colors cursor-pointer btn-press"
+                className="p-2 min-h-[38px] min-w-[38px] flex items-center justify-center text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-slate-100/80 dark:hover:bg-slate-800 rounded-xl disabled:opacity-30 disabled:pointer-events-none transition-colors cursor-pointer shrink-0 btn-press"
               >
-                <Icon className="w-4 h-4" />
+                <Icon className="w-4 h-4 shrink-0" aria-hidden />
               </button>
             );
           })}
@@ -564,17 +584,22 @@ export const Toolbar: React.FC<ToolbarProps> = ({
           {(() => {
             const clearAction = actionMap.clearBoard;
             const ClearIcon = clearAction.icon;
+            const compactLabel =
+              clearAction.shortLabel === 'Clear Board'
+                ? 'Clear'
+                : (clearAction.shortLabel ?? clearAction.label);
             return (
               <button
                 id="clear-board-btn"
+                type="button"
                 onClick={clearAction.handler}
                 disabled={clearAction.disabled}
                 title={clearAction.title}
                 aria-label={clearAction.ariaLabel}
-                className="p-2 sm:p-2.5 min-h-[38px] text-slate-500 dark:text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-xl transition-colors cursor-pointer flex items-center gap-1.5 disabled:opacity-20 disabled:pointer-events-none font-medium text-xs btn-press"
+                className="p-2 sm:px-2.5 min-h-[38px] min-w-[38px] text-rose-500 dark:text-rose-400 hover:text-rose-600 dark:hover:text-rose-300 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-xl transition-colors cursor-pointer flex items-center justify-center gap-1.5 disabled:opacity-35 disabled:pointer-events-none font-semibold text-xs shrink-0 btn-press"
               >
-                <ClearIcon className="w-4 h-4" />
-                <span>{clearAction.shortLabel ?? clearAction.label}</span>
+                <ClearIcon className="w-4 h-4 shrink-0" aria-hidden />
+                <span className="hidden sm:inline whitespace-nowrap">{compactLabel}</span>
               </button>
             );
           })()}
