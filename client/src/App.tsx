@@ -36,6 +36,7 @@ import { AiGenerateModal } from './components/AiGenerateModal';
 import { AiChatPanel } from './components/AiChatPanel';
 import { getAiChatActionMeta } from './components/ui/aiActions';
 import { buildGlobalAiContext } from './ai/sessionContext';
+import { diffAiElements, type AiElementDiffResult } from './ai/elementDiff';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { Info, Sparkles, AlertCircle, CheckCircle2, UserX, X } from 'lucide-react';
 import { isColorBlack, isColorWhite } from './utils/themeColors';
@@ -86,20 +87,6 @@ function collectCascadeWires(
       !excludedIds.has(element.id) &&
       (createdIds.has(element.fromId) || createdIds.has(element.toId))
   );
-}
-
-/**
- * Compare two canvas elements ignoring `updatedAt`, which changes on every
- * server revision even when the visible content is identical.
- */
-function sameElementContent(a: CanvasElement, b: CanvasElement): boolean {
-  if (a === b) return true;
-  const normalize = (element: CanvasElement) => {
-    const copy: Record<string, unknown> = { ...(element as unknown as Record<string, unknown>) };
-    delete copy.updatedAt;
-    return JSON.stringify(copy);
-  };
-  return normalize(a) === normalize(b);
 }
 
 const HISTORY_LIMIT = 100;
@@ -159,6 +146,12 @@ export default function App() {
   const kickedDialogRef = useRef<HTMLDivElement>(null);
   const selectAllHandlerRef = useRef<(() => void) | null>(null);
   const navigateToElementsRef = useRef<((elements: CanvasElement[]) => void) | null>(null);
+  const highlightElementsRef = useRef<
+    ((
+      elements: CanvasElement[],
+      options?: { navigateIfHidden?: boolean; durationMs?: number; badgeLabel?: string }
+    ) => void) | null
+  >(null);
   const getWorldCenterRef = useRef<(() => { x: number; y: number }) | null>(null);
   const getViewportRef = useRef<(() => { pan: { x: number; y: number }; zoom: number }) | null>(null);
 
@@ -694,46 +687,37 @@ export default function App() {
    * left untouched, and the whole turn becomes a single undo step.
    */
   const applyAiElements = useCallback(
-    (sessionId: string, nextElements: CanvasElement[]) => {
+    (sessionId: string, nextElements: CanvasElement[]): AiElementDiffResult => {
       const prefix = `ai_${sessionId}_`;
       const current = (Object.values(elementsRef.current) as CanvasElement[]).filter(
         (element) => element && element.id.startsWith(prefix)
       );
 
-      const currentById = new Map(current.map((element) => [element.id, element]));
-      const nextById = new Map(nextElements.map((element) => [element.id, element]));
+      const diff = diffAiElements(current, nextElements);
 
-      const created = nextElements.filter((element) => !currentById.has(element.id));
-      const deleted = current.filter((element) => !nextById.has(element.id));
-      const updated = nextElements.filter((element) => {
-        const before = currentById.get(element.id);
-        return before ? !sameElementContent(before, element) : false;
-      });
-      const updatedBefore = updated
-        .map((element) => currentById.get(element.id))
-        .filter((element) => Boolean(element)) as CanvasElement[];
-
-      if (created.length === 0 && deleted.length === 0 && updated.length === 0) {
-        return;
+      if (diff.created.length === 0 && diff.deleted.length === 0 && diff.updated.length === 0) {
+        return diff;
       }
 
       // Delete first so a revision that reuses an id never shows a duplicate.
-      if (deleted.length > 0) {
-        emitElementsBatchDelete(deleted.map((element) => element.id));
+      if (diff.deleted.length > 0) {
+        emitElementsBatchDelete(diff.deleted.map((element) => element.id));
       }
-      if (created.length > 0) {
-        emitElementsBatchCreate(created);
+      if (diff.created.length > 0) {
+        emitElementsBatchCreate(diff.created);
       }
-      updated.forEach((element) => emitElementUpdate(element));
+      diff.updated.forEach((element) => emitElementUpdate(element));
 
       pushHistory({
         kind: 'batch',
-        created,
-        deleted,
-        before: updatedBefore,
-        after: updated,
+        created: diff.created,
+        deleted: diff.deleted,
+        before: diff.updatedBefore,
+        after: diff.updated,
         at: Date.now(),
       });
+
+      return diff;
     },
     [emitElementsBatchCreate, emitElementsBatchDelete, emitElementUpdate, pushHistory]
   );
@@ -776,7 +760,8 @@ export default function App() {
         }
       }
 
-      applyAiElements(payload.sessionId, payload.elements);
+      const diff = applyAiElements(payload.sessionId, payload.elements);
+      const focusElements = diff.focusElements.length > 0 ? diff.focusElements : payload.elements;
 
       const now = Date.now();
       const assistantContent =
@@ -798,6 +783,7 @@ export default function App() {
           role: 'assistant' as const,
           content: assistantContent,
           changes: payload.changes,
+          changedElementIds: focusElements.map((element) => element.id),
           suggestions: payload.suggestions,
           notice: payload.notice,
           provider: payload.provider,
@@ -833,9 +819,14 @@ export default function App() {
         'success'
       );
 
-      // Frame the diagram on first generation only; follow-ups keep the view steady.
+      // Frame the diagram cleanly beside the AI Chat drawer and pulse new items.
       setTimeout(() => {
         navigateToElementsRef.current?.(payload.elements);
+        highlightElementsRef.current?.(focusElements, {
+          navigateIfHidden: false,
+          badgeLabel: 'AI generated',
+          durationMs: 4200,
+        });
       }, 120);
     },
     [
@@ -864,7 +855,8 @@ export default function App() {
         return;
       }
 
-      applyAiElements(currentSession.sessionId, payload.elements);
+      const diff = applyAiElements(currentSession.sessionId, payload.elements);
+      const focusElements = diff.focusElements.length > 0 ? diff.focusElements : payload.elements;
 
       const now = Date.now();
       const userMessage = {
@@ -882,6 +874,7 @@ export default function App() {
         role: 'assistant' as const,
         content: assistantContent,
         changes: payload.changes,
+        changedElementIds: focusElements.map((element) => element.id),
         suggestions: payload.suggestions,
         notice: payload.notice,
         provider: payload.provider,
@@ -902,12 +895,43 @@ export default function App() {
       });
       recordBoardAiTurn(payload, instruction, assistantContent);
 
+      const badgeLabel =
+        diff.created.length > 0 && diff.substantivelyUpdated.length === 0
+          ? 'AI added'
+          : 'AI updated';
+
+      setTimeout(() => {
+        highlightElementsRef.current?.(focusElements, {
+          navigateIfHidden: true,
+          badgeLabel,
+          durationMs: 4800,
+        });
+      }, 100);
+
       addNotification(
-        `✨ Applied: ${payload.changes[0] ?? 'diagram updated'}`,
+        `✨ Highlighted changes: ${payload.changes[0] ?? 'diagram updated'}`,
         'success'
       );
     },
     [canWrite, addNotification, applyAiElements, applyAiSession, recordBoardAiTurn]
+  );
+
+  const handleHighlightAiMessageElements = useCallback(
+    (elementIds: string[]) => {
+      const matched = elementIds
+        .map((id) => elementsRef.current[id])
+        .filter((element): element is CanvasElement => Boolean(element));
+      if (matched.length === 0) {
+        addNotification('Those elements are no longer on the board.', 'info');
+        return;
+      }
+      highlightElementsRef.current?.(matched, {
+        navigateIfHidden: true,
+        badgeLabel: 'AI change',
+        durationMs: 4500,
+      });
+    },
+    [addNotification]
   );
 
   // Reset undo history and restore the AI chat & global session ledger for this board.
@@ -1684,6 +1708,9 @@ export default function App() {
         onRegisterNavigateToElements={(fn) => {
           navigateToElementsRef.current = fn;
         }}
+        onRegisterHighlightElements={(fn) => {
+          highlightElementsRef.current = fn;
+        }}
         onRegisterGetWorldCenter={(fn) => {
           getWorldCenterRef.current = fn;
         }}
@@ -1872,6 +1899,7 @@ export default function App() {
         onClose={closeAiChat}
         onNewDiagram={openAiDiagram}
         onApplyTurn={handleAiApplyTurn}
+        onHighlightChanges={handleHighlightAiMessageElements}
         authToken={token}
         globalContext={globalAiContext}
       />
