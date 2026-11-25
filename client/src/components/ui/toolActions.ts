@@ -1,4 +1,7 @@
 import {
+  ArrowRight,
+  Circle,
+  Diamond,
   Eraser,
   Hand,
   Highlighter,
@@ -7,11 +10,42 @@ import {
   Shapes,
   Smile,
   Spline,
+  Square,
+  Star,
   StickyNote,
+  Triangle,
   Type,
   type LucideIcon,
 } from 'lucide-react';
-import type { ToolType } from '../../types';
+import type { ShapeType, ToolType } from '../../types';
+
+export interface StrokeSizeOption {
+  label: string;
+  value: number;
+  dotSize: number;
+}
+
+export const STROKE_SIZE_OPTIONS: StrokeSizeOption[] = [
+  { label: 'Fine', value: 3, dotSize: 4 },
+  { label: 'Medium', value: 6, dotSize: 7 },
+  { label: 'Bold', value: 12, dotSize: 10 },
+];
+
+export interface ShapeToolOption {
+  type: ShapeType;
+  label: string;
+  keywords: string[];
+  icon: LucideIcon;
+}
+
+export const SHAPE_TOOL_OPTIONS: ShapeToolOption[] = [
+  { type: 'rectangle', label: 'Rectangle', keywords: ['rectangle', 'box', 'square', 'card'], icon: Square },
+  { type: 'circle', label: 'Circle', keywords: ['circle', 'round', 'oval', 'bubble'], icon: Circle },
+  { type: 'diamond', label: 'Diamond', keywords: ['diamond', 'rhombus', 'decision', 'flow'], icon: Diamond },
+  { type: 'triangle', label: 'Triangle', keywords: ['triangle', 'delta', 'pyramid'], icon: Triangle },
+  { type: 'star', label: 'Star', keywords: ['star', 'favorite', 'badge'], icon: Star },
+  { type: 'arrow', label: 'Arrow', keywords: ['arrow', 'pointer', 'direction'], icon: ArrowRight },
+];
 
 export interface CanvasToolDefinition {
   tool: ToolType;

@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import test from 'node:test';
 
 function source(path: string): string {
   return readFileSync(new URL(`../client/src/${path}`, import.meta.url), 'utf8');
 }
 
-test('sidebar is a labelled, expandable navigation surface triggered from the navbar (#147, #194)', () => {
+test('sidebar is a labelled, expandable navigation surface triggered from the navbar (#147, #194, #200)', () => {
   const sidebar = source('components/Sidebar.tsx');
   const header = source('components/Header.tsx');
   const actionsHook = source('hooks/useWhiteboardActions.ts');
@@ -30,19 +30,19 @@ test('sidebar is a labelled, expandable navigation surface triggered from the na
   assert.match(actionsHook, /'sidebar'/);
   assert.match(actionsHook, /ariaLabel:\s*isSidebarOpen \? 'Collapse sidebar' : 'Expand sidebar'/);
 
+  assert.match(app, /matchMedia\('\(min-width: 1024px\)'\)\.matches/);
   assert.match(app, /isSidebarOpen=\{isSidebarOpen\}/);
   assert.match(app, /sidebarToggleRef=\{sidebarToggleRef\}/);
   assert.match(app, /toggleButtonRef=\{sidebarToggleRef\}/);
 
-  for (const group of ['Tools', 'Board', 'Collaborate', 'View', 'Account']) {
+  for (const group of ['Tools', 'Style', 'Board', 'Collaborate', 'View', 'Account']) {
     assert.ok(sidebar.includes(`title="${group}"`), `missing ${group} section`);
   }
 });
 
-test('chrome surfaces consume shared whiteboard action registry without DOM shims (#162)', () => {
+test('chrome surfaces consume shared whiteboard action registry without DOM shims (#162, #200)', () => {
   const sidebar = source('components/Sidebar.tsx');
   const header = source('components/Header.tsx');
-  const toolbar = source('components/Toolbar.tsx');
   const canvas = source('components/Canvas.tsx');
   const app = source('App.tsx');
 
@@ -54,37 +54,48 @@ test('chrome surfaces consume shared whiteboard action registry without DOM shim
   assert.match(sidebar, /actions\.actions\.selectAll/);
   assert.match(sidebar, /actions\.actions\.account/);
   assert.match(sidebar, /actions\.actions\.about/);
+  assert.match(sidebar, /id="sidebar-style-controls"/);
 
   assert.match(app, /useWhiteboardActions\(/);
   assert.match(app, /<AboutModal/);
   assert.match(header, /actions\.actions/);
-  assert.match(toolbar, /actions:\s*actionMap.*= actions/);
-  assert.match(toolbar, /actionMap\.undo/);
   assert.match(canvas, /actions\.actions\.shortcuts/);
   assert.match(canvas, /actions\.handToggle/);
 });
 
-test('App mounts Header, Sidebar, Canvas, and Toolbar with shared actions (#147, #162)', () => {
+test('App removes bottom floating toolbar and duplicate navbar buttons (#200)', () => {
   const app = source('App.tsx');
+  const header = source('components/Header.tsx');
 
-  for (const surface of ['<Header', '<Sidebar', '<Canvas', '<Toolbar']) {
+  for (const surface of ['<Header', '<Sidebar', '<Canvas']) {
     assert.ok(app.includes(surface), `App missing ${surface}`);
   }
-  assert.equal((app.match(/actions=\{whiteboardActions\}/g) ?? []).length, 4);
+  assert.equal((app.match(/actions=\{whiteboardActions\}/g) ?? []).length, 3);
+  assert.doesNotMatch(app, /<Toolbar\b|components\/Toolbar/);
+  assert.equal(existsSync(new URL('../client/src/components/Toolbar.tsx', import.meta.url)), false);
   assert.doesNotMatch(app, /onJoinVoice=|onLeaveVoice=/);
+
+  // Navbar no longer duplicates controls that live in Sidebar
+  assert.doesNotMatch(
+    header,
+    /admin-panel-toggle-btn|about-app-btn|theme-toggle-btn|user-profile-btn|sign-in-prompt-btn|ai-chat-header-btn|ai-diagram-header-btn|share-room-modal-btn|mobile-header-menu-btn|room-selector-btn/
+  );
+  assert.match(header, /id="room-status-pill"/);
+  assert.match(header, /id="share-go-live-btn"/);
+  assert.match(header, /<AudioVisualizerBar/);
 
   assert.match(app, /board\?\.clientWidth \|\| window\.innerWidth/);
   assert.match(app, /board\?\.clientHeight \|\| window\.innerHeight/);
 });
 
-test('desktop sidebar docks the canvas and floating chrome (#147)', () => {
+test('desktop sidebar docks the canvas and remaining floating chrome (#147, #200)', () => {
   const css = source('index.css');
 
   assert.match(css, /--wb-sidebar-width:/);
   assert.match(css, /html\[data-sidebar-open='true'\]/);
   assert.match(css, /#whiteboard-canvas-container/);
-  assert.match(css, /#whiteboard-floating-toolbar/);
   assert.match(css, /#whiteboard-zoom-controls/);
+  assert.doesNotMatch(css, /#whiteboard-floating-toolbar/);
 
   const canvas = source('components/Canvas.tsx');
   assert.match(canvas, /id="shortcuts-btn"/);
@@ -94,15 +105,4 @@ test('desktop sidebar docks the canvas and floating chrome (#147)', () => {
   const resetMatches = zoomControls.match(/onClick=\{onResetZoom\}/g) ?? [];
   assert.equal(resetMatches.length, 1, 'ZoomControls should expose exactly one reset control');
   assert.match(zoomControls, /getHandToggleMeta/);
-  assert.doesNotMatch(source('components/Toolbar.tsx'), /id="tool-hand"/);
-});
-
-test('floating toolbar pins delete/clear icon so it never clips (#196)', () => {
-  const toolbar = source('components/Toolbar.tsx');
-
-  assert.match(toolbar, /id="clear-board-btn"/);
-  assert.match(toolbar, /<ClearIcon className="w-4 h-4 shrink-0"/);
-  assert.match(toolbar, /id="toolbar-style-options"/);
-  assert.match(toolbar, /min-w-0 flex-1 overflow-x-auto/);
-  assert.doesNotMatch(toolbar, /<span className="hidden md:inline">/);
 });
