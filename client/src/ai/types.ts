@@ -65,12 +65,33 @@ export interface AiDiagramPayload {
   isFallback?: boolean;
 }
 
+export type AiProviderId =
+  | "auto"
+  | "gemini"
+  | "groq"
+  | "nvidia"
+  | "openrouter"
+  | "deepseek"
+  | "ollama"
+  | "fallback";
+
+export interface AvailableAiProviderOption {
+  id: Exclude<AiProviderId, "auto">;
+  label: string;
+  model: string;
+  models: string[];
+  configured: boolean;
+  local: boolean;
+}
+
 /** Engine description returned by GET /api/ai/config. */
 export interface AiEngineConfig {
-  provider: "gemini" | "ollama" | "fallback";
+  provider: string;
   model: string;
   label: string;
   ollamaFallback?: boolean;
+  defaultSelection?: string;
+  availableProviders?: AvailableAiProviderOption[];
 }
 
 export interface BoardNodeContext {

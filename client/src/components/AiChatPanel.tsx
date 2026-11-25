@@ -3,12 +3,15 @@ import type {
   AiChatMessage,
   AiChatTurn,
   AiDiagramPayload,
+  AiEngineConfig,
   AiSessionState,
   DiagramDirection,
   GlobalAiContext,
 } from '../ai/types';
 import { DIAGRAM_TYPE_LABELS } from '../ai/types';
-import { requestRevision } from '../ai/api';
+import { fetchAiEngine, requestRevision } from '../ai/api';
+import { formatAiEngineDisplay, providerBadgeClasses } from '../ai/providerLabels';
+import type { PreferredAiEngine } from '../utils/aiSessionStorage';
 import {
   Sparkles,
   Send,
@@ -44,6 +47,10 @@ interface AiChatPanelProps {
   authToken?: string | null;
   /** Shared live whiteboard & session history visible to Gemini and Ollama. */
   globalContext?: GlobalAiContext;
+  /** Backend AI configuration and current provider/model switcher selection. */
+  engineConfig?: AiEngineConfig | null;
+  preferredEngine?: PreferredAiEngine;
+  onChangePreferredEngine?: (next: PreferredAiEngine) => void;
 }
 
 interface QuickAction {
@@ -144,14 +151,37 @@ export const AiChatPanel: React.FC<AiChatPanelProps> = ({
   onHighlightChanges,
   authToken,
   globalContext,
+  engineConfig: propEngineConfig,
+  preferredEngine: propPreferredEngine,
+  onChangePreferredEngine,
 }) => {
   const [input, setInput] = useState('');
   const [isBusy, setIsBusy] = useState(false);
   const [pendingInstruction, setPendingInstruction] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [fetchedConfig, setFetchedConfig] = useState<AiEngineConfig | null>(null);
+  const [internalEngine, setInternalEngine] = useState<PreferredAiEngine>({ provider: 'auto' });
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+
+  const liveConfig = propEngineConfig ?? fetchedConfig;
+  const activeEngine = propPreferredEngine ?? internalEngine;
+  const updateSelection = (next: PreferredAiEngine) => {
+    setInternalEngine(next);
+    onChangePreferredEngine?.(next);
+  };
+
+  useEffect(() => {
+    if (!isOpen || propEngineConfig) return;
+    const controller = new AbortController();
+    fetchAiEngine(controller.signal)
+      .then((cfg) => {
+        if (cfg && !controller.signal.aborted) setFetchedConfig(cfg);
+      })
+      .catch(() => {});
+    return () => controller.abort();
+  }, [isOpen, propEngineConfig]);
 
   // A room/session change (or unmount) invalidates any in-flight revision.
   useEffect(() => () => abortRef.current?.abort(), [boardKey, session?.sessionId]);
@@ -202,6 +232,8 @@ export const AiChatPanel: React.FC<AiChatPanelProps> = ({
         canvasCenter: session.origin,
         sessionId: requestSessionId,
         globalContext,
+        provider: activeEngine.provider,
+        model: activeEngine.model,
         authToken,
         signal: controller.signal,
       });
@@ -353,19 +385,11 @@ export const AiChatPanel: React.FC<AiChatPanelProps> = ({
                     {(message.provider || message.model) && (
                       <div className="flex items-center gap-1.5 px-0.5">
                         <span
-                          className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${
-                            message.provider === 'ollama'
-                              ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300'
-                              : message.provider === 'fallback'
-                                ? 'bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300'
-                                : 'bg-indigo-100 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300'
-                          }`}
+                          className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${providerBadgeClasses(
+                            message.provider
+                          )}`}
                         >
-                          {message.provider === 'ollama'
-                            ? `Ollama · ${message.model || 'local'}`
-                            : message.provider === 'fallback'
-                              ? 'Local fallback engine'
-                              : message.model || 'Gemini'}
+                          {formatAiEngineDisplay(message.provider, message.model)}
                         </span>
                       </div>
                     )}
@@ -472,6 +496,66 @@ export const AiChatPanel: React.FC<AiChatPanelProps> = ({
                 </button>
               ))}
             </div>
+
+            {/* AI Provider & Model Switcher */}
+            {(() => {
+              const availableProviders = liveConfig?.availableProviders ?? [];
+              const selectedOption = availableProviders.find(
+                (opt) => opt.id === activeEngine.provider
+              );
+              const selectedModels = selectedOption?.models ?? [];
+              return (
+                <div className="mt-1.5 flex items-center gap-1.5">
+                  <label
+                    htmlFor="ai-chat-provider-select"
+                    className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500 shrink-0"
+                  >
+                    AI
+                  </label>
+                  <select
+                    id="ai-chat-provider-select"
+                    aria-label="Switch AI provider"
+                    value={activeEngine.provider}
+                    disabled={isBusy}
+                    onChange={(e) => updateSelection({ provider: e.target.value })}
+                    className="min-w-0 flex-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-2 py-1 text-[11px] font-medium text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 disabled:opacity-50"
+                  >
+                    <option value="auto">
+                      Auto ({liveConfig?.label || 'smart failover'})
+                    </option>
+                    {availableProviders.map((opt) => (
+                      <option key={opt.id} value={opt.id} disabled={!opt.configured}>
+                        {opt.label}
+                        {opt.configured ? '' : ' (not configured)'}
+                      </option>
+                    ))}
+                    <option value="fallback">Offline fallback engine</option>
+                  </select>
+                  {selectedModels.length > 0 && (
+                    <select
+                      id="ai-chat-model-select"
+                      aria-label="Switch AI model"
+                      value={activeEngine.model || ''}
+                      disabled={isBusy}
+                      onChange={(e) =>
+                        updateSelection({
+                          provider: activeEngine.provider,
+                          model: e.target.value || undefined,
+                        })
+                      }
+                      className="min-w-0 max-w-[155px] rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-2 py-1 text-[11px] font-mono text-slate-600 dark:text-slate-300 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 disabled:opacity-50 truncate"
+                    >
+                      <option value="">Default ({selectedOption?.model})</option>
+                      {selectedModels.map((m) => (
+                        <option key={m} value={m}>
+                          {m}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+              );
+            })()}
 
             {/* Composer */}
             <form onSubmit={handleSubmit} className="mt-2 flex items-end gap-2">

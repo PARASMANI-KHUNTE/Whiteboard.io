@@ -34,6 +34,8 @@ import { ConfirmModal } from './components/ConfirmModal';
 import { AiGenerateModal } from './components/AiGenerateModal';
 import { AiChatPanel } from './components/AiChatPanel';
 import { getAiChatActionMeta } from './components/ui/aiActions';
+import { fetchAiEngine } from './ai/api';
+import { formatAiEngineDisplay } from './ai/providerLabels';
 import { buildGlobalAiContext } from './ai/sessionContext';
 import { diffAiElements, type AiElementDiffResult } from './ai/elementDiff';
 import { ErrorBoundary } from './components/ErrorBoundary';
@@ -44,16 +46,19 @@ import { routeWire } from './utils/wireGeometry';
 import {
   BoardAiLedger,
   EMPTY_BOARD_AI_LEDGER,
+  PreferredAiEngine,
   loadAiSession,
   loadBoardAiLedger,
+  loadPreferredAiEngine,
   saveAiSession,
   saveBoardAiLedger,
+  savePreferredAiEngine,
   clearAiSession,
   clearBoardAiLedger,
 } from './utils/aiSessionStorage';
 import { forgetRecentRoom, rememberRecentRoom } from './utils/recentRooms';
 import { subscribeToSessionExpired } from './utils/authSession';
-import type { AiDiagramPayload, AiSessionState } from './ai/types';
+import type { AiDiagramPayload, AiEngineConfig, AiSessionState } from './ai/types';
 
 /** A reversible local edit recorded for Ctrl+Z / Ctrl+Shift+Z. */
 type HistoryOperation =
@@ -252,6 +257,25 @@ export default function App() {
   const [boardAiLedger, setBoardAiLedger] = useState<BoardAiLedger>(EMPTY_BOARD_AI_LEDGER);
   const boardAiLedgerRef = useRef<BoardAiLedger>(boardAiLedger);
   boardAiLedgerRef.current = boardAiLedger;
+  const [aiEngineConfig, setAiEngineConfig] = useState<AiEngineConfig | null>(null);
+  const [preferredAiEngine, setPreferredAiEngine] = useState<PreferredAiEngine>(() =>
+    loadPreferredAiEngine()
+  );
+
+  const handleChangePreferredAiEngine = useCallback((next: PreferredAiEngine) => {
+    setPreferredAiEngine(next);
+    savePreferredAiEngine(next);
+  }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    fetchAiEngine(controller.signal)
+      .then((cfg) => {
+        if (cfg && !controller.signal.aborted) setAiEngineConfig(cfg);
+      })
+      .catch(() => {});
+    return () => controller.abort();
+  }, [showAiModal, isAiChatOpen]);
 
   const applyAiSession = useCallback((next: AiSessionState | null) => {
     setAiSession(next);
@@ -808,12 +832,7 @@ export default function App() {
       recordBoardAiTurn(payload, context.prompt, payload.summary || assistantContent);
       setIsAiChatOpen(true);
 
-      const engineName =
-        payload.provider === 'ollama'
-          ? `Ollama (${payload.model || 'local'})`
-          : payload.provider === 'fallback'
-            ? 'Local fallback engine'
-            : 'Gemini';
+      const engineName = formatAiEngineDisplay(payload.provider, payload.model);
 
       addNotification(
         `✨ ${engineName} generated ${payload.elements.length} elements. Use the chat to refine it.`,
@@ -1880,6 +1899,9 @@ export default function App() {
         authToken={token}
         canClearBoard={canDirectClear}
         globalContext={globalAiContext}
+        engineConfig={aiEngineConfig}
+        preferredEngine={preferredAiEngine}
+        onChangePreferredEngine={handleChangePreferredAiEngine}
       />
 
       {/* Docked follow-up chat for the current session (null session shows an empty state) */}
@@ -1893,6 +1915,9 @@ export default function App() {
         onHighlightChanges={handleHighlightAiMessageElements}
         authToken={token}
         globalContext={globalAiContext}
+        engineConfig={aiEngineConfig}
+        preferredEngine={preferredAiEngine}
+        onChangePreferredEngine={handleChangePreferredAiEngine}
       />
 
       {/* Reopen the AI chat after it has been minimized */}

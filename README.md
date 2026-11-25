@@ -160,8 +160,7 @@ PORT=3000
 APP_URL=http://localhost:5173
 MONGODB_URI=mongodb://127.0.0.1:27017/whiteboard
 
-# AI engine: "gemini" (cloud), "ollama" (local), "fallback" (offline generator),
-# or leave unset to auto-pick Gemini when a key exists, otherwise Ollama.
+# AI engine: "auto", "gemini", "groq", "nvidia", "openrouter", "deepseek", "ollama", or "fallback".
 AI_PROVIDER=
 
 # Google Gemini API Key for AI Diagram & Mind Map Generation
@@ -169,7 +168,12 @@ GEMINI_API_KEY=your_gemini_api_key_here
 GEMINI_MODEL=gemini-3.8-flash
 # Models tried in order if the primary is rate-limited or unavailable.
 GEMINI_FALLBACK_MODELS=gemini-flash-lite-latest,gemini-3.6-flash
-# Set to false to stop Gemini/auto mode from falling back to a local Ollama model.
+# Optional additional OpenAI-compatible AI providers (selectable in-app too)
+GROQ_API_KEY=
+NVIDIA_API_KEY=
+OPENROUTER_API_KEY=
+DEEPSEEK_API_KEY=
+# Set to false to stop cloud/auto mode from falling back to a local Ollama model.
 AI_ALLOW_OLLAMA_FALLBACK=true
 
 # Local Ollama engine (no API key needed). See "Local AI with Ollama" below.
@@ -230,8 +234,8 @@ never drops the board straight to the offline generator:
 
 | Mode | Chain |
 | :--- | :--- |
-| unset / `auto` with a Gemini key | `GEMINI_MODEL` → `GEMINI_FALLBACK_MODELS` → Ollama (unless disabled) |
-| `AI_PROVIDER=gemini` | `GEMINI_MODEL` → `GEMINI_FALLBACK_MODELS` → Ollama (unless disabled) |
+| unset / `auto` | Configured primary provider -> remaining configured cloud providers (`gemini`, `groq`, `nvidia`, `openrouter`, `deepseek`) -> Ollama (unless disabled) |
+| Explicit provider (`gemini`, `groq`, `nvidia`, `openrouter`, `deepseek`) | Selected provider & model first -> backup configured providers -> Ollama (unless disabled) |
 | `AI_PROVIDER=ollama` | Ollama only |
 | `AI_PROVIDER=fallback` | Offline generator only |
 

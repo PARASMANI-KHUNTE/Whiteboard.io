@@ -78,7 +78,13 @@ import {
 import { AiQueueFullError, generateDiagram, reviseDiagram } from "./ai/generate";
 import { bindRequestAbort } from "./ai/abort";
 import { clearStoredBoardContext, sanitizeGlobalContext } from "./ai/context";
-import { getProviderSummary, ollamaFallbackEnabled } from "./ai/providers";
+import {
+  coerceProviderSelection,
+  getAvailableAiProvidersAsync,
+  getProviderSummary,
+  ollamaFallbackEnabled,
+  sanitizeModelName,
+} from "./ai/providers";
 import {
   coerceDiagramType,
   coerceDetailLevel,
@@ -639,16 +645,37 @@ async function startServer() {
     }
   });
 
-  // Which AI engine is active (Gemini, local Ollama, or the fallback generator).
-  app.get("/api/ai/config", (_req, res) => {
-    const summary = getProviderSummary();
-    res.json({
-      success: true,
-      provider: summary.provider,
-      model: summary.model,
-      label: summary.label,
-      ollamaFallback: ollamaFallbackEnabled(),
-    });
+  // Which AI engine is active plus available configured providers for client switching.
+  app.get("/api/ai/config", async (req, res) => {
+    const requestAbort = bindRequestAbort(req, res);
+    try {
+      const summary = getProviderSummary();
+      const availableProviders = await getAvailableAiProvidersAsync(requestAbort.signal);
+      if (requestAbort.signal.aborted) return;
+      res.json({
+        success: true,
+        provider: summary.provider,
+        model: summary.model,
+        label: summary.label,
+        ollamaFallback: ollamaFallbackEnabled(),
+        defaultSelection: coerceProviderSelection(process.env.AI_PROVIDER) || "auto",
+        availableProviders,
+      });
+    } catch {
+      if (requestAbort.signal.aborted) return;
+      const summary = getProviderSummary();
+      res.json({
+        success: true,
+        provider: summary.provider,
+        model: summary.model,
+        label: summary.label,
+        ollamaFallback: ollamaFallbackEnabled(),
+        defaultSelection: coerceProviderSelection(process.env.AI_PROVIDER) || "auto",
+        availableProviders: [],
+      });
+    } finally {
+      requestAbort.dispose();
+    }
   });
 
   // AI Diagram Generation Route (Rate limited to 10 requests / min per IP)
@@ -690,6 +717,8 @@ async function startServer() {
         author,
         sessionId: typeof body.sessionId === "string" ? body.sessionId : undefined,
         globalContext,
+        preferredProvider: coerceProviderSelection(body.provider),
+        preferredModel: sanitizeModelName(body.model),
         signal: requestAbort.signal,
       });
 
@@ -767,6 +796,8 @@ async function startServer() {
         author,
         sessionId: typeof body.sessionId === "string" ? body.sessionId : undefined,
         globalContext,
+        preferredProvider: coerceProviderSelection(body.provider),
+        preferredModel: sanitizeModelName(body.model),
         signal: requestAbort.signal,
       });
 

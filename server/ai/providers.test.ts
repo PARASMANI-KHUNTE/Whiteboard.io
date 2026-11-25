@@ -3,7 +3,9 @@ import test from 'node:test';
 import {
   callAiModel,
   clearModelHealth,
+  extractJson,
   geminiProviderChain,
+  getAvailableAiProviders,
   isModelHealthy,
   ollamaProviderChain,
   recordModelFailure,
@@ -12,6 +14,7 @@ import {
   resolveProviderChain,
   setCachedDiscoveredModels,
   setCachedOllamaModels,
+  setCachedOpenAiModels,
 } from './providers';
 
 const originalFetch = globalThis.fetch;
@@ -23,6 +26,10 @@ test.afterEach(() => {
   clearModelHealth();
   setCachedDiscoveredModels(null);
   setCachedOllamaModels(null);
+  setCachedOpenAiModels('groq', null);
+  setCachedOpenAiModels('nvidia', null);
+  setCachedOpenAiModels('openrouter', null);
+  setCachedOpenAiModels('deepseek', null);
 });
 
 test('callGemini sends apiKey via x-goog-api-key header and never in URL query string (#101)', async () => {
@@ -268,4 +275,80 @@ test('callOllama falls back to json format when model rejects strict schema with
   assert.equal(typeof sentFormats[0], 'object');
   assert.equal(sentFormats[1], 'json');
   assert.deepEqual(result, { nodes: [{ id: 'n1', label: 'Node' }], edges: [] });
+});
+
+test('extractJson strips <think> blocks from reasoning models (#202)', () => {
+  const parsed = extractJson(
+    '<think>Let me sketch {invalid json} first.</think>\n```json\n{"title":"System","nodes":[]}\n```'
+  );
+  assert.deepEqual(parsed, { title: 'System', nodes: [] });
+});
+
+test('callAiModel dispatches OpenAI-compatible providers and falls back from json_object on HTTP 400 (#202)', async () => {
+  process.env.NODE_ENV = 'test';
+  process.env.GROQ_API_KEY = 'groq-test-key-placeholder';
+  process.env.GROQ_BASE_URL = 'https://api.groq.com/openai/v1';
+
+  const seenBodies: Array<Record<string, unknown>> = [];
+  let seenAuth = '';
+
+  globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+    const headers = init?.headers as Record<string, string>;
+    seenAuth = headers?.Authorization || '';
+    const parsed = JSON.parse(String(init?.body ?? '{}'));
+    seenBodies.push(parsed);
+    if (seenBodies.length === 1) {
+      return new Response(
+        JSON.stringify({ error: { message: 'Failed to validate JSON', code: 'json_validate_failed' } }),
+        { status: 400 }
+      );
+    }
+    return new Response(
+      JSON.stringify({
+        choices: [{ message: { content: JSON.stringify({ nodes: [{ id: 'g1', label: 'Groq' }], edges: [] }) } }],
+      }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } }
+    );
+  }) as typeof fetch;
+
+  const result = await callAiModel(
+    { name: 'groq', model: 'qwen/qwen3.8-27b', label: 'Groq' },
+    'generate diagram',
+    0.3,
+    { maxRetries: 2 }
+  );
+
+  assert.equal(seenAuth, 'Bearer groq-test-key-placeholder');
+  assert.equal(seenBodies.length, 2);
+  assert.deepEqual(seenBodies[0].response_format, { type: 'json_object' });
+  assert.equal('response_format' in seenBodies[1], false);
+  assert.deepEqual(result, { nodes: [{ id: 'g1', label: 'Groq' }], edges: [] });
+});
+
+test('resolveProviderChain honors user provider and model switch plus getAvailableAiProviders (#202)', () => {
+  process.env.AI_PROVIDER = 'gemini';
+  process.env.GEMINI_API_KEY = 'fake-gemini';
+  process.env.GEMINI_FALLBACK_MODELS = 'none';
+  process.env.GROQ_API_KEY = 'fake-groq';
+  process.env.GROQ_FALLBACK_MODELS = 'none';
+  process.env.NVIDIA_API_KEY = 'fake-nvidia';
+  process.env.NVIDIA_FALLBACK_MODELS = 'none';
+  process.env.AI_ALLOW_OLLAMA_FALLBACK = 'false';
+
+  const groqSelected = resolveProviderChain([], [], {
+    preferredProvider: 'groq',
+    preferredModel: 'openai/gpt-oss-120b',
+  });
+  assert.equal(groqSelected[0].name, 'groq');
+  assert.equal(groqSelected[0].model, 'openai/gpt-oss-120b');
+  assert.ok(groqSelected.some((p) => p.name === 'gemini'));
+  assert.ok(groqSelected.some((p) => p.name === 'nvidia'));
+
+  assert.deepEqual(resolveProviderChain([], [], { preferredProvider: 'fallback' }), []);
+
+  const inventory = getAvailableAiProviders();
+  const groqEntry = inventory.find((p) => p.id === 'groq');
+  const openrouterEntry = inventory.find((p) => p.id === 'openrouter');
+  assert.equal(groqEntry?.configured, true);
+  assert.equal(openrouterEntry?.configured, false);
 });
