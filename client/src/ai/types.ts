@@ -138,6 +138,8 @@ export interface AiChatMessage {
   role: "user" | "assistant";
   content: string;
   changes?: string[];
+  /** Canvas element IDs created or updated in this AI turn. */
+  changedElementIds?: string[];
   suggestions?: string[];
   notice?: string;
   provider?: string;

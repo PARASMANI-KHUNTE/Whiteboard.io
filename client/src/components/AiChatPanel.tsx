@@ -23,6 +23,7 @@ import {
   RefreshCw,
   AlertCircle,
   Check,
+  LocateFixed,
 } from 'lucide-react';
 import { AI_CHAT_CLOSE_META, getAiDiagramActionMeta } from './ui/aiActions';
 
@@ -38,6 +39,8 @@ interface AiChatPanelProps {
     instruction: string,
     context: { boardKey: string; sessionId: string }
   ) => void;
+  /** Focus and flash specific canvas elements created/updated in an AI message. */
+  onHighlightChanges?: (elementIds: string[]) => void;
   authToken?: string | null;
   /** Shared live whiteboard & session history visible to Gemini and Ollama. */
   globalContext?: GlobalAiContext;
@@ -138,6 +141,7 @@ export const AiChatPanel: React.FC<AiChatPanelProps> = ({
   onClose,
   onNewDiagram,
   onApplyTurn,
+  onHighlightChanges,
   authToken,
   globalContext,
 }) => {
@@ -388,6 +392,19 @@ export const AiChatPanel: React.FC<AiChatPanelProps> = ({
                           </li>
                         ))}
                       </ul>
+                    )}
+
+                    {message.changedElementIds && message.changedElementIds.length > 0 && onHighlightChanges && (
+                      <div>
+                        <button
+                          type="button"
+                          onClick={() => onHighlightChanges(message.changedElementIds ?? [])}
+                          className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-200/80 dark:border-indigo-800/70 bg-indigo-50/80 dark:bg-indigo-950/40 px-2.5 py-1 text-[11px] font-semibold text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition-colors cursor-pointer"
+                        >
+                          <LocateFixed className="w-3 h-3 shrink-0" aria-hidden />
+                          Highlight on board ({message.changedElementIds.length})
+                        </button>
+                      </div>
                     )}
 
                     {message.suggestions && message.suggestions.length > 0 && (

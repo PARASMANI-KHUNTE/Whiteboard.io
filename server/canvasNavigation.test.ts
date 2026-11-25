@@ -4,6 +4,9 @@ import {
   computeNavigationStep,
   cancelNavigationAnimation,
   scheduleNavigationFrame,
+  computeSafeViewportInsets,
+  computeSafeFitCamera,
+  areBoundsVisibleInSafeViewport,
 } from '../client/src/utils/canvasNavigation';
 
 test('computeNavigationStep computes easeOutCubic pan and zoom progression', () => {
@@ -123,4 +126,38 @@ test('scheduleNavigationFrame stores rAF handle and enables cancellation (#93)',
   assert.equal(cancelled, true);
   assert.equal(state.current, null);
   assert.deepEqual(cancelledIds, [101]);
+});
+
+test('safe viewport insets and fit camera keep AI changes clear of open chat panel (#198)', () => {
+  const desktopInsets = computeSafeViewportInsets(1280, 800, {
+    isAiChatOpen: true,
+    isSidebarOpen: false,
+  });
+  assert.equal(desktopInsets.right, 440);
+  assert.equal(desktopInsets.left, 32);
+
+  const mobileInsets = computeSafeViewportInsets(390, 844, {
+    isAiChatOpen: true,
+    isSidebarOpen: false,
+  });
+  assert.equal(mobileInsets.right, 32);
+  assert.ok(mobileInsets.bottom >= 550);
+
+  // An element drawn at x=900..1120 at zoom=1 pan=(0,0) is hidden behind the 440px chat panel
+  const hiddenBounds = { x: 900, y: 200, width: 220, height: 110 };
+  assert.equal(
+    areBoundsVisibleInSafeViewport(hiddenBounds, { x: 0, y: 0 }, 1, 1280, 800, desktopInsets, 24),
+    false
+  );
+
+  // Fitting camera frames the element centered in the open canvas (to the left of the chat drawer)
+  const fitted = computeSafeFitCamera(hiddenBounds, 1280, 800, desktopInsets, {
+    minZoom: 0.45,
+    maxZoom: 1,
+    padding: 96,
+  });
+  assert.equal(
+    areBoundsVisibleInSafeViewport(hiddenBounds, fitted.pan, fitted.zoom, 1280, 800, desktopInsets, 24),
+    true
+  );
 });

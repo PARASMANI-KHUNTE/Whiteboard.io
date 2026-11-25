@@ -37,6 +37,7 @@ import {
   ChevronsDown,
   Lock,
   Unlock,
+  Sparkles,
 } from 'lucide-react';
 import { getAdaptiveDisplayColor, isColorBlack, isColorWhite } from '../utils/themeColors';
 import {
@@ -44,7 +45,7 @@ import {
   setElementLocked,
   translateElement,
 } from '../utils/elementMutations';
-import { getElementBounds, getElementAnchors, routeDraftWire } from '../utils/wireGeometry';
+import { getElementBounds, getElementAnchors, routeDraftWire, routeWire } from '../utils/wireGeometry';
 import { reorderZIndex, getElementZ } from '../utils/zOrder';
 import { toggleSelection } from '../utils/selection';
 import { isStrokeHit, computeStrokeHitTolerance } from '../utils/hitTesting';
@@ -56,6 +57,9 @@ import {
   cancelNavigationAnimation,
   computeNavigationStep,
   scheduleNavigationFrame,
+  computeSafeViewportInsets,
+  computeSafeFitCamera,
+  areBoundsVisibleInSafeViewport,
 } from '../utils/canvasNavigation';
 import { dprMediaQuery, resizeCanvasBackingStore } from '../utils/canvasSizing';
 import {
@@ -102,6 +106,12 @@ interface CanvasProps {
   actions: WhiteboardActionRegistry;
   onRegisterSelectAll?: (fn: () => void) => void;
   onRegisterNavigateToElements?: (fn: (elements: CanvasElement[]) => void) => void;
+  onRegisterHighlightElements?: (
+    fn: (
+      elements: CanvasElement[],
+      options?: { navigateIfHidden?: boolean; durationMs?: number; badgeLabel?: string }
+    ) => void
+  ) => void;
   onRegisterGetWorldCenter?: (fn: () => { x: number; y: number }) => void;
   onRegisterGetViewport?: (fn: () => { pan: { x: number; y: number }; zoom: number }) => void;
   isShortcutsOpen?: boolean;
@@ -144,6 +154,7 @@ export const Canvas: React.FC<CanvasProps> = ({
   actions,
   onRegisterSelectAll,
   onRegisterNavigateToElements,
+  onRegisterHighlightElements,
   onRegisterGetWorldCenter,
   onRegisterGetViewport,
   isShortcutsOpen = false,
@@ -209,6 +220,9 @@ export const Canvas: React.FC<CanvasProps> = ({
     panY: 0,
   });
   const navAnimationRef = useRef<number | null>(null);
+  const [aiHighlightIds, setAiHighlightIds] = useState<Set<string>>(new Set());
+  const [aiHighlightBadge, setAiHighlightBadge] = useState<string>('AI updated');
+  const aiHighlightTimerRef = useRef<number | null>(null);
 
   const cancelNavAnimation = useCallback(() => {
     cancelNavigationAnimation(navAnimationRef);
@@ -846,17 +860,35 @@ export const Canvas: React.FC<CanvasProps> = ({
     };
   }, []);
 
-  // Smoothly pan & zoom viewport to fit and focus on a set of elements (e.g. newly generated AI diagram)
-  const navigateToElements = useCallback((newElements: CanvasElement[]) => {
-    cancelNavAnimation();
-    if (!newElements || newElements.length === 0) return;
-
+  const computeElementsUnionBounds = useCallback((targetElements: CanvasElement[]) => {
     let minX = Infinity;
     let minY = Infinity;
     let maxX = -Infinity;
     let maxY = -Infinity;
 
-    newElements.forEach((el) => {
+    targetElements.forEach((raw) => {
+      const el = elementsRef.current[raw.id] ?? raw;
+      if (el.type === 'wire') {
+        const fromEl = elementsRef.current[el.fromId];
+        const toEl = elementsRef.current[el.toId];
+        if (!fromEl || !toEl) return;
+        const route = routeWire(
+          fromEl,
+          toEl,
+          el.wireType || 'curve',
+          el.fromAnchor,
+          el.toAnchor
+        );
+        if (!route) return;
+        for (const pt of [route.fromPoint, route.midpoint, route.toPoint]) {
+          if (pt.x < minX) minX = pt.x;
+          if (pt.y < minY) minY = pt.y;
+          if (pt.x > maxX) maxX = pt.x;
+          if (pt.y > maxY) maxY = pt.y;
+        }
+        return;
+      }
+
       const bounds = getElementBounds(el);
       if (bounds.x < minX) minX = bounds.x;
       if (bounds.y < minY) minY = bounds.y;
@@ -864,69 +896,169 @@ export const Canvas: React.FC<CanvasProps> = ({
       if (bounds.y + bounds.height > maxY) maxY = bounds.y + bounds.height;
     });
 
-    if (!isFinite(minX) || !isFinite(maxX)) return;
+    if (!isFinite(minX) || !isFinite(maxX)) return null;
+    return {
+      x: minX,
+      y: minY,
+      width: Math.max(120, maxX - minX),
+      height: Math.max(100, maxY - minY),
+    };
+  }, []);
 
-    const container = containerRef.current;
-    const viewportW = container ? container.clientWidth : window.innerWidth;
-    const viewportH = container ? container.clientHeight : window.innerHeight;
+  const animateCameraTo = useCallback(
+    (
+      targetPan: { x: number; y: number },
+      targetZoom: number,
+      onComplete?: () => void
+    ) => {
+      cancelNavAnimation();
+      const startPan = { ...panRef.current };
+      const startZoom = zoomRef.current;
+      const startTime = performance.now();
+      const duration = 520;
 
-    const diagramW = Math.max(120, maxX - minX);
-    const diagramH = Math.max(100, maxY - minY);
-    const diagramCenterX = minX + diagramW / 2;
-    const diagramCenterY = minY + diagramH / 2;
+      const animate = (now: number) => {
+        const step = computeNavigationStep({
+          startTime,
+          now,
+          duration,
+          startPan,
+          targetPan,
+          startZoom,
+          targetZoom,
+        });
 
-    // Target zoom with comfortable margins around the diagram
-    const paddingX = 160;
-    const paddingY = 180;
-    const fitZoomX = (viewportW - paddingX) / diagramW;
-    const fitZoomY = (viewportH - paddingY) / diagramH;
-    const targetZoom = Math.max(0.45, Math.min(1.15, Number(Math.min(fitZoomX, fitZoomY).toFixed(2))));
+        setPan(step.pan);
+        setZoom(step.zoom);
 
-    const targetPanX = Math.round(viewportW / 2 - diagramCenterX * targetZoom);
-    const targetPanY = Math.round(viewportH / 2 - diagramCenterY * targetZoom);
+        if (!step.done) {
+          scheduleNavigationFrame(navAnimationRef, animate);
+        } else {
+          navAnimationRef.current = null;
+          onComplete?.();
+        }
+      };
 
-    // Smooth easeOutCubic animation over 500ms
-    const startPan = { ...panRef.current };
-    const startZoom = zoomRef.current;
-    const startTime = performance.now();
-    const duration = 520;
+      scheduleNavigationFrame(navAnimationRef, animate);
+    },
+    [cancelNavAnimation]
+  );
 
-    const animate = (now: number) => {
-      const step = computeNavigationStep({
-        startTime,
-        now,
-        duration,
-        startPan,
-        targetPan: { x: targetPanX, y: targetPanY },
-        startZoom,
-        targetZoom,
+  // Smoothly pan & zoom viewport to fit and focus on a set of elements (e.g. newly generated AI diagram)
+  const navigateToElements = useCallback(
+    (newElements: CanvasElement[]) => {
+      if (!newElements || newElements.length === 0) return;
+      const bounds = computeElementsUnionBounds(newElements);
+      if (!bounds) return;
+
+      const container = containerRef.current;
+      const viewportW = container ? container.clientWidth : window.innerWidth;
+      const viewportH = container ? container.clientHeight : window.innerHeight;
+      const insets = computeSafeViewportInsets(viewportW, viewportH, {
+        isAiChatOpen: document.documentElement.dataset.aiChatOpen === 'true',
+        isSidebarOpen: document.documentElement.dataset.sidebarOpen === 'true',
+      });
+      const camera = computeSafeFitCamera(bounds, viewportW, viewportH, insets, {
+        minZoom: 0.45,
+        maxZoom: 1.15,
+        padding: 96,
       });
 
-      setPan(step.pan);
-      setZoom(step.zoom);
-
-      if (!step.done) {
-        scheduleNavigationFrame(navAnimationRef, animate);
-      } else {
-        navAnimationRef.current = null;
-        // Highlight newly generated diagram elements with selection
+      animateCameraTo(camera.pan, camera.zoom, () => {
         setSelectedElementIds(new Set(newElements.map((e) => e.id)));
+      });
+    },
+    [animateCameraTo, computeElementsUnionBounds]
+  );
+
+  // Highlight recently changed/added AI elements and pan into view only if clipped/occluded.
+  const highlightElements = useCallback(
+    (
+      targetElements: CanvasElement[],
+      options?: { navigateIfHidden?: boolean; durationMs?: number; badgeLabel?: string }
+    ) => {
+      if (!targetElements || targetElements.length === 0) return;
+
+      const ids = targetElements
+        .map((e) => e.id)
+        .filter((id) => Boolean(elementsRef.current[id]) || targetElements.some((t) => t.id === id));
+      if (ids.length === 0) return;
+
+      if (aiHighlightTimerRef.current !== null) {
+        window.clearTimeout(aiHighlightTimerRef.current);
+        aiHighlightTimerRef.current = null;
       }
-    };
 
-    scheduleNavigationFrame(navAnimationRef, animate);
-  }, [cancelNavAnimation]);
+      setAiHighlightBadge(options?.badgeLabel || 'AI updated');
+      setAiHighlightIds(new Set(ids));
 
-  // Cancel any running navigation animation when Canvas unmounts (#93)
+      const durationMs = options?.durationMs ?? 4500;
+      aiHighlightTimerRef.current = window.setTimeout(() => {
+        setAiHighlightIds(new Set());
+        aiHighlightTimerRef.current = null;
+      }, durationMs);
+
+      if (options?.navigateIfHidden !== false) {
+        const bounds = computeElementsUnionBounds(targetElements);
+        if (!bounds) return;
+        const container = containerRef.current;
+        const viewportW = container ? container.clientWidth : window.innerWidth;
+        const viewportH = container ? container.clientHeight : window.innerHeight;
+        const insets = computeSafeViewportInsets(viewportW, viewportH, {
+          isAiChatOpen: document.documentElement.dataset.aiChatOpen === 'true',
+          isSidebarOpen: document.documentElement.dataset.sidebarOpen === 'true',
+        });
+
+        const alreadyVisible = areBoundsVisibleInSafeViewport(
+          bounds,
+          panRef.current,
+          zoomRef.current,
+          viewportW,
+          viewportH,
+          insets,
+          24
+        );
+
+        if (!alreadyVisible) {
+          const camera = computeSafeFitCamera(bounds, viewportW, viewportH, insets, {
+            minZoom: 0.45,
+            maxZoom: Math.min(1.15, Math.max(0.85, zoomRef.current)),
+            padding: 110,
+          });
+          animateCameraTo(camera.pan, camera.zoom);
+        }
+      }
+    },
+    [animateCameraTo, computeElementsUnionBounds]
+  );
+
+  // Clear AI spotlight when board clears or Canvas unmounts.
+  useEffect(() => {
+    if (aiHighlightIds.size === 0) return;
+    const anyPresent = Array.from(aiHighlightIds).some((id) => Boolean(elements[id]));
+    if (!anyPresent) {
+      setAiHighlightIds(new Set());
+    }
+  }, [elements, aiHighlightIds]);
+
+  // Cancel any running navigation animation or highlight timer when Canvas unmounts (#93)
   useEffect(() => {
     return () => {
       cancelNavAnimation();
+      if (aiHighlightTimerRef.current !== null) {
+        window.clearTimeout(aiHighlightTimerRef.current);
+        aiHighlightTimerRef.current = null;
+      }
     };
   }, [cancelNavAnimation]);
 
   useEffect(() => {
     onRegisterNavigateToElements?.(navigateToElements);
   }, [onRegisterNavigateToElements, navigateToElements]);
+
+  useEffect(() => {
+    onRegisterHighlightElements?.(highlightElements);
+  }, [onRegisterHighlightElements, highlightElements]);
 
   useEffect(() => {
     onRegisterGetWorldCenter?.(getWorldCenter);
@@ -2157,6 +2289,36 @@ export const Canvas: React.FC<CanvasProps> = ({
           id="whiteboard-wires-svg-layer"
           className="absolute inset-0 w-full h-full overflow-visible pointer-events-none z-10"
         >
+          {aiHighlightIds.size > 0 &&
+            wireElements
+              .filter((wire) => aiHighlightIds.has(wire.id))
+              .map((wire) => {
+                const sourceEl = elements[wire.fromId];
+                const targetEl = elements[wire.toId];
+                if (!sourceEl || !targetEl) return null;
+                const route = routeWire(
+                  sourceEl,
+                  targetEl,
+                  wire.wireType || 'curve',
+                  wire.fromAnchor,
+                  wire.toAnchor
+                );
+                if (!route) return null;
+                return (
+                  <path
+                    key={`ai-highlight-wire-${wire.id}`}
+                    d={route.svgPath}
+                    fill="none"
+                    stroke="#6366f1"
+                    strokeWidth={(wire.strokeWidth || 3) + 12}
+                    strokeOpacity={0.38}
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    className="pointer-events-none animate-pulse"
+                  />
+                );
+              })}
+
           {wireElements.map((wire) => (
             <WireItem
               key={wire.id}
@@ -2325,6 +2487,38 @@ export const Canvas: React.FC<CanvasProps> = ({
           />
         ))}
 
+
+        {/* AI Change Highlight Spotlight Overlays */}
+        {aiHighlightIds.size > 0 && (() => {
+          let labelCount = 0;
+          return positionedElements
+            .filter((el) => aiHighlightIds.has(el.id))
+            .map((el) => {
+              const bounds = getElementBounds(el);
+              const showBadge = labelCount < 3;
+              if (showBadge) labelCount += 1;
+              return (
+                <div
+                  key={`ai-highlight-${el.id}`}
+                  data-ai-highlight
+                  style={{
+                    left: bounds.x - 7,
+                    top: bounds.y - 7,
+                    width: bounds.width + 14,
+                    height: bounds.height + 14,
+                  }}
+                  className="pointer-events-none absolute z-30 rounded-2xl border-2 border-indigo-500 dark:border-indigo-400 ring-4 ring-indigo-500/25 dark:ring-indigo-400/25 bg-indigo-500/[0.06] shadow-[0_0_24px_rgba(99,102,241,0.45)] animate-pulse"
+                >
+                  {showBadge && (
+                    <span className="absolute -top-6 left-0 inline-flex items-center gap-1 rounded-full bg-indigo-600 px-2 py-0.5 text-[10px] font-bold text-white shadow-md whitespace-nowrap">
+                      <Sparkles className="w-2.5 h-2.5 shrink-0" aria-hidden />
+                      {aiHighlightBadge}
+                    </span>
+                  )}
+                </div>
+              );
+            });
+        })()}
 
         {/* Marquee Drag Selection Box */}
         {marqueeRect && (
