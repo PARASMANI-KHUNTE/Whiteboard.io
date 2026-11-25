@@ -180,11 +180,15 @@ VITE_TURN_PASSWORD=your_turn_password
 | `HTTP_HEADERS_TIMEOUT_MS` | Maximum duration in milliseconds to receive complete HTTP headers (must exceed request timeout) | No | `65000` |
 | `AI_QUEUE_MAX_DEPTH` | Maximum pending AI requests in the pacing queue before returning HTTP 429 | No | `24` |
 | `AI_CACHE_MAX_ENTRIES` | Maximum LRU cache entries for generated diagrams | No | `256` |
-| `AI_PROVIDER` | Which AI engine to use: `gemini`, `ollama`, or `fallback`. Unset auto-picks Gemini when `GEMINI_API_KEY` exists, otherwise Ollama when configured | No | auto |
-| `GEMINI_API_KEY` | Google Gemini API key for AI diagram generation | No (optional; uses Ollama or procedural fallback if unset) | `""` |
+| `AI_PROVIDER` | Default AI engine: `auto`, `gemini`, `groq`, `nvidia`, `openrouter`, `deepseek`, `ollama`, or `fallback` | No | `auto` |
+| `GEMINI_API_KEY` | Google Gemini API key for AI diagram generation | No (optional; uses other configured providers or fallback if unset) | `""` |
 | `GEMINI_MODEL` | Gemini model id (first link in the failover chain) | No | `gemini-3.8-flash` |
 | `GEMINI_FALLBACK_MODELS` | Comma-separated Gemini models tried when the primary is unavailable; `none` disables Gemini failover | No | `gemini-flash-lite-latest,gemini-3.6-flash` |
 | `GEMINI_TIMEOUT_MS` | Per-attempt Gemini request timeout | No | `45000` |
+| `GROQ_API_KEY` | Optional Groq API key (`GROQ_BASE_URL`, `GROQ_MODEL` also supported) | No | `""` |
+| `NVIDIA_API_KEY` | Optional NVIDIA NIM API key (`NVIDIA_BASE_URL`, `NVIDIA_MODEL` also supported) | No | `""` |
+| `OPENROUTER_API_KEY` | Optional OpenRouter API key (`OPENROUTER_BASE_URL`, `OPENROUTER_MODEL` also supported) | No | `""` |
+| `DEEPSEEK_API_KEY` | Optional DeepSeek API key (`DEEPSEEK_BASE_URL`, `DEEPSEEK_MODEL` also supported) | No | `""` |
 | `AI_ALLOW_OLLAMA_FALLBACK` | In `gemini` or `auto` mode, fall back to local Ollama after all Gemini models fail; set `false` to disable | No | `true` |
 | `OLLAMA_MODEL` | Local Ollama model used for generation | No | `llama3.2` |
 | `OLLAMA_BASE_URL` | Ollama server base URL | No | `http://127.0.0.1:11434` |

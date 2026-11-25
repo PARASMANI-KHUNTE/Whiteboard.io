@@ -2,7 +2,9 @@ import { GRAPH_RESPONSE_SCHEMA, SYSTEM_INSTRUCTION } from "./prompt";
 import type { DiagramAuthor } from "./types";
 import { combineWithTimeout, delay, throwIfAborted } from "./abort";
 
-export type AiProviderName = "gemini" | "ollama";
+export type OpenAiCompatibleProviderName = "groq" | "nvidia" | "openrouter" | "deepseek";
+export type AiProviderName = "gemini" | OpenAiCompatibleProviderName | "ollama";
+export type AiProviderSelection = AiProviderName | "auto" | "fallback";
 
 export interface AiProviderInfo {
   name: AiProviderName;
@@ -10,13 +12,129 @@ export interface AiProviderInfo {
   label: string;
 }
 
+export interface AvailableAiProviderOption {
+  id: AiProviderName | "fallback";
+  label: string;
+  model: string;
+  models: string[];
+  configured: boolean;
+  local: boolean;
+}
+
+interface OpenAiProviderSpec {
+  name: OpenAiCompatibleProviderName;
+  displayName: string;
+  apiKeyEnv: string;
+  baseUrlEnv: string;
+  modelEnv: string;
+  fallbackModelsEnv: string;
+  timeoutEnv: string;
+  defaultBaseUrl: string;
+  defaultModel: string;
+  defaultFallbacks: string[];
+  prioritizeFreeDiscovery?: boolean;
+}
+
 const DEFAULT_GEMINI_MODEL = "gemini-3.8-flash";
 // Newest Gemini flash tiers can 503 during demand spikes. When that happens the
-// next model in the chain is tried instead of dropping straight to the local
-// procedural engine. Override with GEMINI_FALLBACK_MODELS (comma separated).
+// next model in the chain is tried instead of dropping straight to fallback.
 const DEFAULT_GEMINI_FALLBACK_MODELS = ["gemini-flash-lite-latest", "gemini-3.6-flash"];
 const DEFAULT_OLLAMA_MODEL = "llama3.2";
 const DEFAULT_OLLAMA_BASE_URL = "http://127.0.0.1:11434";
+
+const OPENAI_PROVIDER_SPECS: readonly OpenAiProviderSpec[] = [
+  {
+    name: "groq",
+    displayName: "Groq",
+    apiKeyEnv: "GROQ_API_KEY",
+    baseUrlEnv: "GROQ_BASE_URL",
+    modelEnv: "GROQ_MODEL",
+    fallbackModelsEnv: "GROQ_FALLBACK_MODELS",
+    timeoutEnv: "GROQ_TIMEOUT_MS",
+    defaultBaseUrl: "https://api.groq.com/openai/v1",
+    defaultModel: "qwen/qwen3.8-27b",
+    defaultFallbacks: ["openai/gpt-oss-120b", "openai/gpt-oss-20b"],
+  },
+  {
+    name: "nvidia",
+    displayName: "NVIDIA NIM",
+    apiKeyEnv: "NVIDIA_API_KEY",
+    baseUrlEnv: "NVIDIA_BASE_URL",
+    modelEnv: "NVIDIA_MODEL",
+    fallbackModelsEnv: "NVIDIA_FALLBACK_MODELS",
+    timeoutEnv: "NVIDIA_TIMEOUT_MS",
+    defaultBaseUrl: "https://integrate.api.nvidia.com/v1",
+    defaultModel: "minimaxai/minimax-m3.1-flash",
+    defaultFallbacks: [
+      "nvidia/nemotron-3.5-lightning-30b-a3b",
+      "z-ai/glm-5.3-flash",
+      "mistralai/mistral-large-4-1t-a52b",
+    ],
+  },
+  {
+    name: "openrouter",
+    displayName: "OpenRouter",
+    apiKeyEnv: "OPENROUTER_API_KEY",
+    baseUrlEnv: "OPENROUTER_BASE_URL",
+    modelEnv: "OPENROUTER_MODEL",
+    fallbackModelsEnv: "OPENROUTER_FALLBACK_MODELS",
+    timeoutEnv: "OPENROUTER_TIMEOUT_MS",
+    defaultBaseUrl: "https://openrouter.ai/api/v1",
+    defaultModel: "baidu/ernie-5.5-flash-preview:free",
+    defaultFallbacks: [
+      "inclusionai/ling-3.2-flash:free",
+      "nvidia/nemotron-3.5-lightning:free",
+      "google/gemma-4-26b-a4b-it:free",
+    ],
+    prioritizeFreeDiscovery: true,
+  },
+  {
+    name: "deepseek",
+    displayName: "DeepSeek",
+    apiKeyEnv: "DEEPSEEK_API_KEY",
+    baseUrlEnv: "DEEPSEEK_BASE_URL",
+    modelEnv: "DEEPSEEK_MODEL",
+    fallbackModelsEnv: "DEEPSEEK_FALLBACK_MODELS",
+    timeoutEnv: "DEEPSEEK_TIMEOUT_MS",
+    defaultBaseUrl: "https://api.deepseek.com",
+    defaultModel: "deepseek-flash",
+    defaultFallbacks: ["deepseek-v4-pro"],
+  },
+];
+
+const OPENAI_SPEC_BY_NAME = new Map<AiProviderName, OpenAiProviderSpec>(
+  OPENAI_PROVIDER_SPECS.map((spec) => [spec.name, spec])
+);
+
+const VALID_PROVIDER_SELECTIONS = new Set<string>([
+  "auto",
+  "fallback",
+  "gemini",
+  "ollama",
+  "groq",
+  "nvidia",
+  "openrouter",
+  "deepseek",
+]);
+
+export function coerceProviderSelection(value: unknown): AiProviderSelection | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim().toLowerCase();
+  if (!trimmed) return undefined;
+  if (trimmed === "none" || trimmed === "off") return "fallback";
+  if (VALID_PROVIDER_SELECTIONS.has(trimmed)) {
+    return trimmed as AiProviderSelection;
+  }
+  return undefined;
+}
+
+export function sanitizeModelName(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.length > 120) return undefined;
+  if (!/^[a-zA-Z0-9._:/-]+$/.test(trimmed)) return undefined;
+  return trimmed;
+}
 
 // ---------------------------------------------------------------------------
 // Dynamic Model Discovery & Self-Healing Circuit Breaker
@@ -32,12 +150,22 @@ let cachedDiscoveredModels: string[] | null = null;
 let lastDiscoveryTime = 0;
 const DISCOVERY_TTL_MS = 30 * 60 * 1000; // 30 minutes
 
+const cachedOpenAiModels = new Map<OpenAiCompatibleProviderName, string[]>();
+const lastOpenAiDiscoveryTime = new Map<OpenAiCompatibleProviderName, number>();
+
 export function recordModelFailure(model: string, status: number): void {
   const norm = model.toLowerCase();
   if (status === 404) {
     // Model is retired or does not exist for this API key: exclude for 24 hours
     modelHealth.set(norm, { cooldownUntil: Date.now() + 24 * 60 * 60 * 1000, retired: true });
     console.warn(`[AI Discovery]: Model ${model} returned HTTP 404 and was removed from rotation.`);
+  } else if (status === 401 || status === 402 || status === 403) {
+    // Insufficient balance or unauthorized key: demote below healthy backends
+    const cooldownMs = process.env.NODE_ENV === "test" ? 50 : 15 * 60 * 1000;
+    modelHealth.set(norm, { cooldownUntil: Date.now() + cooldownMs });
+    console.warn(
+      `[AI Discovery]: Model ${model} demoted due to HTTP ${status} (cooldown: ${Math.round(cooldownMs / 1000)}s).`
+    );
   } else if (status === 503 || status === 429) {
     // Transient demand spike: demote for 3 minutes (50ms in test)
     const cooldownMs = process.env.NODE_ENV === "test" ? 50 : 3 * 60 * 1000;
@@ -75,6 +203,19 @@ const OLLAMA_DISCOVERY_TTL_MS = 60 * 1000;
 export function setCachedOllamaModels(models: string[] | null): void {
   cachedOllamaModels = models;
   lastOllamaDiscoveryTime = models ? Date.now() : 0;
+}
+
+export function setCachedOpenAiModels(
+  provider: OpenAiCompatibleProviderName,
+  models: string[] | null
+): void {
+  if (models) {
+    cachedOpenAiModels.set(provider, models);
+    lastOpenAiDiscoveryTime.set(provider, Date.now());
+  } else {
+    cachedOpenAiModels.delete(provider);
+    lastOpenAiDiscoveryTime.delete(provider);
+  }
 }
 
 export async function discoverGeminiModels(apiKey: string, signal?: AbortSignal): Promise<string[]> {
@@ -174,6 +315,81 @@ export async function discoverOllamaModels(signal?: AbortSignal): Promise<string
   }
 }
 
+const EXCLUDED_OPENAI_MODEL_PATTERN =
+  /embed|whisper|guard|tts|audio|orpheus|safeguard|pii|video-detector|rerank|clip|cosmos|ising|translate|vision|vl(?:-|$)/i;
+
+function providerBaseUrl(spec: OpenAiProviderSpec): string {
+  return (process.env[spec.baseUrlEnv]?.trim() || spec.defaultBaseUrl).replace(/\/+$/, "");
+}
+
+function providerApiKey(spec: OpenAiProviderSpec): string | undefined {
+  const key = process.env[spec.apiKeyEnv]?.trim();
+  return key || undefined;
+}
+
+export async function discoverOpenAiModels(
+  providerName: OpenAiCompatibleProviderName,
+  signal?: AbortSignal
+): Promise<string[]> {
+  const spec = OPENAI_SPEC_BY_NAME.get(providerName) as OpenAiProviderSpec | undefined;
+  if (!spec) return [];
+
+  const cached = cachedOpenAiModels.get(providerName) || [];
+  const apiKey = providerApiKey(spec);
+  if (!apiKey || process.env.NODE_ENV === "test") {
+    return cached;
+  }
+
+  const now = Date.now();
+  const lastAt = lastOpenAiDiscoveryTime.get(providerName) || 0;
+  if (cached.length > 0 && now - lastAt < DISCOVERY_TTL_MS) {
+    return cached;
+  }
+
+  try {
+    const requestSignal = signal ? combineWithTimeout(4000, signal).signal : AbortSignal.timeout(4000);
+    const res = await fetch(`${providerBaseUrl(spec)}/models`, {
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        ...(spec.name === "openrouter"
+          ? {
+              "HTTP-Referer": process.env.APP_URL?.trim() || "http://localhost:5173",
+              "X-Title": "Whiteboard.io",
+            }
+          : {}),
+      },
+      signal: requestSignal,
+    });
+    if (!res.ok) {
+      return cached;
+    }
+    const data = (await res.json()) as { data?: Array<{ id?: string }> };
+    const candidates = (data.data || [])
+      .map((m) => (m.id || "").trim())
+      .filter((id) => Boolean(id) && !EXCLUDED_OPENAI_MODEL_PATTERN.test(id));
+
+    const filtered = spec.prioritizeFreeDiscovery
+      ? candidates.filter((id) => id.endsWith(":free"))
+      : candidates;
+
+    const scored = (filtered.length > 0 ? filtered : candidates).map((id) => {
+      let score = 0;
+      if (id.endsWith(":free")) score += 60;
+      if (/flash|lightning|mini|bolt/i.test(id)) score += 30;
+      if (/qwen|deepseek|nemotron|gpt-oss|ernie|mistral|llama/i.test(id)) score += 20;
+      return { id, score };
+    });
+    scored.sort((a, b) => b.score - a.score);
+
+    const limited = scored.slice(0, 12).map((s) => s.id);
+    cachedOpenAiModels.set(providerName, limited);
+    lastOpenAiDiscoveryTime.set(providerName, now);
+    return limited;
+  } catch {
+    return cached;
+  }
+}
+
 function splitList(value: string | undefined): string[] {
   if (!value) return [];
   return value
@@ -196,6 +412,10 @@ function geminiInfo(model: string): AiProviderInfo {
   return { name: "gemini", model, label: prettyGeminiModel(model) };
 }
 
+function openAiInfo(spec: OpenAiProviderSpec, model: string): AiProviderInfo {
+  return { name: spec.name, model, label: spec.displayName };
+}
+
 function prettyGeminiModel(model: string): string {
   const cleaned = model.replace(/^gemini[-_]?/i, "");
   const words = cleaned
@@ -203,50 +423,6 @@ function prettyGeminiModel(model: string): string {
     .filter(Boolean)
     .map((word) => word.charAt(0).toUpperCase() + word.slice(1));
   return `Gemini ${words.join(" ")}`.trim();
-}
-
-/**
- * Which model backend should handle AI diagram requests.
- *
- * Selection order:
- * - `AI_PROVIDER=gemini`   -> Gemini when GEMINI_API_KEY is set, else local Ollama if allowed.
- * - `AI_PROVIDER=ollama`   -> Ollama (local, no API key needed).
- * - `AI_PROVIDER=fallback` -> force the procedural engine (no model calls).
- * - unset / `auto`         -> Gemini when a key exists, else Ollama when
- *                             configured or fallback-enabled.
- */
-export function resolveAiProvider(): AiProviderInfo | null {
-  const requested = (process.env.AI_PROVIDER || "").trim().toLowerCase();
-  const geminiKey = process.env.GEMINI_API_KEY?.trim();
-  const ollamaModel = process.env.OLLAMA_MODEL?.trim();
-  const ollamaBaseUrlEnv = process.env.OLLAMA_BASE_URL?.trim();
-
-  if (requested === "none" || requested === "fallback" || requested === "off") {
-    return null;
-  }
-
-  if (requested === "ollama") {
-    return ollamaProviderChain()[0] ?? ollamaInfo();
-  }
-
-  if (requested === "gemini") {
-    if (geminiKey) {
-      const model = process.env.GEMINI_MODEL?.trim() || DEFAULT_GEMINI_MODEL;
-      return geminiInfo(model);
-    }
-    return ollamaFallbackEnabled() ? (ollamaProviderChain()[0] ?? ollamaInfo()) : null;
-  }
-
-  if (geminiKey) {
-    const model = process.env.GEMINI_MODEL?.trim() || DEFAULT_GEMINI_MODEL;
-    return geminiInfo(model);
-  }
-
-  if (ollamaModel || ollamaBaseUrlEnv || ollamaFallbackEnabled()) {
-    return ollamaProviderChain()[0] ?? ollamaInfo();
-  }
-
-  return null;
 }
 
 function partitionHealthyModels(models: string[]): string[] {
@@ -322,75 +498,191 @@ export function ollamaProviderChain(dynamicOllamaModels: string[] = []): AiProvi
   return ordered.map(ollamaInfo);
 }
 
+/** OpenAI-compatible provider model chain (Groq, NVIDIA NIM, OpenRouter, DeepSeek). */
+export function openAiProviderChain(
+  providerName: OpenAiCompatibleProviderName,
+  dynamicModels: string[] = []
+): AiProviderInfo[] {
+  const spec = OPENAI_SPEC_BY_NAME.get(providerName) as OpenAiProviderSpec | undefined;
+  if (!spec || !providerApiKey(spec)) return [];
+
+  const primary = process.env[spec.modelEnv]?.trim() || spec.defaultModel;
+  const configured = process.env[spec.fallbackModelsEnv]?.trim();
+  const disabled = /^(none|off|-)$/i.test(configured || "");
+  const fallbacks = disabled
+    ? []
+    : configured
+      ? splitList(configured)
+      : spec.defaultFallbacks;
+
+  const discovered = [...dynamicModels, ...(cachedOpenAiModels.get(providerName) || [])];
+  const baseCandidates =
+    discovered.length > 0 && !configured
+      ? [
+          ...(discovered.includes(primary) ? [primary] : []),
+          ...fallbacks.filter((m) => discovered.includes(m)),
+          ...(discovered.length === 0 ? [primary, ...fallbacks] : []),
+          ...discovered,
+        ]
+      : [primary, ...fallbacks, ...discovered];
+
+  // Guarantee primary stays first unless retired when discovery returned empty/subset
+  const withPrimary = [primary, ...fallbacks, ...baseCandidates];
+  const ordered = partitionHealthyModels(withPrimary);
+  return ordered.map((model) => openAiInfo(spec, model));
+}
+
 /**
- * Ollama as local failover whenever Gemini is unavailable or fails. Enabled by
- * default so outages or quota exhaustion degrade to a local LLM instead of the
- * procedural approximation. Set AI_ALLOW_OLLAMA_FALLBACK=false to disable.
+ * Ollama as local failover whenever cloud models are unavailable or fail.
+ * Enabled by default so outages degrade cleanly to a local LLM instead of the
+ * procedural engine. Set AI_ALLOW_OLLAMA_FALLBACK=false to disable.
  */
 export function ollamaFallbackEnabled(): boolean {
   return !/^(false|0|off|no)$/i.test((process.env.AI_ALLOW_OLLAMA_FALLBACK || "").trim());
 }
 
+export interface ResolveChainOptions {
+  preferredProvider?: AiProviderSelection;
+  preferredModel?: string;
+  discoveredByProvider?: Partial<Record<OpenAiCompatibleProviderName, string[]>>;
+}
+
+function buildRemoteChainForProvider(
+  name: Exclude<AiProviderName, "ollama">,
+  dynamicGeminiModels: string[],
+  discoveredByProvider: Partial<Record<OpenAiCompatibleProviderName, string[]>>
+): AiProviderInfo[] {
+  if (name === "gemini") {
+    return process.env.GEMINI_API_KEY?.trim()
+      ? geminiProviderChain(dynamicGeminiModels)
+      : [];
+  }
+  return openAiProviderChain(name, discoveredByProvider[name] || []);
+}
+
+/**
+ * Which model backend should handle AI diagram requests by default.
+ */
+export function resolveAiProvider(): AiProviderInfo | null {
+  const chain = resolveProviderChain();
+  return chain[0] ?? null;
+}
+
 /**
  * Ordered list of model backends to try for a single AI turn. The first entry is
  * the preferred engine; the rest are failover candidates. Empty when no model
- * backend is configured.
- *
- * - `AI_PROVIDER=gemini`   -> Gemini chain, then local Ollama when AI_ALLOW_OLLAMA_FALLBACK != false.
- * - `AI_PROVIDER=ollama`   -> Ollama chain only.
- * - `AI_PROVIDER=fallback` -> empty (procedural engine).
- * - unset / `auto`         -> Gemini chain (if keyed), then local Ollama (unless disabled).
+ * backend is configured or offline fallback is explicitly selected.
  */
 export function resolveProviderChain(
   dynamicModels: string[] = [],
-  dynamicOllamaModels: string[] = []
+  dynamicOllamaModels: string[] = [],
+  options: ResolveChainOptions = {}
 ): AiProviderInfo[] {
-  const requested = (process.env.AI_PROVIDER || "").trim().toLowerCase();
-  const geminiKey = process.env.GEMINI_API_KEY?.trim();
-  const ollamaModel = process.env.OLLAMA_MODEL?.trim();
-  const ollamaBaseUrlEnv = process.env.OLLAMA_BASE_URL?.trim();
+  const envRequested = coerceProviderSelection(process.env.AI_PROVIDER);
+  const requested = options.preferredProvider ?? envRequested ?? "auto";
+  const preferredModel = sanitizeModelName(options.preferredModel);
+  const discoveredByProvider = options.discoveredByProvider ?? {};
 
-  if (requested === "none" || requested === "fallback" || requested === "off") {
+  if (requested === "fallback") {
     return [];
   }
+
   if (requested === "ollama") {
-    return ollamaProviderChain(dynamicOllamaModels);
-  }
-  if (requested === "gemini") {
-    const chain = geminiKey ? geminiProviderChain(dynamicModels) : [];
-    if (ollamaFallbackEnabled()) chain.push(...ollamaProviderChain(dynamicOllamaModels));
+    const chain = ollamaProviderChain(dynamicOllamaModels);
+    if (preferredModel) {
+      return [
+        ollamaInfo(preferredModel),
+        ...chain.filter((p) => p.model !== preferredModel),
+      ];
+    }
     return chain;
   }
 
-  if (geminiKey) {
-    const chain = geminiProviderChain(dynamicModels);
-    if (ollamaFallbackEnabled()) chain.push(...ollamaProviderChain(dynamicOllamaModels));
-    return chain;
+  const allCloudOrder: Array<Exclude<AiProviderName, "ollama">> = [
+    "gemini",
+    "groq",
+    "nvidia",
+    "openrouter",
+    "deepseek",
+  ];
+
+  let orderedProviders: Array<Exclude<AiProviderName, "ollama">>;
+  if (requested !== "auto") {
+    orderedProviders = [requested, ...allCloudOrder.filter((p) => p !== requested)];
+  } else {
+    orderedProviders = allCloudOrder;
   }
 
-  if (ollamaModel || ollamaBaseUrlEnv || ollamaFallbackEnabled()) {
-    return ollamaProviderChain(dynamicOllamaModels);
+  const chain: AiProviderInfo[] = [];
+  for (const name of orderedProviders) {
+    const providerChain = buildRemoteChainForProvider(name, dynamicModels, discoveredByProvider);
+    if (name === requested && preferredModel) {
+      const hasModel = providerChain.some((entry) => entry.model === preferredModel);
+      const spec = OPENAI_SPEC_BY_NAME.get(name);
+      const customEntry: AiProviderInfo | null =
+        name === "gemini" && process.env.GEMINI_API_KEY?.trim()
+          ? geminiInfo(preferredModel)
+          : spec && providerApiKey(spec)
+            ? openAiInfo(spec, preferredModel)
+            : null;
+      if (customEntry) {
+        chain.push(
+          customEntry,
+          ...(hasModel
+            ? providerChain.filter((entry) => entry.model !== preferredModel)
+            : providerChain)
+        );
+        continue;
+      }
+    }
+    chain.push(...providerChain);
   }
 
-  return [];
+  if (
+    ollamaFallbackEnabled() ||
+    (requested === "auto" &&
+      chain.length === 0 &&
+      (Boolean(process.env.OLLAMA_MODEL?.trim()) || Boolean(process.env.OLLAMA_BASE_URL?.trim())))
+  ) {
+    chain.push(...ollamaProviderChain(dynamicOllamaModels));
+  }
+
+  return chain;
 }
 
-/** Asynchronously resolves the provider chain, discovering available Gemini and local Ollama models. */
-export async function resolveProviderChainAsync(signal?: AbortSignal): Promise<AiProviderInfo[]> {
-  const requested = (process.env.AI_PROVIDER || "").trim().toLowerCase();
-  if (requested === "none" || requested === "fallback" || requested === "off") {
+/** Asynchronously resolves the provider chain, discovering models on configured providers. */
+export async function resolveProviderChainAsync(
+  signal?: AbortSignal,
+  options: ResolveChainOptions = {}
+): Promise<AiProviderInfo[]> {
+  const envRequested = coerceProviderSelection(process.env.AI_PROVIDER);
+  const requested = options.preferredProvider ?? envRequested ?? "auto";
+  if (requested === "fallback") {
     return [];
   }
+
   const geminiKey = process.env.GEMINI_API_KEY?.trim();
   const shouldDiscoverGemini = Boolean(geminiKey && requested !== "ollama");
   const shouldDiscoverOllama =
     requested === "ollama" || ollamaFallbackEnabled() || !geminiKey;
 
-  const [dynamicGeminiModels, dynamicOllamaModels] = await Promise.all([
+  const configuredOpenAi = OPENAI_PROVIDER_SPECS.filter((spec) => Boolean(providerApiKey(spec)));
+
+  const [dynamicGeminiModels, dynamicOllamaModels, ...openAiLists] = await Promise.all([
     shouldDiscoverGemini && geminiKey ? discoverGeminiModels(geminiKey, signal) : Promise.resolve([]),
     shouldDiscoverOllama ? discoverOllamaModels(signal) : Promise.resolve([]),
+    ...configuredOpenAi.map((spec) => discoverOpenAiModels(spec.name, signal)),
   ]);
-  return resolveProviderChain(dynamicGeminiModels, dynamicOllamaModels);
+
+  const discoveredByProvider: Partial<Record<OpenAiCompatibleProviderName, string[]>> = {};
+  configuredOpenAi.forEach((spec, idx) => {
+    discoveredByProvider[spec.name] = openAiLists[idx] || [];
+  });
+
+  return resolveProviderChain(dynamicGeminiModels, dynamicOllamaModels, {
+    ...options,
+    discoveredByProvider,
+  });
 }
 
 export interface AiProviderSummary {
@@ -399,11 +691,16 @@ export interface AiProviderSummary {
   label: string;
 }
 
-/** Human-readable engine description for the client badge / config route. */
+/** Human-readable engine description for client badges and config route. */
 export function providerDisplayName(provider: AiProviderInfo): string {
-  return provider.name === "ollama"
-    ? `Ollama · ${provider.model}`
-    : prettyGeminiModel(provider.model);
+  if (provider.name === "gemini") {
+    return prettyGeminiModel(provider.model);
+  }
+  const spec = OPENAI_SPEC_BY_NAME.get(provider.name);
+  if (spec) {
+    return `${spec.displayName} · ${provider.model}`;
+  }
+  return `Ollama · ${provider.model}`;
 }
 
 export function summarizeProvider(provider: AiProviderInfo | null): AiProviderSummary {
@@ -425,23 +722,106 @@ export function getProviderSummary(): AiProviderSummary {
   return summarizeProvider(resolveAiProvider());
 }
 
+/** Non-secret inventory of supported AI backends and their available models for UI switching. */
+export function getAvailableAiProviders(
+  discoveredByProvider: Partial<Record<AiProviderName, string[]>> = {}
+): AvailableAiProviderOption[] {
+  const options: AvailableAiProviderOption[] = [];
+
+  const geminiConfigured = Boolean(process.env.GEMINI_API_KEY?.trim());
+  const geminiChain = geminiProviderChain(discoveredByProvider.gemini || []);
+  const geminiModels = [...new Set(geminiChain.map((entry) => entry.model))].slice(0, 8);
+  options.push({
+    id: "gemini",
+    label: "Google Gemini",
+    model: geminiModels[0] || DEFAULT_GEMINI_MODEL,
+    models: geminiModels,
+    configured: geminiConfigured,
+    local: false,
+  });
+
+  for (const spec of OPENAI_PROVIDER_SPECS) {
+    const configured = Boolean(providerApiKey(spec));
+    const discovered = (discoveredByProvider[spec.name] || []).slice(0, 8);
+    const configuredChain = configured
+      ? openAiProviderChain(spec.name, discovered)
+      : [];
+    const fallbackList = [
+      process.env[spec.modelEnv]?.trim() || spec.defaultModel,
+      ...spec.defaultFallbacks,
+    ];
+    const models = [
+      ...new Set([
+        ...configuredChain.map((entry) => entry.model),
+        ...fallbackList,
+        ...discovered,
+      ]),
+    ].slice(0, 8);
+
+    options.push({
+      id: spec.name,
+      label: spec.displayName,
+      model: models[0] || spec.defaultModel,
+      models,
+      configured,
+      local: false,
+    });
+  }
+
+  const ollamaChain = ollamaProviderChain(discoveredByProvider.ollama || []);
+  const ollamaModels = [...new Set(ollamaChain.map((entry) => entry.model))].slice(0, 8);
+  options.push({
+    id: "ollama",
+    label: "Ollama (Local)",
+    model: ollamaModels[0] || DEFAULT_OLLAMA_MODEL,
+    models: ollamaModels,
+    configured: ollamaFallbackEnabled() || Boolean(process.env.OLLAMA_MODEL?.trim() || process.env.OLLAMA_BASE_URL?.trim()),
+    local: true,
+  });
+
+  return options;
+}
+
+export async function getAvailableAiProvidersAsync(
+  signal?: AbortSignal
+): Promise<AvailableAiProviderOption[]> {
+  const geminiKey = process.env.GEMINI_API_KEY?.trim();
+  const configuredOpenAi = OPENAI_PROVIDER_SPECS.filter((spec) => Boolean(providerApiKey(spec)));
+
+  const [geminiModels, ollamaModels, ...openAiLists] = await Promise.all([
+    geminiKey ? discoverGeminiModels(geminiKey, signal) : Promise.resolve([]),
+    discoverOllamaModels(signal),
+    ...configuredOpenAi.map((spec) => discoverOpenAiModels(spec.name, signal)),
+  ]);
+
+  const discovered: Partial<Record<AiProviderName, string[]>> = {
+    gemini: geminiModels,
+    ollama: ollamaModels,
+  };
+  configuredOpenAi.forEach((spec, idx) => {
+    discovered[spec.name] = openAiLists[idx] || [];
+  });
+
+  return getAvailableAiProviders(discovered);
+}
+
 // ---------------------------------------------------------------------------
 // Author metadata for generated elements
 // ---------------------------------------------------------------------------
 
-/**
- * Default creator stamped onto AI-generated elements when the request is not
- * tied to a signed-in user. Keeps the board's presence label honest about
- * which engine actually drew the diagram.
- */
 export function defaultDiagramAuthor(provider: AiProviderInfo | null): DiagramAuthor {
-  if (provider?.name === "ollama") {
-    return { id: "ai_ollama", name: `Ollama (${provider.model})` };
+  if (!provider) {
+    return { id: "ai_local", name: "Local diagram engine" };
   }
-  if (provider?.name === "gemini") {
+  if (provider.name === "gemini") {
     return { id: "ai_gemini", name: "Gemini AI" };
   }
-  return { id: "ai_local", name: "Local diagram engine" };
+  if (provider.name === "ollama") {
+    return { id: "ai_ollama", name: `Ollama (${provider.model})` };
+  }
+  const spec = OPENAI_SPEC_BY_NAME.get(provider.name);
+  const display = spec?.displayName || provider.label;
+  return { id: `ai_${provider.name}`, name: `${display} (${provider.model})` };
 }
 
 // ---------------------------------------------------------------------------
@@ -449,7 +829,9 @@ export function defaultDiagramAuthor(provider: AiProviderInfo | null): DiagramAu
 // ---------------------------------------------------------------------------
 
 export function extractJson(text: string): unknown {
-  const trimmed = text.trim();
+  // Reasoning models may wrap scratchpad thoughts inside <think>...</think> blocks.
+  const withoutThinking = text.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
+  const trimmed = (withoutThinking || text).trim();
   const unfenced = trimmed
     .replace(/^```(?:json)?\s*/i, "")
     .replace(/\s*```$/i, "")
@@ -468,7 +850,7 @@ export function extractJson(text: string): unknown {
 }
 
 // ---------------------------------------------------------------------------
-// Gemini caller
+// Retry & HTTP helpers
 // ---------------------------------------------------------------------------
 
 function getRetryDelayMs(response: Response, attempt: number): number {
@@ -485,6 +867,16 @@ function getRetryDelayMs(response: Response, attempt: number): number {
   const exponentialDelay = Math.min(2 ** attempt * 1000, 15_000);
   return exponentialDelay + Math.floor(Math.random() * 500);
 }
+
+function numberFromEnv(name: string, fallback: number, min: number, max: number): number {
+  const value = Number(process.env[name]);
+  if (!Number.isFinite(value) || value <= 0) return fallback;
+  return Math.min(max, Math.max(min, value));
+}
+
+// ---------------------------------------------------------------------------
+// Gemini caller
+// ---------------------------------------------------------------------------
 
 async function callGemini(
   apiKey: string,
@@ -594,12 +986,164 @@ async function callGemini(
 }
 
 // ---------------------------------------------------------------------------
+// OpenAI-compatible caller (Groq, NVIDIA NIM, OpenRouter, DeepSeek)
+// ---------------------------------------------------------------------------
+
+async function callOpenAiCompatible(
+  spec: OpenAiProviderSpec,
+  apiKey: string,
+  model: string,
+  userMessage: string,
+  temperature: number,
+  maxRetries = 3,
+  timeoutMs = 45_000,
+  signal?: AbortSignal
+): Promise<unknown> {
+  const endpoint = `${providerBaseUrl(spec)}/chat/completions`;
+  let useJsonObjectMode = true;
+
+  const makeRequestBody = () => ({
+    model,
+    messages: [
+      { role: "system", content: SYSTEM_INSTRUCTION },
+      { role: "user", content: userMessage },
+    ],
+    temperature,
+    max_tokens: 8192,
+    ...(useJsonObjectMode ? { response_format: { type: "json_object" } } : {}),
+  });
+
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${apiKey}`,
+    ...(spec.name === "openrouter"
+      ? {
+          "HTTP-Referer": process.env.APP_URL?.trim() || "http://localhost:5173",
+          "X-Title": "Whiteboard.io",
+        }
+      : {}),
+  };
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    throwIfAborted(signal);
+    const requestSignal = combineWithTimeout(timeoutMs, signal);
+    try {
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(makeRequestBody()),
+        signal: requestSignal.signal,
+      });
+      throwIfAborted(signal);
+
+      if (response.status === 429 || (response.status >= 500 && response.status <= 599)) {
+        if (response.status === 429 || response.status === 503) {
+          recordModelFailure(model, response.status);
+        }
+        if (attempt === maxRetries) {
+          const detail = (await response.text().catch(() => "")).slice(0, 300);
+          const reason = response.status === 429 ? "rate limit" : "server error";
+          throw new Error(
+            `${spec.displayName} ${reason} after ${attemptCountLabel(maxRetries)} (HTTP ${response.status}${detail ? `: ${detail}` : ""}).`
+          );
+        }
+        const delayMs = getRetryDelayMs(response, attempt);
+        console.warn(
+          `[AI Retry]: ${spec.displayName} HTTP ${response.status}. Retrying in ${delayMs}ms (attempt ${attempt + 1}/${maxRetries})...`
+        );
+        await response.body?.cancel().catch(() => {});
+        await delay(delayMs, signal);
+        continue;
+      }
+
+      if (!response.ok) {
+        const rawText = (await response.text().catch(() => "")).slice(0, 400);
+        if (
+          response.status === 400 &&
+          useJsonObjectMode &&
+          /response_format|json_validate_failed|json mode|structured|schema|unsupported/i.test(rawText)
+        ) {
+          useJsonObjectMode = false;
+          console.warn(
+            `[AI Retry]: ${spec.displayName} "${model}" rejected json_object mode (HTTP 400); retrying with plain JSON prompt.`
+          );
+          continue;
+        }
+        recordModelFailure(model, response.status);
+        let detailMessage = rawText || response.statusText || `${spec.displayName} request failed`;
+        try {
+          const parsedErr = JSON.parse(rawText) as { error?: { message?: string }; detail?: string; title?: string };
+          detailMessage = parsedErr.error?.message || parsedErr.detail || parsedErr.title || detailMessage;
+        } catch {
+          // Keep plain text detail
+        }
+        const error = new Error(
+          `${spec.displayName} API Error (HTTP ${response.status}): ${detailMessage}`
+        ) as Error & { fatal?: boolean };
+        if (response.status >= 400 && response.status < 500) {
+          error.fatal = true;
+        }
+        throw error;
+      }
+
+      const data = (await response.json()) as {
+        choices?: Array<{
+          message?: {
+            content?: string | null;
+            reasoning_content?: string | null;
+          };
+          finish_reason?: string;
+        }>;
+        error?: { message?: string };
+      };
+
+      if (data.error?.message) {
+        throw new Error(`${spec.displayName} error: ${data.error.message}`);
+      }
+
+      const msg = data.choices?.[0]?.message;
+      const content = (msg?.content || "").trim();
+      const candidateText = content || (msg?.reasoning_content || "").trim();
+      if (!candidateText) {
+        throw new Error(`${spec.displayName} returned an empty response.`);
+      }
+
+      const parsed = extractJson(candidateText);
+      recordModelSuccess(model);
+      return parsed;
+    } catch (err: unknown) {
+      throwIfAborted(signal);
+      const error = err as Error & { fatal?: boolean };
+      if (error.name === "TimeoutError" || error.name === "AbortError") {
+        const timeoutError = new Error(
+          `${spec.displayName} ${model} did not respond within ${Math.round(timeoutMs / 1000)}s.`
+        ) as Error & { fatal?: boolean };
+        if (attempt === maxRetries) throw timeoutError;
+        console.warn(
+          `[AI Retry]: ${timeoutError.message} Retrying (attempt ${attempt + 1}/${maxRetries})...`
+        );
+        continue;
+      }
+      if (attempt === maxRetries || error.fatal) throw error;
+      const delayMs = process.env.NODE_ENV === "test"
+        ? 5
+        : Math.min(1200 * attempt, 5000) + Math.floor(Math.random() * 400);
+      console.warn(
+        `[AI Retry]: ${error.message}. Retrying in ${delayMs}ms (attempt ${attempt + 1}/${maxRetries})...`
+      );
+      await delay(delayMs, signal);
+    } finally {
+      requestSignal.dispose();
+    }
+  }
+
+  throw new Error(`${spec.displayName} API call failed after multiple retry attempts`);
+}
+
+// ---------------------------------------------------------------------------
 // Ollama caller (local, OpenAI-free JSON-schema constrained output)
 // ---------------------------------------------------------------------------
 
-// Ollama's `format` field expects standard JSON Schema (lowercase types), while
-// Gemini's `responseSchema` uses its own uppercase dialect. Convert the shared
-// schema so both backends stay in sync from a single definition.
 function toStandardJsonSchema(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(toStandardJsonSchema);
   if (!value || typeof value !== "object") return value;
@@ -607,7 +1151,6 @@ function toStandardJsonSchema(value: unknown): unknown {
   const source = value as Record<string, unknown>;
   const result: Record<string, unknown> = {};
   for (const [key, entry] of Object.entries(source)) {
-    // Gemini-only layout hint that Ollama's grammar converter rejects.
     if (key === "propertyOrdering") continue;
     if (key === "type" && typeof entry === "string") {
       result.type = entry.toLowerCase();
@@ -619,12 +1162,6 @@ function toStandardJsonSchema(value: unknown): unknown {
 }
 
 const OLLAMA_RESPONSE_SCHEMA = toStandardJsonSchema(GRAPH_RESPONSE_SCHEMA);
-
-function numberFromEnv(name: string, fallback: number, min: number, max: number): number {
-  const value = Number(process.env[name]);
-  if (!Number.isFinite(value) || value <= 0) return fallback;
-  return Math.min(max, Math.max(min, value));
-}
 
 export function ollamaBaseUrl(): string {
   return (process.env.OLLAMA_BASE_URL?.trim() || DEFAULT_OLLAMA_BASE_URL).replace(/\/+$/, "");
@@ -699,8 +1236,6 @@ async function callOllama(
 
       if (!response.ok) {
         const detail = (await response.text().catch(() => "")).slice(0, 300);
-        // Some local Ollama models reject strict JSON Schema grammar in `format`;
-        // retry once with generic `format: "json"` before failing.
         if (
           response.status === 400 &&
           responseFormat !== "json" &&
@@ -718,7 +1253,6 @@ async function callOllama(
         const error = new Error(
           `Ollama request failed (HTTP ${response.status}${detail ? `: ${detail}` : ""}).`
         ) as Error & { fatal?: boolean };
-        // 400/404 usually mean the model name or format is invalid, so retrying is pointless.
         if (response.status === 400 || response.status === 404) error.fatal = true;
         throw error;
       }
@@ -824,6 +1358,24 @@ export async function callAiModel(
       temperature,
       Math.max(1, options.maxRetries ?? 3),
       options.timeoutMs,
+      options.signal
+    );
+  }
+
+  const spec = OPENAI_SPEC_BY_NAME.get(provider.name);
+  if (spec) {
+    const apiKey = providerApiKey(spec);
+    if (!apiKey) {
+      throw new Error(`${spec.apiKeyEnv} is not configured.`);
+    }
+    return callOpenAiCompatible(
+      spec,
+      apiKey,
+      provider.model,
+      userMessage,
+      temperature,
+      Math.max(1, options.maxRetries ?? 3),
+      options.timeoutMs ?? numberFromEnv(spec.timeoutEnv, 45_000, 10_000, 180_000),
       options.signal
     );
   }

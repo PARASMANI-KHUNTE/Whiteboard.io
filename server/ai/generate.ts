@@ -37,6 +37,7 @@ import {
   resolveProviderChainAsync,
   summarizeProvider,
   type AiProviderInfo,
+  type AiProviderSelection,
   type AiProviderSummary,
 } from "./providers";
 
@@ -100,6 +101,9 @@ function outboundIntervalMs(provider: AiProviderInfo): number {
   if (provider.name === "ollama") {
     const configured = Number(process.env.OLLAMA_MIN_INTERVAL_MS);
     return Number.isFinite(configured) && configured >= 0 ? configured : 250;
+  }
+  if (provider.name !== "gemini") {
+    return 400;
   }
   return 3000;
 }
@@ -411,6 +415,8 @@ export interface GenerateDiagramParams {
   author?: DiagramAuthor;
   sessionId?: string;
   globalContext?: GlobalAiContext;
+  preferredProvider?: AiProviderSelection;
+  preferredModel?: string;
   signal?: AbortSignal;
 }
 
@@ -419,7 +425,10 @@ export async function generateDiagram(params: GenerateDiagramParams): Promise<Di
   throwIfAborted(signal);
 
   const mergedContext = mergeWithStoredBoardContext(params.globalContext);
-  const chain = await resolveProviderChainAsync(signal);
+  const chain = await resolveProviderChainAsync(signal, {
+    preferredProvider: params.preferredProvider,
+    preferredModel: params.preferredModel,
+  });
   const provider = chain[0] ?? null;
   const sessionId = sanitizeSessionId(params.sessionId);
   const options: NormalizeOptions = {
@@ -599,6 +608,8 @@ export interface ReviseDiagramParams {
   author?: DiagramAuthor;
   sessionId?: string;
   globalContext?: GlobalAiContext;
+  preferredProvider?: AiProviderSelection;
+  preferredModel?: string;
   signal?: AbortSignal;
 }
 
@@ -625,7 +636,10 @@ export async function reviseDiagram(params: ReviseDiagramParams): Promise<Diagra
     fallbackSummary: graph.summary,
   });
 
-  const chain = await resolveProviderChainAsync(signal);
+  const chain = await resolveProviderChainAsync(signal, {
+    preferredProvider: params.preferredProvider,
+    preferredModel: params.preferredModel,
+  });
   const provider = chain[0] ?? null;
 
   // A failed follow-up must never erase the user's existing diagram.

@@ -11,9 +11,48 @@ import type {
 
 const PREFIX = 'whiteboard_ai_session:';
 const LEDGER_PREFIX = 'whiteboard_ai_global_ctx:';
+const PREFERRED_AI_KEY = 'whiteboard_ai_preferred_engine';
 const MAX_MESSAGES = 60;
 const MAX_LEDGER_DIAGRAMS = 6;
 const MAX_LEDGER_TURNS = 16;
+
+export interface PreferredAiEngine {
+  provider: string;
+  model?: string;
+}
+
+export function loadPreferredAiEngine(): PreferredAiEngine {
+  try {
+    const raw = localStorage.getItem(PREFERRED_AI_KEY);
+    if (!raw) return { provider: 'auto' };
+    const parsed = JSON.parse(raw) as Partial<PreferredAiEngine>;
+    const provider =
+      typeof parsed?.provider === 'string' && parsed.provider.trim()
+        ? parsed.provider.trim()
+        : 'auto';
+    const model =
+      typeof parsed?.model === 'string' && parsed.model.trim()
+        ? parsed.model.trim()
+        : undefined;
+    return model ? { provider, model } : { provider };
+  } catch {
+    return { provider: 'auto' };
+  }
+}
+
+export function savePreferredAiEngine(engine: PreferredAiEngine): void {
+  try {
+    localStorage.setItem(
+      PREFERRED_AI_KEY,
+      JSON.stringify({
+        provider: engine.provider || 'auto',
+        ...(engine.model ? { model: engine.model } : {}),
+      })
+    );
+  } catch {
+    // Ignore storage quota errors.
+  }
+}
 
 export interface BoardAiLedger {
   diagrams: SessionDiagramSummary[];

@@ -4,6 +4,7 @@ import type {
   AiChatTurn,
   AiDiagramPayload,
   AiEngineConfig,
+  AvailableAiProviderOption,
   DetailLevel,
   DiagramDirection,
   DiagramGraph,
@@ -43,10 +44,12 @@ export async function fetchAiEngine(signal?: AbortSignal): Promise<AiEngineConfi
     if (!res.ok) return null;
     const data = (await res.json()) as {
       success?: boolean;
-      provider?: AiEngineConfig["provider"];
+      provider?: string;
       model?: string;
       label?: string;
       ollamaFallback?: boolean;
+      defaultSelection?: string;
+      availableProviders?: AvailableAiProviderOption[];
     };
     if (!data?.success || !data.provider || !data.label) return null;
     return {
@@ -55,6 +58,12 @@ export async function fetchAiEngine(signal?: AbortSignal): Promise<AiEngineConfi
       label: data.label,
       ...(typeof data.ollamaFallback === "boolean"
         ? { ollamaFallback: data.ollamaFallback }
+        : {}),
+      ...(typeof data.defaultSelection === "string"
+        ? { defaultSelection: data.defaultSelection }
+        : {}),
+      ...(Array.isArray(data.availableProviders)
+        ? { availableProviders: data.availableProviders }
         : {}),
     };
   } catch {
@@ -69,6 +78,8 @@ export interface GenerateDiagramRequest extends BaseRequest {
   direction: DiagramDirection;
   canvasCenter: { x: number; y: number };
   globalContext?: GlobalAiContext;
+  provider?: string;
+  model?: string;
 }
 
 export async function requestDiagram(request: GenerateDiagramRequest): Promise<AiDiagramPayload> {
@@ -85,6 +96,8 @@ export async function requestDiagram(request: GenerateDiagramRequest): Promise<A
       direction: request.direction,
       canvasCenter: request.canvasCenter,
       ...(request.globalContext ? { globalContext: request.globalContext } : {}),
+      ...(request.provider && request.provider !== "auto" ? { provider: request.provider } : {}),
+      ...(request.model ? { model: request.model } : {}),
     }),
     signal: request.signal,
   });
@@ -102,6 +115,8 @@ export interface ReviseDiagramRequest extends BaseRequest {
   canvasCenter: { x: number; y: number };
   sessionId: string;
   globalContext?: GlobalAiContext;
+  provider?: string;
+  model?: string;
 }
 
 export async function requestRevision(request: ReviseDiagramRequest): Promise<AiDiagramPayload> {
@@ -121,6 +136,8 @@ export async function requestRevision(request: ReviseDiagramRequest): Promise<Ai
       canvasCenter: request.canvasCenter,
       sessionId: request.sessionId,
       ...(request.globalContext ? { globalContext: request.globalContext } : {}),
+      ...(request.provider && request.provider !== "auto" ? { provider: request.provider } : {}),
+      ...(request.model ? { model: request.model } : {}),
     }),
     signal: request.signal,
   });
