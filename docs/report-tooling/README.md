@@ -11,12 +11,14 @@ Python utilities and generated academic/project artifacts live here so the appli
 | `generate_diagrams.py` | Regenerates the four architecture/dataflow/AI/schema PNG figures. |
 | `generate_pptx.py` | Regenerates `Whiteboard_io_Presentation.pptx`. |
 | `generate_summary_pptx.py` | Regenerates the 10-slide visual deck `docs/Whiteboard_io_Presentation.pptx`. |
+| `generate_presentation_script.py` | Regenerates the one-page speaker script `docs/Whiteboard_io_Presentation_Script.docx`. |
 | `scan_secrets.py` | CI secret scanner (`secret:scan`). |
 | `requirements.txt` | Pinned Python dependencies (`matplotlib`, `python-docx`, `python-pptx`). |
 
 ## Artifacts
 
 - `../Whiteboard_io_Presentation.pptx` (10-slide visual overview & flowchart deck)
+- `../Whiteboard_io_Presentation_Script.docx` (one-page speaker script aligned with the 10-slide deck)
 - `Generated_Project_Report.docx`
 - `diagram_architecture.png`, `diagram_dataflow.png`, `diagram_ai_pipeline.png`, `diagram_database_schema.png`
 - `Whiteboard_io_Presentation.pptx` (current deck)
