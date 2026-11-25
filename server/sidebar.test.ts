@@ -96,3 +96,13 @@ test('desktop sidebar docks the canvas and floating chrome (#147)', () => {
   assert.match(zoomControls, /getHandToggleMeta/);
   assert.doesNotMatch(source('components/Toolbar.tsx'), /id="tool-hand"/);
 });
+
+test('floating toolbar pins delete/clear icon so it never clips (#196)', () => {
+  const toolbar = source('components/Toolbar.tsx');
+
+  assert.match(toolbar, /id="clear-board-btn"/);
+  assert.match(toolbar, /<ClearIcon className="w-4 h-4 shrink-0"/);
+  assert.match(toolbar, /id="toolbar-style-options"/);
+  assert.match(toolbar, /min-w-0 flex-1 overflow-x-auto/);
+  assert.doesNotMatch(toolbar, /<span className="hidden md:inline">/);
+});
