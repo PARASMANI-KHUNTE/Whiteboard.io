@@ -68,6 +68,15 @@ export function setCachedDiscoveredModels(models: string[] | null): void {
   lastDiscoveryTime = models ? Date.now() : 0;
 }
 
+let cachedOllamaModels: string[] | null = null;
+let lastOllamaDiscoveryTime = 0;
+const OLLAMA_DISCOVERY_TTL_MS = 60 * 1000;
+
+export function setCachedOllamaModels(models: string[] | null): void {
+  cachedOllamaModels = models;
+  lastOllamaDiscoveryTime = models ? Date.now() : 0;
+}
+
 export async function discoverGeminiModels(apiKey: string, signal?: AbortSignal): Promise<string[]> {
   if (!apiKey || process.env.NODE_ENV === "test") {
     return cachedDiscoveredModels || [];
@@ -121,6 +130,50 @@ export async function discoverGeminiModels(apiKey: string, signal?: AbortSignal)
   }
 }
 
+export async function discoverOllamaModels(signal?: AbortSignal): Promise<string[]> {
+  if (process.env.NODE_ENV === "test") {
+    return cachedOllamaModels || [];
+  }
+  const now = Date.now();
+  if (cachedOllamaModels && now - lastOllamaDiscoveryTime < OLLAMA_DISCOVERY_TTL_MS) {
+    return cachedOllamaModels;
+  }
+  try {
+    const apiKey = process.env.OLLAMA_API_KEY?.trim();
+    const requestSignal = signal ? combineWithTimeout(2000, signal).signal : AbortSignal.timeout(2000);
+    const res = await fetch(`${ollamaBaseUrl()}/api/tags`, {
+      headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : undefined,
+      signal: requestSignal,
+    });
+    if (!res.ok) {
+      return cachedOllamaModels || [];
+    }
+    const data = (await res.json()) as {
+      models?: Array<{ name?: string; model?: string }>;
+    };
+    const candidates = (data.models || [])
+      .map((m) => (m.name || m.model || "").trim())
+      .filter((name) => Boolean(name) && !/embed|nomic-embed|bge-|mxbai|rerank|whisper/i.test(name));
+
+    const scored = candidates.map((name) => {
+      let score = 0;
+      if (/llama3\.2/i.test(name)) score += 90;
+      else if (/qwen/i.test(name)) score += 85;
+      else if (/llama3/i.test(name)) score += 80;
+      else if (/gemma/i.test(name)) score += 70;
+      else if (/mistral|deepseek|phi/i.test(name)) score += 60;
+      return { name, score };
+    });
+    scored.sort((a, b) => b.score - a.score);
+
+    cachedOllamaModels = scored.map((s) => s.name);
+    lastOllamaDiscoveryTime = now;
+    return cachedOllamaModels;
+  } catch {
+    return cachedOllamaModels || [];
+  }
+}
+
 function splitList(value: string | undefined): string[] {
   if (!value) return [];
   return value
@@ -134,9 +187,9 @@ export function attemptCountLabel(count: number): string {
   return `${count} attempt${count === 1 ? "" : "s"}`;
 }
 
-function ollamaInfo(): AiProviderInfo {
-  const model = process.env.OLLAMA_MODEL?.trim() || DEFAULT_OLLAMA_MODEL;
-  return { name: "ollama", model, label: "Ollama" };
+function ollamaInfo(model?: string): AiProviderInfo {
+  const chosen = (model || process.env.OLLAMA_MODEL?.trim() || DEFAULT_OLLAMA_MODEL).trim();
+  return { name: "ollama", model: chosen, label: "Ollama" };
 }
 
 function geminiInfo(model: string): AiProviderInfo {
@@ -156,30 +209,32 @@ function prettyGeminiModel(model: string): string {
  * Which model backend should handle AI diagram requests.
  *
  * Selection order:
- * - `AI_PROVIDER=gemini`   -> Gemini when GEMINI_API_KEY is set, otherwise none.
+ * - `AI_PROVIDER=gemini`   -> Gemini when GEMINI_API_KEY is set, else local Ollama if allowed.
  * - `AI_PROVIDER=ollama`   -> Ollama (local, no API key needed).
  * - `AI_PROVIDER=fallback` -> force the procedural engine (no model calls).
  * - unset / `auto`         -> Gemini when a key exists, else Ollama when
- *                             OLLAMA_MODEL / OLLAMA_BASE_URL is configured.
+ *                             configured or fallback-enabled.
  */
 export function resolveAiProvider(): AiProviderInfo | null {
   const requested = (process.env.AI_PROVIDER || "").trim().toLowerCase();
   const geminiKey = process.env.GEMINI_API_KEY?.trim();
   const ollamaModel = process.env.OLLAMA_MODEL?.trim();
-  const ollamaBaseUrl = process.env.OLLAMA_BASE_URL?.trim();
+  const ollamaBaseUrlEnv = process.env.OLLAMA_BASE_URL?.trim();
 
   if (requested === "none" || requested === "fallback" || requested === "off") {
     return null;
   }
 
   if (requested === "ollama") {
-    return ollamaInfo();
+    return ollamaProviderChain()[0] ?? ollamaInfo();
   }
 
   if (requested === "gemini") {
-    if (!geminiKey) return null;
-    const model = process.env.GEMINI_MODEL?.trim() || DEFAULT_GEMINI_MODEL;
-    return geminiInfo(model);
+    if (geminiKey) {
+      const model = process.env.GEMINI_MODEL?.trim() || DEFAULT_GEMINI_MODEL;
+      return geminiInfo(model);
+    }
+    return ollamaFallbackEnabled() ? (ollamaProviderChain()[0] ?? ollamaInfo()) : null;
   }
 
   if (geminiKey) {
@@ -187,11 +242,30 @@ export function resolveAiProvider(): AiProviderInfo | null {
     return geminiInfo(model);
   }
 
-  if (ollamaModel || ollamaBaseUrl) {
-    return ollamaInfo();
+  if (ollamaModel || ollamaBaseUrlEnv || ollamaFallbackEnabled()) {
+    return ollamaProviderChain()[0] ?? ollamaInfo();
   }
 
   return null;
+}
+
+function partitionHealthyModels(models: string[]): string[] {
+  const unique: string[] = [];
+  for (const m of models) {
+    if (m && !unique.includes(m)) unique.push(m);
+  }
+
+  const active = unique.filter((m) => !modelHealth.get(m.toLowerCase())?.retired);
+  const healthy: string[] = [];
+  const coolingDown: string[] = [];
+  for (const m of active) {
+    if (isModelHealthy(m)) {
+      healthy.push(m);
+    } else {
+      coolingDown.push(m);
+    }
+  }
+  return [...healthy, ...coolingDown];
 }
 
 /** Gemini model chain: configured primary, fallbacks, and dynamically discovered models. */
@@ -205,39 +279,53 @@ export function geminiProviderChain(dynamicModels: string[] = []): AiProviderInf
       ? splitList(configured)
       : DEFAULT_GEMINI_FALLBACK_MODELS;
 
-  const rawList = [primary, ...fallbacks, ...dynamicModels, ...(cachedDiscoveredModels || [])];
-  const uniqueModels: string[] = [];
-  for (const m of rawList) {
-    if (m && !uniqueModels.includes(m)) {
-      uniqueModels.push(m);
-    }
-  }
-
-  // Filter out permanently retired models (HTTP 404)
-  const activeModels = uniqueModels.filter((m) => {
-    const health = modelHealth.get(m.toLowerCase());
-    return !health?.retired;
-  });
-
-  // Partition into healthy models and currently cooling down models
-  const healthy: string[] = [];
-  const coolingDown: string[] = [];
-  for (const m of activeModels) {
-    if (isModelHealthy(m)) {
-      healthy.push(m);
-    } else {
-      coolingDown.push(m);
-    }
-  }
-
-  const ordered = [...healthy, ...coolingDown];
+  const ordered = partitionHealthyModels([
+    primary,
+    ...fallbacks,
+    ...dynamicModels,
+    ...(cachedDiscoveredModels || []),
+  ]);
   return ordered.map(geminiInfo);
 }
 
+/** Local Ollama model chain: prioritizes installed matching models, then configured fallbacks. */
+export function ollamaProviderChain(dynamicOllamaModels: string[] = []): AiProviderInfo[] {
+  const configuredPrimary = process.env.OLLAMA_MODEL?.trim() || DEFAULT_OLLAMA_MODEL;
+  const configuredFallbacks = splitList(process.env.OLLAMA_FALLBACK_MODELS);
+  const discovered = [...dynamicOllamaModels, ...(cachedOllamaModels || [])];
+
+  const resolveMatchingTag = (candidate: string): string | undefined => {
+    const norm = candidate.toLowerCase();
+    return discovered.find(
+      (installed) =>
+        installed.toLowerCase() === norm ||
+        installed.toLowerCase() === `${norm}:latest`
+    );
+  };
+
+  let rawList: string[];
+  if (discovered.length > 0) {
+    const matchedPrimary = resolveMatchingTag(configuredPrimary);
+    const matchedFallbacks = configuredFallbacks
+      .map(resolveMatchingTag)
+      .filter((entry): entry is string => Boolean(entry));
+    rawList = [
+      ...(matchedPrimary ? [matchedPrimary] : []),
+      ...matchedFallbacks,
+      ...discovered,
+    ];
+  } else {
+    rawList = [configuredPrimary, ...configuredFallbacks];
+  }
+
+  const ordered = partitionHealthyModels(rawList);
+  return ordered.map(ollamaInfo);
+}
+
 /**
- * Ollama as a last resort in `auto` mode. Enabled by default so a Gemini outage
- * still produces a real diagram instead of the procedural approximation. Set
- * AI_ALLOW_OLLAMA_FALLBACK=false to keep Gemini-only behaviour.
+ * Ollama as local failover whenever Gemini is unavailable or fails. Enabled by
+ * default so outages or quota exhaustion degrade to a local LLM instead of the
+ * procedural approximation. Set AI_ALLOW_OLLAMA_FALLBACK=false to disable.
  */
 export function ollamaFallbackEnabled(): boolean {
   return !/^(false|0|off|no)$/i.test((process.env.AI_ALLOW_OLLAMA_FALLBACK || "").trim());
@@ -248,46 +336,61 @@ export function ollamaFallbackEnabled(): boolean {
  * the preferred engine; the rest are failover candidates. Empty when no model
  * backend is configured.
  *
- * - `AI_PROVIDER=gemini`   -> the Gemini chain only (operator asked for Gemini).
- * - `AI_PROVIDER=ollama`   -> Ollama only.
+ * - `AI_PROVIDER=gemini`   -> Gemini chain, then local Ollama when AI_ALLOW_OLLAMA_FALLBACK != false.
+ * - `AI_PROVIDER=ollama`   -> Ollama chain only.
  * - `AI_PROVIDER=fallback` -> empty (procedural engine).
- * - unset / `auto`         -> Gemini chain, then Ollama (unless disabled).
- * - no Gemini key          -> Ollama when configured.
+ * - unset / `auto`         -> Gemini chain (if keyed), then local Ollama (unless disabled).
  */
-export function resolveProviderChain(dynamicModels: string[] = []): AiProviderInfo[] {
+export function resolveProviderChain(
+  dynamicModels: string[] = [],
+  dynamicOllamaModels: string[] = []
+): AiProviderInfo[] {
   const requested = (process.env.AI_PROVIDER || "").trim().toLowerCase();
   const geminiKey = process.env.GEMINI_API_KEY?.trim();
   const ollamaModel = process.env.OLLAMA_MODEL?.trim();
-  const ollamaBaseUrl = process.env.OLLAMA_BASE_URL?.trim();
+  const ollamaBaseUrlEnv = process.env.OLLAMA_BASE_URL?.trim();
 
   if (requested === "none" || requested === "fallback" || requested === "off") {
     return [];
   }
   if (requested === "ollama") {
-    return [ollamaInfo()];
+    return ollamaProviderChain(dynamicOllamaModels);
   }
   if (requested === "gemini") {
-    return geminiKey ? geminiProviderChain(dynamicModels) : [];
+    const chain = geminiKey ? geminiProviderChain(dynamicModels) : [];
+    if (ollamaFallbackEnabled()) chain.push(...ollamaProviderChain(dynamicOllamaModels));
+    return chain;
   }
 
   if (geminiKey) {
     const chain = geminiProviderChain(dynamicModels);
-    if (ollamaFallbackEnabled()) chain.push(ollamaInfo());
+    if (ollamaFallbackEnabled()) chain.push(...ollamaProviderChain(dynamicOllamaModels));
     return chain;
   }
 
-  if (ollamaModel || ollamaBaseUrl) {
-    return [ollamaInfo()];
+  if (ollamaModel || ollamaBaseUrlEnv || ollamaFallbackEnabled()) {
+    return ollamaProviderChain(dynamicOllamaModels);
   }
 
   return [];
 }
 
-/** Asynchronously resolves the provider chain, discovering available models when an API key is present. */
+/** Asynchronously resolves the provider chain, discovering available Gemini and local Ollama models. */
 export async function resolveProviderChainAsync(signal?: AbortSignal): Promise<AiProviderInfo[]> {
+  const requested = (process.env.AI_PROVIDER || "").trim().toLowerCase();
+  if (requested === "none" || requested === "fallback" || requested === "off") {
+    return [];
+  }
   const geminiKey = process.env.GEMINI_API_KEY?.trim();
-  const dynamicModels = geminiKey ? await discoverGeminiModels(geminiKey, signal) : [];
-  return resolveProviderChain(dynamicModels);
+  const shouldDiscoverGemini = Boolean(geminiKey && requested !== "ollama");
+  const shouldDiscoverOllama =
+    requested === "ollama" || ollamaFallbackEnabled() || !geminiKey;
+
+  const [dynamicGeminiModels, dynamicOllamaModels] = await Promise.all([
+    shouldDiscoverGemini && geminiKey ? discoverGeminiModels(geminiKey, signal) : Promise.resolve([]),
+    shouldDiscoverOllama ? discoverOllamaModels(signal) : Promise.resolve([]),
+  ]);
+  return resolveProviderChain(dynamicGeminiModels, dynamicOllamaModels);
 }
 
 export interface AiProviderSummary {
@@ -542,10 +645,11 @@ async function callOllama(
 
   const apiKey = process.env.OLLAMA_API_KEY?.trim();
 
-  const requestBody = {
+  let responseFormat: unknown = OLLAMA_RESPONSE_SCHEMA;
+  const makeRequestBody = () => ({
     model,
     stream: false,
-    format: OLLAMA_RESPONSE_SCHEMA,
+    format: responseFormat,
     keep_alive: process.env.OLLAMA_KEEP_ALIVE?.trim() || "10m",
     options: {
       temperature,
@@ -556,7 +660,7 @@ async function callOllama(
       { role: "system", content: SYSTEM_INSTRUCTION },
       { role: "user", content: userMessage },
     ],
-  };
+  });
 
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     throwIfAborted(signal);
@@ -568,12 +672,15 @@ async function callOllama(
           "Content-Type": "application/json",
           ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
         },
-        body: JSON.stringify(requestBody),
+        body: JSON.stringify(makeRequestBody()),
         signal: requestSignal.signal,
       });
       throwIfAborted(signal);
 
       if (response.status === 429 || (response.status >= 500 && response.status <= 599)) {
+        if (response.status === 429 || response.status === 503) {
+          recordModelFailure(model, response.status);
+        }
         if (attempt === maxRetries) {
           const detail = (await response.text().catch(() => "")).slice(0, 300);
           const reason = response.status === 429 ? "rate limit" : "server error";
@@ -592,10 +699,26 @@ async function callOllama(
 
       if (!response.ok) {
         const detail = (await response.text().catch(() => "")).slice(0, 300);
+        // Some local Ollama models reject strict JSON Schema grammar in `format`;
+        // retry once with generic `format: "json"` before failing.
+        if (
+          response.status === 400 &&
+          responseFormat !== "json" &&
+          /format|schema|grammar/i.test(detail)
+        ) {
+          responseFormat = "json";
+          console.warn(
+            `[AI Retry]: Ollama "${model}" rejected schema grammar (HTTP 400); retrying with JSON mode.`
+          );
+          continue;
+        }
+        if (response.status === 404) {
+          recordModelFailure(model, response.status);
+        }
         const error = new Error(
           `Ollama request failed (HTTP ${response.status}${detail ? `: ${detail}` : ""}).`
         ) as Error & { fatal?: boolean };
-        // 400/404 usually mean the model name is wrong, so retrying is pointless.
+        // 400/404 usually mean the model name or format is invalid, so retrying is pointless.
         if (response.status === 400 || response.status === 404) error.fatal = true;
         throw error;
       }
@@ -617,7 +740,9 @@ async function callOllama(
       }
 
       try {
-        return extractJson(text);
+        const parsed = extractJson(text);
+        recordModelSuccess(model);
+        return parsed;
       } catch (parseError: unknown) {
         if (data.done_reason === "length") {
           throw new Error(

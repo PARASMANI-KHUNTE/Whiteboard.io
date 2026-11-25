@@ -169,7 +169,7 @@ GEMINI_API_KEY=your_gemini_api_key_here
 GEMINI_MODEL=gemini-3.8-flash
 # Models tried in order if the primary is rate-limited or unavailable.
 GEMINI_FALLBACK_MODELS=gemini-flash-lite-latest,gemini-3.6-flash
-# Set to false to stop auto mode from falling back to a local Ollama model.
+# Set to false to stop Gemini/auto mode from falling back to a local Ollama model.
 AI_ALLOW_OLLAMA_FALLBACK=true
 
 # Local Ollama engine (no API key needed). See "Local AI with Ollama" below.
@@ -230,8 +230,8 @@ never drops the board straight to the offline generator:
 
 | Mode | Chain |
 | :--- | :--- |
-| unset / `auto` with a Gemini key | `GEMINI_MODEL` → `GEMINI_FALLBACK_MODELS` → Ollama |
-| `AI_PROVIDER=gemini` | `GEMINI_MODEL` → `GEMINI_FALLBACK_MODELS` |
+| unset / `auto` with a Gemini key | `GEMINI_MODEL` → `GEMINI_FALLBACK_MODELS` → Ollama (unless disabled) |
+| `AI_PROVIDER=gemini` | `GEMINI_MODEL` → `GEMINI_FALLBACK_MODELS` → Ollama (unless disabled) |
 | `AI_PROVIDER=ollama` | Ollama only |
 | `AI_PROVIDER=fallback` | Offline generator only |
 

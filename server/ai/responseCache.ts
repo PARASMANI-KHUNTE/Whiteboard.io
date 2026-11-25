@@ -42,6 +42,14 @@ export class TimedCache<T> {
     }
   }
 
+  delete(key: string): boolean {
+    return this.store.delete(key);
+  }
+
+  clear(): void {
+    this.store.clear();
+  }
+
   prune(now: number = Date.now()): void {
     for (const [key, entry] of this.store.entries()) {
       if (entry.expiresAt <= now) this.store.delete(key);

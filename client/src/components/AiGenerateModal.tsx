@@ -5,6 +5,7 @@ import type {
   DetailLevel,
   DiagramDirection,
   DiagramType,
+  GlobalAiContext,
 } from '../ai/types';
 import { fetchAiEngine, requestDiagram } from '../ai/api';
 import { ModalShell } from './ui/ModalShell';
@@ -31,7 +32,7 @@ interface AiGenerateModalProps {
   onGenerated: (
     payload: AiDiagramPayload,
     options: { origin: { x: number; y: number }; replaceBoard: boolean },
-    context: { boardKey: string }
+    context: { boardKey: string; prompt?: string }
   ) => void;
   /** Room code (or "solo") captured when generation starts. */
   boardKey: string;
@@ -39,6 +40,8 @@ interface AiGenerateModalProps {
   authToken?: string | null;
   /** Only the host (or a sole participant) may replace the whole board. */
   canClearBoard?: boolean;
+  /** Shared live whiteboard & session history visible to Gemini and Ollama. */
+  globalContext?: GlobalAiContext;
 }
 
 interface TemplateOption {
@@ -111,6 +114,7 @@ export const AiGenerateModal: React.FC<AiGenerateModalProps> = ({
   canvasCenter,
   authToken,
   canClearBoard = true,
+  globalContext,
 }) => {
   const [selectedType, setSelectedType] = useState<DiagramType>('mindmap');
   const [detail, setDetail] = useState<DetailLevel>('detailed');
@@ -124,6 +128,7 @@ export const AiGenerateModal: React.FC<AiGenerateModalProps> = ({
   const [replaceBoard, setReplaceBoard] = useState<boolean>(false);
   const [engineLabel, setEngineLabel] = useState<string>('Checking AI engine…');
   const [engineProvider, setEngineProvider] = useState<AiEngineConfig['provider'] | null>(null);
+  const [ollamaFallbackArmed, setOllamaFallbackArmed] = useState<boolean>(false);
 
   const abortControllerRef = useRef<AbortController | null>(null);
 
@@ -162,6 +167,7 @@ export const AiGenerateModal: React.FC<AiGenerateModalProps> = ({
         if (!config || controller.signal.aborted) return;
         setEngineProvider(config.provider);
         setEngineLabel(config.label);
+        setOllamaFallbackArmed(Boolean(config.ollamaFallback));
       })
       .catch(() => {
         if (!controller.signal.aborted) setEngineLabel('AI engine');
@@ -201,7 +207,8 @@ export const AiGenerateModal: React.FC<AiGenerateModalProps> = ({
 
   const handleGenerate = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    if (!prompt.trim() || isGenerating) return;
+    const trimmedPrompt = prompt.trim();
+    if (!trimmedPrompt || isGenerating) return;
 
     setIsGenerating(true);
     setIsReady(false);
@@ -217,11 +224,12 @@ export const AiGenerateModal: React.FC<AiGenerateModalProps> = ({
 
     try {
       const payload = await requestDiagram({
-        prompt: prompt.trim(),
+        prompt: trimmedPrompt,
         type: selectedType,
         detail,
         direction,
         canvasCenter: requestCanvasCenter,
+        globalContext,
         authToken,
         signal: controller.signal,
       });
@@ -235,7 +243,7 @@ export const AiGenerateModal: React.FC<AiGenerateModalProps> = ({
       onGenerated(
         payload,
         { origin: requestCanvasCenter, replaceBoard: requestReplaceBoard },
-        { boardKey: requestBoardKey }
+        { boardKey: requestBoardKey, prompt: trimmedPrompt }
       );
       onClose();
       setPrompt('');
@@ -249,6 +257,10 @@ export const AiGenerateModal: React.FC<AiGenerateModalProps> = ({
       abortControllerRef.current = null;
     }
   };
+
+  const contextNodesCount = globalContext?.boardSummary?.nodes.length ?? 0;
+  const contextTurnsCount = globalContext?.recentTurns?.length ?? 0;
+  const hasSessionContext = contextNodesCount > 0 || contextTurnsCount > 0;
 
   return (
     <ModalShell
@@ -266,14 +278,33 @@ export const AiGenerateModal: React.FC<AiGenerateModalProps> = ({
               <Sparkles className="w-5 h-5 animate-pulse" />
             </div>
             <div>
-              <h3 id="ai-generate-modal-title" className="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
+              <h3 id="ai-generate-modal-title" className="text-lg font-bold text-slate-900 dark:text-white flex flex-wrap items-center gap-2">
                 Generate with AI
                 <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700 dark:bg-indigo-900/60 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800">
                   {engineLabel}
                 </span>
-                {engineProvider === 'ollama' && (
+                {engineProvider === 'ollama' ? (
                   <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
                     Local
+                  </span>
+                ) : (
+                  engineProvider === 'gemini' &&
+                  ollamaFallbackArmed && (
+                    <span
+                      title="If Gemini fails or is unavailable, requests fail over to your local Ollama model automatically."
+                      className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800"
+                    >
+                      Ollama failover ready
+                    </span>
+                  )
+                )}
+                {hasSessionContext && (
+                  <span
+                    title="Live canvas items and session history are shared with every AI engine."
+                    className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300 border border-slate-200 dark:border-slate-700"
+                  >
+                    Session context: {contextNodesCount} items
+                    {contextTurnsCount > 0 ? ` · ${contextTurnsCount} turns` : ''}
                   </span>
                 )}
               </h3>

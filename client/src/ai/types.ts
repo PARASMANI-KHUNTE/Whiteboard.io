@@ -70,6 +70,62 @@ export interface AiEngineConfig {
   provider: "gemini" | "ollama" | "fallback";
   model: string;
   label: string;
+  ollamaFallback?: boolean;
+}
+
+export interface BoardNodeContext {
+  id: string;
+  kind: "sticky" | "shape" | "text" | "icon";
+  label: string;
+  shapeType?: string;
+  author?: string;
+}
+
+export interface BoardEdgeContext {
+  from: string;
+  to: string;
+  label?: string;
+}
+
+export interface BoardSummaryContext {
+  totalElements: number;
+  strokeCount: number;
+  nodes: BoardNodeContext[];
+  connections: BoardEdgeContext[];
+}
+
+export interface SessionDiagramSummary {
+  sessionId: string;
+  title: string;
+  type: DiagramType;
+  summary: string;
+  provider?: string;
+  model?: string;
+  nodeCount: number;
+  updatedAt: number;
+}
+
+export interface GlobalSessionTurn {
+  role: "user" | "assistant";
+  content: string;
+  provider?: string;
+  model?: string;
+  diagramTitle?: string;
+  at?: number;
+}
+
+export interface GlobalAiContext {
+  boardKey: string;
+  roomName?: string;
+  mode?: "solo" | "room";
+  participantCount?: number;
+  theme?: "light" | "dark";
+  boardSummary?: BoardSummaryContext;
+  sessionSummary?: string;
+  priorDiagrams?: SessionDiagramSummary[];
+  recentTurns?: GlobalSessionTurn[];
+  lastProvider?: string;
+  lastModel?: string;
 }
 
 export interface AiChatTurn {
@@ -84,6 +140,8 @@ export interface AiChatMessage {
   changes?: string[];
   suggestions?: string[];
   notice?: string;
+  provider?: string;
+  model?: string;
   at: number;
 }
 
