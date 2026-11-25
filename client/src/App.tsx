@@ -4,10 +4,8 @@ import {
   ShapeType,
   CanvasElement,
   DrawingStroke,
-  StickyNote,
   TextElement,
   ShapeElement,
-  IconElement,
   WireElement,
   WireStyle,
 } from './types';
@@ -31,6 +29,7 @@ import { AdminPanelModal } from './components/AdminPanelModal';
 import { SessionLauncherModal } from './components/SessionLauncherModal';
 import { ShortcutsModal } from './components/ShortcutsModal';
 import { ConfirmModal } from './components/ConfirmModal';
+import { ExportModal } from './components/ExportModal';
 import { AiGenerateModal } from './components/AiGenerateModal';
 import { AiChatPanel } from './components/AiChatPanel';
 import { WelcomeHintToast } from './components/WelcomeHintToast';
@@ -43,7 +42,7 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import { Info, AlertCircle, CheckCircle2, UserX, X } from 'lucide-react';
 import { isColorBlack, isColorWhite } from './utils/themeColors';
 import { shouldRecolorBoardOnThemeToggle } from './utils/themeBoardEdit';
-import { routeWire } from './utils/wireGeometry';
+import type { ExportViewportInfo } from './utils/exportTypes';
 import {
   BoardAiLedger,
   EMPTY_BOARD_AI_LEDGER,
@@ -117,6 +116,7 @@ export default function App() {
   const [showCreateRoomModal, setShowCreateRoomModal] = useState<boolean>(false);
   const [showShareModal, setShowShareModal] = useState<boolean>(false);
   const [showAdminModal, setShowAdminModal] = useState<boolean>(false);
+  const [showExportModal, setShowExportModal] = useState<boolean>(false);
   const [showAiModal, setShowAiModal] = useState<boolean>(false);
   const [showAboutModal, setShowAboutModal] = useState<boolean>(false);
   const [showShortcutsModal, setShowShortcutsModal] = useState<boolean>(false);
@@ -1087,456 +1087,22 @@ export default function App() {
     }
   }, [canWrite, users, elements, emitVoteClearStart, emitClearBoardDirect, addNotification, recordBoardClearHistory]);
 
-  // Export board as PNG (matches the current viewport pan & zoom)
-  const handleExport = useCallback(() => {
-    const canvas = document.createElement('canvas');
-    // Export what the user actually sees: the canvas is docked beside the
-    // sidebar on desktop, so its client box can be narrower than the window.
+  const getExportViewportSnapshot = useCallback((): ExportViewportInfo => {
     const board = document.getElementById('whiteboard-canvas-container');
     const width = board?.clientWidth || window.innerWidth;
     const height = board?.clientHeight || window.innerHeight;
-    const dpr = 2;
-    canvas.width = width * dpr;
-    canvas.height = height * dpr;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
     const viewport = getViewportRef.current?.() ?? { pan: { x: 0, y: 0 }, zoom: 1 };
-    const pan = viewport.pan;
-    const zoom = viewport.zoom > 0 ? viewport.zoom : 1;
-
-    ctx.scale(dpr, dpr);
-
-    // Background
-    ctx.fillStyle = theme === 'dark' ? '#0b0f19' : '#ffffff';
-    ctx.fillRect(0, 0, width, height);
-
-    // Grid, aligned with the current viewport offset
-    const gridSize = 24 * zoom;
-    if (gridSize >= 4) {
-      ctx.strokeStyle = theme === 'dark' ? '#1e293b' : '#f1f5f9';
-      ctx.lineWidth = 1;
-      const startX = ((pan.x % gridSize) + gridSize) % gridSize;
-      const startY = ((pan.y % gridSize) + gridSize) % gridSize;
-      for (let x = startX; x < width; x += gridSize) {
-        ctx.beginPath();
-        ctx.moveTo(x, 0);
-        ctx.lineTo(x, height);
-        ctx.stroke();
-      }
-      for (let y = startY; y < height; y += gridSize) {
-        ctx.beginPath();
-        ctx.moveTo(0, y);
-        ctx.lineTo(width, y);
-        ctx.stroke();
-      }
-    }
-
-    // Enter world space so element coordinates line up with the on-screen canvas
-    ctx.save();
-    ctx.translate(pan.x, pan.y);
-    ctx.scale(zoom, zoom);
-
-    const allElements = Object.values(elements) as CanvasElement[];
-
-    // Word-wrap helper used for sticky notes / shapes / text elements
-    const wrapLines = (text: string, maxWidth: number): string[] => {
-      const result: string[] = [];
-      if (!text) return result;
-      for (const paragraph of text.split('\n')) {
-        if (paragraph === '') {
-          result.push('');
-          continue;
-        }
-        const words = paragraph.split(/\s+/);
-        let current = '';
-        for (const word of words) {
-          const candidate = current ? `${current} ${word}` : word;
-          if (ctx.measureText(candidate).width > maxWidth && current) {
-            result.push(current);
-            current = word;
-          } else {
-            current = candidate;
-          }
-        }
-        if (current) result.push(current);
-      }
-      return result;
+    return {
+      pan: viewport.pan,
+      zoom: viewport.zoom > 0 ? viewport.zoom : 1,
+      width,
+      height,
     };
+  }, []);
 
-    // Draw strokes
-    allElements.forEach((el) => {
-      if (el.type === 'stroke') {
-        const stroke = el as DrawingStroke;
-        const points = stroke.points;
-        if (points.length < 1) return;
-
-        ctx.save();
-        ctx.beginPath();
-        ctx.lineCap = 'round';
-        ctx.lineJoin = 'round';
-        ctx.lineWidth = stroke.isHighlighter ? stroke.size * 2.5 : stroke.size;
-        const strokeColor =
-          theme === 'dark' && isColorBlack(stroke.color)
-            ? '#ffffff'
-            : theme === 'light' && isColorWhite(stroke.color)
-            ? '#0f172a'
-            : stroke.color;
-        ctx.strokeStyle = strokeColor;
-        ctx.globalAlpha = stroke.isHighlighter ? 0.35 : 1.0;
-
-        if (points.length === 1) {
-          ctx.arc(points[0].x, points[0].y, ctx.lineWidth / 2, 0, Math.PI * 2);
-          ctx.fillStyle = strokeColor;
-          ctx.fill();
-        } else {
-          ctx.moveTo(points[0].x, points[0].y);
-          for (let i = 1; i < points.length - 1; i++) {
-            const midX = (points[i].x + points[i + 1].x) / 2;
-            const midY = (points[i].y + points[i + 1].y) / 2;
-            ctx.quadraticCurveTo(points[i].x, points[i].y, midX, midY);
-          }
-          ctx.lineTo(points[points.length - 1].x, points[points.length - 1].y);
-          ctx.stroke();
-        }
-        ctx.restore();
-      }
-    });
-
-    // Draw wires (Line & Curve connectors between objects)
-    allElements.forEach((el) => {
-      if (el.type === 'wire') {
-        const w = el as WireElement;
-        const sourceEl = elements[w.fromId];
-        const targetEl = elements[w.toId];
-        if (!sourceEl || !targetEl) return;
-        const route = routeWire(sourceEl, targetEl, w.wireType || 'curve', w.fromAnchor, w.toAnchor);
-        if (!route) return;
-
-        ctx.save();
-        const effectiveWireColor =
-          theme === 'dark' && isColorBlack(w.color)
-            ? '#ffffff'
-            : theme === 'light' && isColorWhite(w.color)
-            ? '#0f172a'
-            : w.color || '#3b82f6';
-
-        ctx.strokeStyle = effectiveWireColor;
-        ctx.fillStyle = effectiveWireColor;
-        ctx.lineWidth = w.strokeWidth || 3;
-        ctx.lineCap = 'round';
-        ctx.lineJoin = 'round';
-
-        if (w.strokeStyle === 'dashed') {
-          ctx.setLineDash([9, 6]);
-        } else if (w.strokeStyle === 'dotted') {
-          ctx.setLineDash([3, 4]);
-        }
-
-        const path2d = new Path2D(route.svgPath);
-        ctx.stroke(path2d);
-
-        const drawArrowHead = (pt: { x: number; y: number }, angle: number) => {
-          const headLen = Math.max(8, (w.strokeWidth || 3) * 2.5);
-          ctx.beginPath();
-          ctx.moveTo(pt.x, pt.y);
-          ctx.lineTo(pt.x - headLen * Math.cos(angle - Math.PI / 6), pt.y - headLen * Math.sin(angle - Math.PI / 6));
-          ctx.lineTo(pt.x - headLen * Math.cos(angle + Math.PI / 6), pt.y - headLen * Math.sin(angle + Math.PI / 6));
-          ctx.closePath();
-          ctx.fill();
-        };
-
-        // End arrow
-        if (w.arrowEnd !== false) {
-          const endPt = route.toPoint;
-          let angle = 0;
-          if (route.controlPoints) {
-            const cp2 = route.controlPoints[1];
-            angle = Math.atan2(endPt.y - cp2.y, endPt.x - cp2.x);
-          } else {
-            angle = Math.atan2(endPt.y - route.fromPoint.y, endPt.x - route.fromPoint.x);
-          }
-          drawArrowHead(endPt, angle);
-        }
-
-        // Start arrow
-        if (w.arrowStart) {
-          const startPt = route.fromPoint;
-          let angle = 0;
-          if (route.controlPoints) {
-            const cp1 = route.controlPoints[0];
-            angle = Math.atan2(startPt.y - cp1.y, startPt.x - cp1.x);
-          } else {
-            angle = Math.atan2(startPt.y - route.toPoint.y, startPt.x - route.toPoint.x);
-          }
-          drawArrowHead(startPt, angle);
-        }
-
-        // Draw midpoint label if present
-        if (w.label) {
-          ctx.setLineDash([]);
-          ctx.font = 'bold 11px sans-serif';
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'middle';
-          const textMetrics = ctx.measureText(w.label);
-          const bgW = textMetrics.width + 12;
-          const bgH = 18;
-          ctx.fillStyle = theme === 'dark' ? '#0f172a' : '#ffffff';
-          ctx.beginPath();
-          ctx.roundRect(route.midpoint.x - bgW / 2, route.midpoint.y - bgH / 2, bgW, bgH, 9);
-          ctx.fill();
-          ctx.strokeStyle = effectiveWireColor;
-          ctx.lineWidth = 1;
-          ctx.stroke();
-
-          ctx.fillStyle = effectiveWireColor;
-          ctx.fillText(w.label, route.midpoint.x, route.midpoint.y);
-        }
-
-        ctx.restore();
-      }
-    });
-
-    // Draw sticky notes
-    allElements.forEach((el) => {
-      if (el.type === 'sticky') {
-        const note = el as StickyNote;
-        const noteWidth = note.width || 224;
-        const noteHeight = note.height || 150;
-        ctx.save();
-        ctx.fillStyle = note.color || '#fef08a';
-        ctx.strokeStyle = '#e2e8f0';
-        ctx.shadowColor = 'rgba(0,0,0,0.1)';
-        ctx.shadowBlur = 8;
-        ctx.beginPath();
-        ctx.roundRect(note.x, note.y, noteWidth, noteHeight, 8);
-        ctx.fill();
-        ctx.stroke();
-
-        ctx.shadowColor = 'transparent';
-        ctx.fillStyle = theme === 'dark' ? '#0f172a' : '#1e293b';
-        ctx.font = '14px sans-serif';
-        ctx.textAlign = 'left';
-        ctx.textBaseline = 'top';
-        ctx.beginPath();
-        ctx.rect(note.x + 8, note.y + 8, noteWidth - 16, noteHeight - 16);
-        ctx.clip();
-        const lines = wrapLines(note.text || '', noteWidth - 24);
-        lines.forEach((line, idx) => {
-          ctx.fillText(line, note.x + 12, note.y + 18 + idx * 18);
-        });
-        ctx.restore();
-      }
-    });
-
-    // Draw text elements
-    allElements.forEach((el) => {
-      if (el.type === 'text') {
-        const t = el as TextElement;
-        ctx.save();
-        const textColor =
-          theme === 'dark' && (!t.color || isColorBlack(t.color))
-            ? '#ffffff'
-            : theme === 'light' && isColorWhite(t.color)
-            ? '#0f172a'
-            : t.color || '#0f172a';
-        const fontSize = t.fontSize || 18;
-        const fontStyle = t.fontStyle || 'normal';
-        const fontWeight = t.fontWeight || 'normal';
-        ctx.fillStyle = textColor;
-        ctx.font = `${fontStyle} ${fontWeight} ${fontSize}px ${t.fontFamily || 'sans-serif'}`;
-        ctx.textBaseline = 'top';
-        ctx.textAlign = t.textAlign || 'left';
-
-        const lines = (t.text || '').split('\n');
-        const maxWidth = Math.max(
-          0,
-          ...lines.map((line) => ctx.measureText(line || ' ').width)
-        );
-        let anchorX = t.x;
-        if (t.textAlign === 'center') anchorX = t.x + maxWidth / 2;
-        else if (t.textAlign === 'right') anchorX = t.x + maxWidth;
-
-        const lineHeight = fontSize * 1.25;
-        lines.forEach((line, idx) => {
-          const lineY = t.y + idx * lineHeight;
-          ctx.fillText(line, anchorX, lineY);
-          if (t.textDecoration === 'underline' && line) {
-            const lineWidth = ctx.measureText(line).width;
-            let startX = anchorX;
-            if (t.textAlign === 'center') startX = anchorX - lineWidth / 2;
-            else if (t.textAlign === 'right') startX = anchorX - lineWidth;
-            ctx.beginPath();
-            ctx.strokeStyle = textColor;
-            ctx.lineWidth = Math.max(1, fontSize / 14);
-            ctx.moveTo(startX, lineY + fontSize + 1);
-            ctx.lineTo(startX + lineWidth, lineY + fontSize + 1);
-            ctx.stroke();
-          }
-        });
-        ctx.restore();
-      }
-    });
-
-    // Draw shapes
-    allElements.forEach((el) => {
-      if (el.type === 'shape') {
-        const s = el as ShapeElement;
-        ctx.save();
-        ctx.globalAlpha = typeof s.opacity === 'number' ? s.opacity : 1;
-        if (s.rotation) {
-          const cx = s.x + s.width / 2;
-          const cy = s.y + s.height / 2;
-          ctx.translate(cx, cy);
-          ctx.rotate((s.rotation * Math.PI) / 180);
-          ctx.translate(-cx, -cy);
-        }
-        ctx.strokeStyle = s.color || '#0f172a';
-        ctx.fillStyle = s.fillColor && s.fillColor !== 'transparent' ? s.fillColor : 'transparent';
-        ctx.lineWidth = s.strokeWidth || 3;
-        ctx.lineJoin = 'round';
-        if (s.strokeStyle === 'dashed') {
-          ctx.setLineDash([9, 6]);
-        } else if (s.strokeStyle === 'dotted') {
-          ctx.setLineDash([3, 4]);
-        }
-        ctx.beginPath();
-
-        if (s.shapeType === 'rectangle') {
-          ctx.roundRect(s.x, s.y, s.width, s.height, 8);
-        } else if (s.shapeType === 'circle') {
-          ctx.ellipse(s.x + s.width / 2, s.y + s.height / 2, s.width / 2, s.height / 2, 0, 0, Math.PI * 2);
-        } else if (s.shapeType === 'diamond') {
-          ctx.moveTo(s.x + s.width / 2, s.y);
-          ctx.lineTo(s.x + s.width, s.y + s.height / 2);
-          ctx.lineTo(s.x + s.width / 2, s.y + s.height);
-          ctx.lineTo(s.x, s.y + s.height / 2);
-          ctx.closePath();
-        } else if (s.shapeType === 'triangle') {
-          ctx.moveTo(s.x + s.width / 2, s.y);
-          ctx.lineTo(s.x + s.width, s.y + s.height);
-          ctx.lineTo(s.x, s.y + s.height);
-          ctx.closePath();
-        } else if (s.shapeType === 'star') {
-          const spikes = 5;
-          const outerR = Math.min(s.width, s.height) / 2;
-          const innerR = outerR * 0.45;
-          const cx = s.x + s.width / 2;
-          const cy = s.y + s.height / 2;
-          for (let i = 0; i < spikes * 2; i++) {
-            const r = i % 2 === 0 ? outerR : innerR;
-            const a = (Math.PI / spikes) * i - Math.PI / 2;
-            const px = cx + Math.cos(a) * r;
-            const py = cy + Math.sin(a) * r;
-            if (i === 0) ctx.moveTo(px, py);
-            else ctx.lineTo(px, py);
-          }
-          ctx.closePath();
-        } else if (s.shapeType === 'arrow') {
-          const arrowH = s.height * 0.4;
-          const headW = Math.min(s.width * 0.4, s.height * 0.8);
-          const yCenter = s.y + s.height / 2;
-          ctx.moveTo(s.x, yCenter - arrowH / 2);
-          ctx.lineTo(s.x + s.width - headW, yCenter - arrowH / 2);
-          ctx.lineTo(s.x + s.width - headW, s.y);
-          ctx.lineTo(s.x + s.width, yCenter);
-          ctx.lineTo(s.x + s.width - headW, s.y + s.height);
-          ctx.lineTo(s.x + s.width - headW, yCenter + arrowH / 2);
-          ctx.lineTo(s.x, yCenter + arrowH / 2);
-          ctx.closePath();
-        } else {
-          ctx.rect(s.x, s.y, s.width, s.height);
-        }
-
-        if (s.fillColor && s.fillColor !== 'transparent') ctx.fill();
-        ctx.stroke();
-
-        if (s.text) {
-          const fontSize = s.fontSize || 16;
-          ctx.setLineDash([]);
-          ctx.fillStyle = s.textColor || (theme === 'dark' ? '#f8fafc' : '#0f172a');
-          ctx.font = `normal ${fontSize}px sans-serif`;
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'middle';
-          ctx.beginPath();
-          ctx.rect(s.x + 6, s.y + 6, Math.max(0, s.width - 12), Math.max(0, s.height - 12));
-          ctx.clip();
-          const lines = wrapLines(s.text, Math.max(10, s.width - 16));
-          const lineHeight = fontSize * 1.25;
-          const startY = s.y + s.height / 2 - ((lines.length - 1) * lineHeight) / 2;
-          lines.forEach((line, idx) => {
-            ctx.fillText(line, s.x + s.width / 2, startY + idx * lineHeight);
-          });
-        }
-
-        ctx.restore();
-      }
-    });
-
-    // Draw icons
-    allElements.forEach((el) => {
-      if (el.type === 'icon') {
-        const ic = el as IconElement;
-        const boxSize = ic.size + 16;
-        const cx = ic.x + boxSize / 2;
-        const cy = ic.y + boxSize / 2;
-        ctx.save();
-        ctx.globalAlpha = typeof ic.opacity === 'number' ? ic.opacity : 1;
-        ctx.translate(cx, cy);
-        if (ic.rotation) ctx.rotate((ic.rotation * Math.PI) / 180);
-        if (ic.flipH || ic.flipV) ctx.scale(ic.flipH ? -1 : 1, ic.flipV ? -1 : 1);
-
-        // Background shape
-        if (ic.bgShape && ic.bgShape !== 'none') {
-          ctx.fillStyle = ic.bgColor || 'rgba(148, 163, 184, 0.2)';
-          ctx.beginPath();
-          if (ic.bgShape === 'circle') {
-            ctx.arc(0, 0, boxSize / 2, 0, Math.PI * 2);
-          } else if (ic.bgShape === 'square') {
-            ctx.rect(-boxSize / 2, -boxSize / 2, boxSize, boxSize);
-          } else {
-            ctx.roundRect(-boxSize / 2, -boxSize / 2, boxSize, boxSize, 8);
-          }
-          ctx.fill();
-        }
-
-        ctx.fillStyle = ic.color || '#3b82f6';
-        ctx.font = `bold ${Math.max(16, ic.size * 0.65)}px sans-serif`;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        const emojiMap: Record<string, string> = {
-          star: '⭐',
-          heart: '❤️',
-          sparkles: '✨',
-          flame: '🔥',
-          lightbulb: '💡',
-          user: '👤',
-          cloud: '☁️',
-          database: '🗄️',
-          code: '💻',
-          shield: '🛡️',
-          message: '💬',
-          'thumbs-up': '👍',
-          alert: '⚠️',
-          rocket: '🚀',
-          smile: '😊',
-          compass: '🧭',
-          check: '✅',
-        };
-        const symbol = emojiMap[ic.iconName] || '★';
-        ctx.fillText(symbol, 0, 0);
-        ctx.restore();
-      }
-    });
-
-    ctx.restore();
-
-    const link = document.createElement('a');
-    link.download = `whiteboard-${roomId}.png`;
-    link.href = canvas.toDataURL('image/png');
-    link.click();
-    addNotification('Whiteboard exported as PNG', 'success');
-  }, [elements, roomId, addNotification, theme]);
+  const handleExport = useCallback(() => {
+    setShowExportModal(true);
+  }, []);
 
   const isMultiplayer = Object.keys(users).length > 1;
 
@@ -1623,6 +1189,7 @@ export default function App() {
     showCreateRoomModal ||
     showShareModal ||
     showAdminModal ||
+    showExportModal ||
     showAiModal ||
     isAiChatOpen ||
     confirmModalState.isOpen ||
@@ -1880,6 +1447,20 @@ export default function App() {
           isOpen={showAboutModal}
           onClose={() => setShowAboutModal(false)}
           onOpenAiModal={whiteboardActions.actions.aiDiagram.handler}
+        />
+      </ErrorBoundary>
+
+      {/* Export & Preview Modal */}
+      <ErrorBoundary fallbackTitle="Export Dialog">
+        <ExportModal
+          isOpen={showExportModal}
+          onClose={() => setShowExportModal(false)}
+          elements={elements}
+          roomId={roomId}
+          roomName={roomName}
+          theme={theme}
+          getViewportSnapshot={getExportViewportSnapshot}
+          onExportSuccess={(message, variant = 'success') => addNotification(message, variant)}
         />
       </ErrorBoundary>
 

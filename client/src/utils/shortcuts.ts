@@ -73,6 +73,7 @@ export const SHORTCUT_SECTIONS: ShortcutSection[] = [
       { keys: ['+'], label: 'Zoom in' },
       { keys: ['−'], label: 'Zoom out' },
       { keys: ['0'], label: 'Reset zoom & position' },
+      { keys: [MOD_KEY, 'Shift', 'E'], label: 'Export preview', description: 'Download PNG, SVG, JPEG, WebP, or JSON' },
       { keys: ['?'], label: 'Open this cheat sheet' },
     ],
   },
