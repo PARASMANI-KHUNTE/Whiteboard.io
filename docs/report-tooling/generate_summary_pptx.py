@@ -20,7 +20,7 @@ TOOLING_DIR = os.path.dirname(os.path.abspath(__file__))
 DOCS_DIR = os.path.dirname(TOOLING_DIR)
 OUTPUT_PPTX = os.path.join(DOCS_DIR, "Whiteboard_io_Presentation.pptx")
 
-TOTAL_SLIDES = 10
+TOTAL_SLIDES = 11
 
 # Color tokens
 BG_DARK = RGBColor(11, 19, 43)           # #0B132B
@@ -383,8 +383,123 @@ def render_db_schema_diagram(path):
 
 
 # ==============================================================================
-# 10 SLIDE BUILDERS
+# 11 SLIDE BUILDERS
 # ==============================================================================
+
+def build_slide_0_academic_title(prs):
+    """Slide 1 – Professional academic title / cover page."""
+    slide = blank_slide(prs, BG_DARK)
+
+    # ── Top decorative accent bar ──────────────────────────────────────────
+    bar = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, 0, 0, Inches(13.333), Inches(0.065))
+    bar.fill.solid()
+    bar.fill.fore_color.rgb = CYAN
+    bar.line.fill.background()
+
+    # ── Institution / Department pill (top-center) ─────────────────────────
+    add_pill(
+        slide,
+        Inches(3.9), Inches(0.22),
+        Inches(5.5), Inches(0.32),
+        "DEPARTMENT OF COMPUTER APPLICATIONS",
+        RGBColor(10, 30, 70), CYAN,
+        border_color=CYAN, font_size=8.5,
+    )
+
+    # ── Main outer card ────────────────────────────────────────────────────
+    add_card(slide, Inches(0.55), Inches(0.70), Inches(12.23), Inches(6.05),
+             fill_color=CARD_DARK, border_color=BORDER_DARK, radius=0.04, border_width=1.5)
+
+    # ── Minor Project badge ────────────────────────────────────────────────
+    add_pill(
+        slide,
+        Inches(5.52), Inches(0.95),
+        Inches(2.3), Inches(0.28),
+        "MINOR PROJECT",
+        RGBColor(26, 48, 96), AMBER,
+        border_color=AMBER, font_size=8.5,
+    )
+
+    # ── Project title ──────────────────────────────────────────────────────
+    tf_title = add_text_box(
+        slide,
+        Inches(0.90), Inches(1.42),
+        Inches(11.53), Inches(0.70),
+        "Whiteboard.io",
+        font_size=48, color=TEXT_LIGHT, bold=True, align=PP_ALIGN.CENTER,
+    )
+
+    # ── Project subtitle ───────────────────────────────────────────────────
+    add_text_box(
+        slide,
+        Inches(0.90), Inches(2.14),
+        Inches(11.53), Inches(0.42),
+        "Real-Time Distributed Collaborative Whiteboard Platform",
+        font_size=15, color=CYAN, bold=False, align=PP_ALIGN.CENTER,
+    )
+    add_text_box(
+        slide,
+        Inches(0.90), Inches(2.55),
+        Inches(11.53), Inches(0.28),
+        "WebRTC Voice Mesh  •  Generative AI Diagramming  •  Socket.io Canvas Sync",
+        font_size=10, color=TEXT_DARK_MUTED, bold=False, align=PP_ALIGN.CENTER,
+    )
+
+    # ── Horizontal divider ─────────────────────────────────────────────────
+    div = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, Inches(1.80), Inches(2.98), Inches(9.73), Inches(0.012))
+    div.fill.solid()
+    div.fill.fore_color.rgb = BORDER_DARK
+    div.line.fill.background()
+
+    # ── Academic details: Program / Semester / Year row ───────────────────
+    add_pill(slide, Inches(1.90), Inches(3.12), Inches(3.60), Inches(0.28),
+             "Master of Computer Applications (MCA)", RGBColor(14, 26, 60), TEXT_LIGHT_SUB,
+             border_color=BORDER_DARK, font_size=8.5)
+    add_pill(slide, Inches(5.65), Inches(3.12), Inches(2.0), Inches(0.28),
+             "Semester 3", RGBColor(14, 26, 60), TEXT_LIGHT_SUB,
+             border_color=BORDER_DARK, font_size=8.5)
+    add_pill(slide, Inches(7.80), Inches(3.12), Inches(2.0), Inches(0.28),
+             "Session: 2025–2026", RGBColor(14, 26, 60), TEXT_DARK_MUTED,
+             border_color=BORDER_DARK, font_size=8.5)
+
+    # ── Two-column student / mentor block ──────────────────────────────────
+    # Left card – Student
+    add_card(slide, Inches(0.80), Inches(3.56), Inches(5.60), Inches(2.60),
+             fill_color=CARD_DARK_ALT, border_color=BLUE, radius=0.10, border_width=1)
+    add_pill(slide, Inches(0.98), Inches(3.70), Inches(1.8), Inches(0.26),
+             "SUBMITTED BY", RGBColor(26, 48, 96), BLUE, border_color=BLUE, font_size=7.5)
+    add_text_box(slide, Inches(0.98), Inches(4.04), Inches(5.22), Inches(0.38),
+                 "Parasmani Khunte", font_size=20, color=TEXT_LIGHT, bold=True)
+    add_text_box(slide, Inches(0.98), Inches(4.44), Inches(5.22), Inches(0.26),
+                 "Roll Number: 43", font_size=10.5, color=CYAN)
+    add_text_box(slide, Inches(0.98), Inches(4.72), Inches(5.22), Inches(0.26),
+                 "MCA – Department of Computer Applications", font_size=9.5, color=TEXT_DARK_MUTED)
+    add_text_box(slide, Inches(0.98), Inches(4.98), Inches(5.22), Inches(0.24),
+                 "Academic Year 2025–2026", font_size=9, color=TEXT_DARK_MUTED)
+
+    # Right card – Mentor
+    add_card(slide, Inches(6.95), Inches(3.56), Inches(5.60), Inches(2.60),
+             fill_color=CARD_DARK_ALT, border_color=EMERALD, radius=0.10, border_width=1)
+    add_pill(slide, Inches(7.13), Inches(3.70), Inches(1.8), Inches(0.26),
+             "PROJECT MENTOR", RGBColor(16, 50, 40), EMERALD, border_color=EMERALD, font_size=7.5)
+    add_text_box(slide, Inches(7.13), Inches(4.04), Inches(5.22), Inches(0.38),
+                 "Amitesh Kumar Jha", font_size=20, color=TEXT_LIGHT, bold=True)
+    add_text_box(slide, Inches(7.13), Inches(4.44), Inches(5.22), Inches(0.26),
+                 "Assistant Professor & Project Mentor", font_size=10.5, color=EMERALD)
+    add_text_box(slide, Inches(7.13), Inches(4.72), Inches(5.22), Inches(0.26),
+                 "Department of Computer Applications", font_size=9.5, color=TEXT_DARK_MUTED)
+
+    # ── Bottom accent bar ──────────────────────────────────────────────────
+    bbar = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, 0, Inches(7.435), Inches(13.333), Inches(0.065))
+    bbar.fill.solid()
+    bbar.fill.fore_color.rgb = BLUE
+    bbar.line.fill.background()
+
+    # Footer label (no page number on title slide — just branding)
+    add_text_box(slide, Inches(0.65), Inches(7.02), Inches(12.03), Inches(0.30),
+                 "Whiteboard.io  •  Minor Project  •  Department of Computer Applications  •  MCA Semester 3  •  2025–2026",
+                 font_size=8, color=TEXT_DARK_MUTED, align=PP_ALIGN.CENTER)
+
 
 def build_slide_1_cover(prs):
     slide = blank_slide(prs, BG_DARK)
@@ -461,7 +576,7 @@ def build_slide_1_cover(prs):
         color=TEXT_DARK_MUTED,
         align=PP_ALIGN.CENTER,
     )
-    add_footer(slide, 1, dark=True)
+    add_footer(slide, 2, dark=True)
 
 
 def build_slide_2_tech_stack(prs):
@@ -527,7 +642,7 @@ def build_slide_2_tech_stack(prs):
         if idx < len(pipeline) - 1:
             add_arrow(slide, Inches(10.97), cy + Inches(0.64), Inches(0.20), Inches(0.21), color=acc, direction="down")
 
-    add_footer(slide, 2)
+    add_footer(slide, 3)
 
 
 def build_slide_3_features(prs):
@@ -597,7 +712,7 @@ def build_slide_3_features(prs):
             p.font.color.rgb = TEXT_DARK_BODY
             p.space_after = Pt(7)
 
-    add_footer(slide, 3)
+    add_footer(slide, 4)
 
 
 def build_slide_4_architecture(prs, arch_img_path):
@@ -621,7 +736,7 @@ def build_slide_4_architecture(prs, arch_img_path):
         add_text_box(slide, x + Inches(0.16), y + Inches(0.08), Inches(3.50), Inches(0.24), t, font_size=10, color=accent, bold=True)
         add_text_box(slide, x + Inches(0.16), y + Inches(0.32), Inches(3.50), Inches(0.34), d, font_size=8.6, color=TEXT_DARK_BODY)
 
-    add_footer(slide, 4)
+    add_footer(slide, 5)
 
 
 def build_slide_5_realtime_flow(prs):
@@ -685,7 +800,7 @@ def build_slide_5_realtime_flow(prs):
             add_arrow(slide, sx + Inches(1.59), Inches(5.16), Inches(0.22), Inches(0.22), color=EMERALD)
     add_text_box(slide, Inches(7.08), Inches(6.02), Inches(5.35), Inches(0.50), "Solo boards survive browser refreshes offline and upgrade seamlessly to live rooms via Share & Go Live.", font_size=9.2, color=TEXT_MUTED)
 
-    add_footer(slide, 5)
+    add_footer(slide, 6)
 
 
 def build_slide_6_ai_pipeline(prs, ai_img_path):
@@ -707,7 +822,7 @@ def build_slide_6_ai_pipeline(prs, ai_img_path):
         add_text_box(slide, x + Inches(0.15), y + Inches(0.07), Inches(3.52), Inches(0.22), t, font_size=9.5, color=accent, bold=True)
         add_text_box(slide, x + Inches(0.15), y + Inches(0.30), Inches(3.52), Inches(0.28), d, font_size=8.3, color=TEXT_DARK_BODY)
 
-    add_footer(slide, 6)
+    add_footer(slide, 7)
 
 
 def build_slide_7_voice_auth_export(prs):
@@ -773,7 +888,7 @@ def build_slide_7_voice_auth_export(prs):
 
     add_text_box(slide, Inches(6.90), Inches(6.18), Inches(5.53), Inches(0.42), "Includes 1x–3x scale selector, checkerboard alpha preview, 4096px raster guard & clipboard copy.", font_size=8.8, color=TEXT_MUTED)
 
-    add_footer(slide, 7)
+    add_footer(slide, 8)
 
 
 def build_slide_8_database(prs, db_img_path):
@@ -795,7 +910,7 @@ def build_slide_8_database(prs, db_img_path):
         add_text_box(slide, x + Inches(0.15), y + Inches(0.07), Inches(3.52), Inches(0.22), t, font_size=9.5, color=accent, bold=True)
         add_text_box(slide, x + Inches(0.15), y + Inches(0.30), Inches(3.52), Inches(0.28), d, font_size=8.3, color=TEXT_DARK_BODY)
 
-    add_footer(slide, 8)
+    add_footer(slide, 9)
 
 
 def build_slide_9_use_cases(prs):
@@ -840,7 +955,7 @@ def build_slide_9_use_cases(prs):
             if s_i < 2:
                 add_arrow(slide, sx + Inches(1.59), sy + Inches(0.45), Inches(0.21), Inches(0.20), color=accent)
 
-    add_footer(slide, 9)
+    add_footer(slide, 10)
 
 
 def build_slide_10_limitations_roadmap(prs):
@@ -885,11 +1000,11 @@ def build_slide_10_limitations_roadmap(prs):
         align=PP_ALIGN.CENTER,
     )
 
-    add_footer(slide, 10, dark=True)
+    add_footer(slide, 11, dark=True)
 
 
 def main():
-    print("Generating Whiteboard.io 10-page presentation...")
+    print("Generating Whiteboard.io 11-page presentation...")
     prs = init_deck()
 
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -901,6 +1016,7 @@ def main():
         render_ai_pipeline_diagram(ai_png)
         render_db_schema_diagram(db_png)
 
+        build_slide_0_academic_title(prs)
         build_slide_1_cover(prs)
         build_slide_2_tech_stack(prs)
         build_slide_3_features(prs)
