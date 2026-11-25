@@ -33,13 +33,14 @@ import { ShortcutsModal } from './components/ShortcutsModal';
 import { ConfirmModal } from './components/ConfirmModal';
 import { AiGenerateModal } from './components/AiGenerateModal';
 import { AiChatPanel } from './components/AiChatPanel';
+import { WelcomeHintToast } from './components/WelcomeHintToast';
 import { getAiChatActionMeta } from './components/ui/aiActions';
 import { fetchAiEngine } from './ai/api';
 import { formatAiEngineDisplay } from './ai/providerLabels';
 import { buildGlobalAiContext } from './ai/sessionContext';
 import { diffAiElements, type AiElementDiffResult } from './ai/elementDiff';
 import { ErrorBoundary } from './components/ErrorBoundary';
-import { Info, Sparkles, AlertCircle, CheckCircle2, UserX, X } from 'lucide-react';
+import { Info, AlertCircle, CheckCircle2, UserX, X } from 'lucide-react';
 import { isColorBlack, isColorWhite } from './utils/themeColors';
 import { shouldRecolorBoardOnThemeToggle } from './utils/themeBoardEdit';
 import { routeWire } from './utils/wireGeometry';
@@ -1983,31 +1984,11 @@ export default function App() {
         </div>
       )}
 
-      {/* Quick Start Prompt & Instructions (Auto dismissible, hidden on mobile) */}
-      {showWelcomeHint && (
-        <div
-          id="welcome-hint-pill"
-          className="hidden sm:block fixed top-20 left-6 z-30 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xl rounded-2xl p-4 max-w-xs text-xs text-slate-700 dark:text-slate-200 animate-in fade-in duration-300 select-none"
-        >
-          <div className="flex items-start justify-between gap-2">
-            <div className="flex items-center gap-1.5 font-semibold text-slate-900 dark:text-white">
-              <Sparkles className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
-              <span>Real-time Whiteboard</span>
-            </div>
-            <button
-              type="button"
-              aria-label="Dismiss welcome hint"
-              onClick={() => setShowWelcomeHint(false)}
-              className="text-slate-400 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-200 text-xs font-bold cursor-pointer"
-            >
-              <X className="w-3.5 h-3.5" />
-            </button>
-          </div>
-          <p className="mt-1.5 text-slate-500 dark:text-slate-400 leading-relaxed">
-            Click <strong className="text-slate-700 dark:text-slate-200 font-semibold">Share</strong> to invite friends via room code or link. Room creators can manage participants and toggle write permissions.
-          </p>
-        </div>
-      )}
+      {/* Brief onboarding toast (8s auto-dismiss, pauses on hover) */}
+      <WelcomeHintToast
+        isOpen={showWelcomeHint && !isBlockingOverlayOpen}
+        onDismiss={() => setShowWelcomeHint(false)}
+      />
 
       {/* Floating System Notifications */}
       <div
