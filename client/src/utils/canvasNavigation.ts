@@ -105,7 +105,7 @@ export function computeSafeViewportInsets(
   const top = 84;
   const left = isSidebarOpen && viewportW >= 1024 ? 280 : 32;
   const right = isAiChatOpen && viewportW >= 640 ? Math.min(440, Math.round(viewportW * 0.45)) : 32;
-  const bottom = isAiChatOpen && viewportW < 640 ? Math.max(96, Math.round(viewportH * 0.66)) : 96;
+  const bottom = isAiChatOpen && viewportW < 640 ? Math.max(96, Math.round(viewportH * 0.66)) : 56;
 
   return { top, right, bottom, left };
 }

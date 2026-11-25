@@ -36,7 +36,7 @@ export const ZoomControls: React.FC<ZoomControlsProps> = ({
   return (
     <div
       id="whiteboard-zoom-controls"
-      className="fixed bottom-20 sm:bottom-6 left-3 sm:left-4 z-40 wb-surface-glass rounded-2xl p-1 sm:p-1.5 flex items-center gap-0.5 sm:gap-1 select-none pointer-events-auto transition-all text-slate-700 dark:text-slate-200 wb-bottom-chat-aware wb-bottom-zoom shadow-xl"
+      className="fixed bottom-4 sm:bottom-6 left-3 sm:left-4 z-40 wb-surface-glass rounded-2xl p-1 sm:p-1.5 flex items-center gap-0.5 sm:gap-1 select-none pointer-events-auto transition-all text-slate-700 dark:text-slate-200 wb-bottom-chat-aware wb-bottom-zoom shadow-xl"
     >
       {/* Hand / Pan Toggle Button (sourced from shared tool registry) */}
       {handHandler && (

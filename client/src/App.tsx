@@ -20,7 +20,6 @@ import { useTouchPointerBridge } from './hooks/useTouchPointerBridge';
 import { useWhiteboardActions } from './hooks/useWhiteboardActions';
 import { Header } from './components/Header';
 import Sidebar from './components/Sidebar';
-import { Toolbar } from './components/Toolbar';
 import { Canvas } from './components/Canvas';
 import { VoteToClearModal } from './components/VoteToClearModal';
 import { AuthModal } from './components/AuthModal';
@@ -117,7 +116,9 @@ export default function App() {
   const [showShortcutsModal, setShowShortcutsModal] = useState<boolean>(false);
   const [aiSession, setAiSession] = useState<AiSessionState | null>(null);
   const [isAiChatOpen, setIsAiChatOpen] = useState<boolean>(false);
-  const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(false);
+  const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(() =>
+    typeof window !== 'undefined' ? window.matchMedia('(min-width: 1024px)').matches : true
+  );
   const sidebarToggleRef = useRef<HTMLButtonElement | null>(null);
 
   // Lets shared CSS lift bottom chrome above the mobile AI chat sheet.
@@ -1621,20 +1622,13 @@ export default function App() {
         roomId={roomId}
         isSoloMode={isSoloMode}
         roomName={roomName}
-        creatorName={creatorName}
-        currentUser={currentUser}
         users={users}
         isConnected={isConnected}
-        isHost={isHost}
         canWrite={canWrite}
         isLocked={isLocked}
-        authUser={authUser}
         actions={whiteboardActions}
         isSidebarOpen={isSidebarOpen}
         sidebarToggleRef={sidebarToggleRef}
-        onSwitchRoom={switchRoom}
-        theme={theme}
-        isAiChatOpen={isAiChatOpen}
         isVoiceConnected={isVoiceConnected}
         isMuted={isMuted}
         isDeafened={isDeafened}
@@ -1654,14 +1648,28 @@ export default function App() {
         onAudioLevelChange={emitAudioLevel}
       />
 
-      {/* Grouped controls rail — keeps the canvas uncluttered while every action stays reachable. */}
+      {/* Unified controls rail & style palette */}
       <Sidebar
         actions={whiteboardActions}
         theme={theme}
         isVoiceConnected={isVoiceConnected}
+        isSoloMode={isSoloMode}
+        isGuestOrSignedOut={!authUser || authUser.isGuest}
         isOpen={isSidebarOpen}
         onClose={() => setIsSidebarOpen(false)}
         toggleButtonRef={sidebarToggleRef}
+        currentTool={currentTool}
+        currentColor={currentColor}
+        currentSize={currentSize}
+        canWrite={canWrite}
+        selectedShapeType={selectedShapeType}
+        selectedIconName={selectedIconName}
+        selectedWireStyle={selectedWireStyle}
+        onSelectColor={setCurrentColor}
+        onSelectSize={setCurrentSize}
+        onSelectShape={setSelectedShapeType}
+        onSelectIcon={setSelectedIconName}
+        onSelectWireStyle={setSelectedWireStyle}
       />
 
       {/* Main Interactive Canvas Area */}
@@ -1717,23 +1725,6 @@ export default function App() {
         onRegisterGetViewport={(fn) => {
           getViewportRef.current = fn;
         }}
-      />
-
-      {/* Bottom Floating Toolbar */}
-      <Toolbar
-        actions={whiteboardActions}
-        currentTool={currentTool}
-        currentColor={currentColor}
-        currentSize={currentSize}
-        canWrite={canWrite}
-        selectedShapeType={selectedShapeType}
-        selectedIconName={selectedIconName}
-        selectedWireStyle={selectedWireStyle}
-        onSelectColor={setCurrentColor}
-        onSelectSize={setCurrentSize}
-        onSelectShape={setSelectedShapeType}
-        onSelectIcon={setSelectedIconName}
-        onSelectWireStyle={setSelectedWireStyle}
       />
 
       {/* Vote to Clear Modal Banner */}
@@ -1914,7 +1905,7 @@ export default function App() {
             onClick={reopenAiChat}
             title={reopenMeta.title}
             aria-label={reopenMeta.ariaLabel}
-            className="fixed bottom-[calc(env(safe-area-inset-bottom,0px)+5.5rem)] sm:bottom-5 right-5 z-30 inline-flex items-center gap-2 rounded-full bg-gradient-to-tr from-indigo-600 to-violet-600 px-4 py-3 text-xs font-semibold text-white shadow-xl shadow-indigo-500/30 hover:from-indigo-500 hover:to-violet-500 active:scale-95 transition-all cursor-pointer"
+            className="fixed bottom-[calc(env(safe-area-inset-bottom,0px)+4.25rem)] sm:bottom-20 right-3 sm:right-4 z-30 inline-flex items-center gap-2 rounded-full bg-gradient-to-tr from-indigo-600 to-violet-600 px-4 py-3 text-xs font-semibold text-white shadow-xl shadow-indigo-500/30 hover:from-indigo-500 hover:to-violet-500 active:scale-95 transition-all cursor-pointer"
           >
             <ReopenIcon className="w-4 h-4" />
             {reopenMeta.compactLabel}
