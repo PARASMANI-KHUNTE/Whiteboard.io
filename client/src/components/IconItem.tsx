@@ -30,6 +30,8 @@ interface IconItemProps {
   onMoveSelectionStart?: () => void;
   onMoveSelection?: (deltaX: number, deltaY: number) => void;
   onMoveSelectionEnd?: () => void;
+  onResolveSnap?: (element: IconElement, x: number, y: number, skipSnap: boolean) => { x: number; y: number };
+  onSnapEnd?: () => void;
 }
 
 const SIZES = [
@@ -52,6 +54,8 @@ export const IconItem: React.FC<IconItemProps> = ({
   onMoveSelectionStart,
   onMoveSelection,
   onMoveSelectionEnd,
+  onResolveSnap,
+  onSnapEnd,
 }) => {
   const [localPos, setLocalPos] = useState<{ x: number; y: number }>({ x: element.x, y: element.y });
   const [localSize, setLocalSize] = useState<number>(element.size || 48);
@@ -166,8 +170,14 @@ export const IconItem: React.FC<IconItemProps> = ({
     const handleMouseMove = (moveEvent: MouseEvent) => {
       const deltaX = (moveEvent.clientX - startX) / (zoom || 1);
       const deltaY = (moveEvent.clientY - startY) / (zoom || 1);
-      const newX = initialPos.x + deltaX;
-      const newY = initialPos.y + deltaY;
+      const rawX = initialPos.x + deltaX;
+      const rawY = initialPos.y + deltaY;
+      const snapped =
+        !moveWholeSelection && onResolveSnap
+          ? onResolveSnap(dragElement, rawX, rawY, moveEvent.altKey)
+          : { x: rawX, y: rawY };
+      const newX = snapped.x;
+      const newY = snapped.y;
 
       currentPosRef.current = { x: newX, y: newY };
       setLocalPos({ x: newX, y: newY });
@@ -191,6 +201,7 @@ export const IconItem: React.FC<IconItemProps> = ({
 
     const handleMouseUp = () => {
       setIsDragging(false);
+      onSnapEnd?.();
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
       if (moveWholeSelection) {

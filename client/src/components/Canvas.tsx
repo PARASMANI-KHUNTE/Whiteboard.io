@@ -71,6 +71,7 @@ import {
 import { finalizeStrokeForCommit } from '../utils/strokeCommit';
 import { blameOverlayColor, getEffectiveAttribution } from '../utils/attributionColor';
 import { findHoveredElementAtPoint } from '../utils/attributionHitTest';
+import { computeSnapAndGuides, type AlignmentGuide } from '../utils/alignmentGuides';
 
 interface CanvasProps {
   currentTool: ToolType;
@@ -121,6 +122,8 @@ interface CanvasProps {
   onCloseShortcuts?: () => void;
   /** Blame mode: whether author colour overlays are active. */
   blameMode?: boolean;
+  /** Optional snap-to-grid when dragging positioned elements. */
+  snapToGrid?: boolean;
   /** Blame mode: callback to get blame overlay colour for an element (null = off). */
   blameColorFor?: (el: CanvasElement) => string | null;
   /** Attribution hover: called when pointer hovers/clicks an element. */
@@ -176,12 +179,14 @@ export const Canvas: React.FC<CanvasProps> = ({
   isShortcutsOpen = false,
   onCloseShortcuts,
   blameMode = false,
+  snapToGrid = false,
   blameColorFor,
   onAttributionEnter,
   onAttributionLeave,
 }) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const [alignmentGuides, setAlignmentGuides] = useState<AlignmentGuide[]>([]);
 
   // Pan, Zoom & Viewport state
   const [pan, setPan] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
@@ -2231,6 +2236,39 @@ export const Canvas: React.FC<CanvasProps> = ({
     finishStroke();
   };
 
+  const clearSnapGuides = useCallback(() => {
+    setAlignmentGuides((prev) => (prev.length === 0 ? prev : []));
+  }, []);
+
+  const resolveDragSnap = useCallback(
+    (el: CanvasElement, rawX: number, rawY: number, skipSnap: boolean) => {
+      const bounds = getElementBounds(el);
+      const others = (Object.values(elementsRef.current) as CanvasElement[]).filter(
+        (candidate) =>
+          candidate.type === 'sticky' ||
+          candidate.type === 'text' ||
+          candidate.type === 'shape' ||
+          candidate.type === 'icon'
+      );
+      const result = computeSnapAndGuides({
+        movingId: el.id,
+        candidateBounds: {
+          x: rawX,
+          y: rawY,
+          width: bounds.width,
+          height: bounds.height,
+        },
+        positionedElements: others,
+        zoom: zoomRef.current,
+        snapToGrid,
+        disableSnap: skipSnap,
+      });
+      setAlignmentGuides(result.guides);
+      return { x: result.x, y: result.y };
+    },
+    [snapToGrid]
+  );
+
   // Partition elements once per update instead of running five separate
   // full-array filters on every render.
   const { wireElements, positionedElements } = useMemo(() => {
@@ -2506,6 +2544,8 @@ export const Canvas: React.FC<CanvasProps> = ({
                 onMoveSelectionStart={beginSelectionDrag}
                 onMoveSelection={moveSelectionByDelta}
                 onMoveSelectionEnd={endSelectionDrag}
+                onResolveSnap={resolveDragSnap}
+                onSnapEnd={clearSnapGuides}
               />
             );
           }
@@ -2528,6 +2568,8 @@ export const Canvas: React.FC<CanvasProps> = ({
                 onMoveSelectionStart={beginSelectionDrag}
                 onMoveSelection={moveSelectionByDelta}
                 onMoveSelectionEnd={endSelectionDrag}
+                onResolveSnap={resolveDragSnap}
+                onSnapEnd={clearSnapGuides}
               />
             );
           }
@@ -2549,6 +2591,8 @@ export const Canvas: React.FC<CanvasProps> = ({
                 onMoveSelectionStart={beginSelectionDrag}
                 onMoveSelection={moveSelectionByDelta}
                 onMoveSelectionEnd={endSelectionDrag}
+                onResolveSnap={resolveDragSnap}
+                onSnapEnd={clearSnapGuides}
               />
             );
           }
@@ -2569,11 +2613,37 @@ export const Canvas: React.FC<CanvasProps> = ({
                 onMoveSelectionStart={beginSelectionDrag}
                 onMoveSelection={moveSelectionByDelta}
                 onMoveSelectionEnd={endSelectionDrag}
+                onResolveSnap={resolveDragSnap}
+                onSnapEnd={clearSnapGuides}
               />
             );
           }
           return null;
         })}
+
+        {/* Smart Alignment Guides Overlay */}
+        {alignmentGuides.map((guide, index) => (
+          <div
+            key={`align-guide-${guide.axis}-${index}`}
+            data-alignment-guide
+            style={
+              guide.axis === 'x'
+                ? {
+                    left: guide.position,
+                    top: guide.start,
+                    width: Math.max(1, 1.5 / zoom),
+                    height: Math.max(8, guide.end - guide.start),
+                  }
+                : {
+                    left: guide.start,
+                    top: guide.position,
+                    width: Math.max(8, guide.end - guide.start),
+                    height: Math.max(1, 1.5 / zoom),
+                  }
+            }
+            className="pointer-events-none absolute z-40 bg-rose-500 shadow-[0_0_6px_rgba(244,63,94,0.65)]"
+          />
+        ))}
 
         {/* Wire Interactive Overlays Layer (Floating Action Bar, Color Picker, and Midpoint Label) */}
         {wireElements.map((wire) => (

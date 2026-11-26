@@ -513,7 +513,7 @@ export default function Sidebar({
           </SidebarSection>
 
           <SidebarSection title="View" expanded={isOpen}>
-            {[actions.actions.shortcuts, actions.actions.theme].map((action) => (
+            {[actions.actions.snapGrid, actions.actions.shortcuts, actions.actions.theme].map((action) => (
               <SidebarActionItem
                 key={action.id}
                 id={action.id === 'shortcuts' ? 'sidebar-shortcuts' : undefined}

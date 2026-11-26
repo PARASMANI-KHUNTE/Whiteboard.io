@@ -26,6 +26,8 @@ interface StickyNoteItemProps {
   onMoveSelectionStart?: () => void;
   onMoveSelection?: (deltaX: number, deltaY: number) => void;
   onMoveSelectionEnd?: () => void;
+  onResolveSnap?: (element: StickyNote, x: number, y: number, skipSnap: boolean) => { x: number; y: number };
+  onSnapEnd?: () => void;
 }
 
 export const StickyNoteItem: React.FC<StickyNoteItemProps> = ({
@@ -43,6 +45,8 @@ export const StickyNoteItem: React.FC<StickyNoteItemProps> = ({
   onMoveSelectionStart,
   onMoveSelection,
   onMoveSelectionEnd,
+  onResolveSnap,
+  onSnapEnd,
 }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [localText, setLocalText] = useState(note.text);
@@ -213,8 +217,14 @@ export const StickyNoteItem: React.FC<StickyNoteItemProps> = ({
     const handleMouseMove = (moveEvent: MouseEvent) => {
       const deltaX = (moveEvent.clientX - dragStartRef.current.mouseX) / (zoom || 1);
       const deltaY = (moveEvent.clientY - dragStartRef.current.mouseY) / (zoom || 1);
-      const newX = dragStartRef.current.startX + deltaX;
-      const newY = dragStartRef.current.startY + deltaY;
+      const rawX = dragStartRef.current.startX + deltaX;
+      const rawY = dragStartRef.current.startY + deltaY;
+      const snapped =
+        !moveWholeSelection && onResolveSnap
+          ? onResolveSnap(dragElement, rawX, rawY, moveEvent.altKey)
+          : { x: rawX, y: rawY };
+      const newX = snapped.x;
+      const newY = snapped.y;
 
       currentPosRef.current = { x: newX, y: newY };
       setLocalPos({ x: newX, y: newY });
@@ -238,6 +248,7 @@ export const StickyNoteItem: React.FC<StickyNoteItemProps> = ({
 
     const handleMouseUp = () => {
       setIsDragging(false);
+      onSnapEnd?.();
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
       if (moveWholeSelection) {

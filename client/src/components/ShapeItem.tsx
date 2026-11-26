@@ -28,6 +28,8 @@ interface ShapeItemProps {
   onMoveSelectionStart?: () => void;
   onMoveSelection?: (deltaX: number, deltaY: number) => void;
   onMoveSelectionEnd?: () => void;
+  onResolveSnap?: (element: ShapeElement, x: number, y: number, skipSnap: boolean) => { x: number; y: number };
+  onSnapEnd?: () => void;
 }
 
 const STROKE_WIDTHS = [
@@ -50,6 +52,8 @@ export const ShapeItem: React.FC<ShapeItemProps> = ({
   onMoveSelectionStart,
   onMoveSelection,
   onMoveSelectionEnd,
+  onResolveSnap,
+  onSnapEnd,
 }) => {
   const [localPos, setLocalPos] = useState<{ x: number; y: number }>({ x: element.x, y: element.y });
   const [localSize, setLocalSize] = useState<{ width: number; height: number }>({
@@ -181,8 +185,14 @@ export const ShapeItem: React.FC<ShapeItemProps> = ({
     const handleMouseMove = (moveEvent: MouseEvent) => {
       const deltaX = (moveEvent.clientX - startX) / (zoom || 1);
       const deltaY = (moveEvent.clientY - startY) / (zoom || 1);
-      const newX = initialPos.x + deltaX;
-      const newY = initialPos.y + deltaY;
+      const rawX = initialPos.x + deltaX;
+      const rawY = initialPos.y + deltaY;
+      const snapped =
+        !moveWholeSelection && onResolveSnap
+          ? onResolveSnap(dragElement, rawX, rawY, moveEvent.altKey)
+          : { x: rawX, y: rawY };
+      const newX = snapped.x;
+      const newY = snapped.y;
 
       currentPosRef.current = { x: newX, y: newY };
       setLocalPos({ x: newX, y: newY });
@@ -206,6 +216,7 @@ export const ShapeItem: React.FC<ShapeItemProps> = ({
 
     const handleMouseUp = () => {
       setIsDragging(false);
+      onSnapEnd?.();
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
       if (moveWholeSelection) {

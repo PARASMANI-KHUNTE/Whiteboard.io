@@ -116,6 +116,7 @@ export default function App() {
   const [selectedWireStyle, setSelectedWireStyle] = useState<WireStyle>('curve');
   const [showWelcomeHint, setShowWelcomeHint] = useState<boolean>(true);
   const [showEmptyGuide, setShowEmptyGuide] = useState<boolean>(true);
+  const [snapToGrid, setSnapToGrid] = useState<boolean>(false);
   const [hasChosenSessionMode, setHasChosenSessionMode] = useState<boolean>(false);
 
   const [showAuthModal, setShowAuthModal] = useState<boolean>(false);
@@ -1135,8 +1136,10 @@ export default function App() {
     isMuted,
     isAiChatOpen,
     isSidebarOpen,
+    snapToGrid,
     onSelectTool: setCurrentTool,
     onToggleTheme: handleToggleTheme,
+    onToggleSnapToGrid: () => setSnapToGrid((prev) => !prev),
     onSelectAll: () => selectAllHandlerRef.current?.(),
     onUndo: handleUndo,
     onRedo: handleRedo,
@@ -1328,6 +1331,7 @@ export default function App() {
           getViewportRef.current = fn;
         }}
         blameMode={blameMode}
+        snapToGrid={snapToGrid}
         blameColorFor={blameColorFor}
         onAttributionEnter={onAttributionEnter}
         onAttributionLeave={onAttributionLeave}

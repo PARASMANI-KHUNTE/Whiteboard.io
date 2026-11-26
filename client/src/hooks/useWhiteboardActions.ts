@@ -5,6 +5,7 @@ import {
   Info,
   Keyboard,
   LogIn,
+  Magnet,
   Menu,
   PanelLeftClose,
   Radio,
@@ -41,6 +42,7 @@ export type WhiteboardActionId =
   | 'voiceMute'
   | 'shortcuts'
   | 'theme'
+  | 'snapGrid'
   | 'profile'
   | 'auth'
   | 'account'
@@ -106,8 +108,10 @@ export interface UseWhiteboardActionsParams {
   isMuted: boolean;
   isAiChatOpen: boolean;
   isSidebarOpen: boolean;
+  snapToGrid?: boolean;
   onSelectTool: (tool: ToolType) => void;
   onToggleTheme: () => void;
+  onToggleSnapToGrid?: () => void;
   onSelectAll: () => void;
   onUndo: () => void;
   onRedo: () => void;
@@ -146,8 +150,10 @@ export function useWhiteboardActions({
   isMuted,
   isAiChatOpen,
   isSidebarOpen,
+  snapToGrid = false,
   onSelectTool,
   onToggleTheme,
+  onToggleSnapToGrid,
   onSelectAll,
   onUndo,
   onRedo,
@@ -408,6 +414,18 @@ export function useWhiteboardActions({
         disabled: false,
         handler: onToggleTheme,
       },
+      snapGrid: {
+        id: 'snapGrid',
+        label: snapToGrid ? 'Grid Snap: On' : 'Grid Snap: Off',
+        shortLabel: 'Grid Snap',
+        ariaLabel: snapToGrid ? 'Disable grid snapping' : 'Enable grid snapping',
+        title: 'Toggle grid snapping when dragging elements',
+        icon: Magnet,
+        active: snapToGrid,
+        pressed: snapToGrid,
+        disabled: false,
+        handler: onToggleSnapToGrid ?? (() => {}),
+      },
       profile: profileAction,
       auth: authAction,
       account: {
@@ -447,8 +465,10 @@ export function useWhiteboardActions({
     isMuted,
     isAiChatOpen,
     isSidebarOpen,
+    snapToGrid,
     onSelectTool,
     onToggleTheme,
+    onToggleSnapToGrid,
     onSelectAll,
     onUndo,
     onRedo,
