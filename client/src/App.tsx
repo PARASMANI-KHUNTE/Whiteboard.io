@@ -117,6 +117,7 @@ export default function App() {
   const [showWelcomeHint, setShowWelcomeHint] = useState<boolean>(true);
   const [showEmptyGuide, setShowEmptyGuide] = useState<boolean>(true);
   const [snapToGrid, setSnapToGrid] = useState<boolean>(false);
+  const [followingUserId, setFollowingUserId] = useState<string | null>(null);
   const [hasChosenSessionMode, setHasChosenSessionMode] = useState<boolean>(false);
 
   const [showAuthModal, setShowAuthModal] = useState<boolean>(false);
@@ -239,6 +240,17 @@ export default function App() {
     onElementMouseEnter: onAttributionEnter,
     onElementMouseLeave: onAttributionLeave,
   } = useAttributionHover();
+
+  // Stop following if the target user disconnects or leaves the room.
+  useEffect(() => {
+    if (followingUserId && !users[followingUserId]) {
+      setFollowingUserId(null);
+    }
+  }, [followingUserId, users]);
+
+  const handleToggleFollowUser = useCallback((targetUserId: string) => {
+    setFollowingUserId((prev) => (prev === targetUserId ? null : targetUserId));
+  }, []);
 
   // Surface session expiry from REST/AI/socket callers. useAuth performs the
   // actual recovery; this only keeps the user informed.
@@ -1251,6 +1263,8 @@ export default function App() {
         onToggleSimulated={toggleSimulated}
         onOpenInNewTab={openInNewTab}
         onAudioLevelChange={emitAudioLevel}
+        followingUserId={followingUserId}
+        onToggleFollowUser={handleToggleFollowUser}
       />
 
       {/* Unified controls rail & style palette */}
@@ -1335,6 +1349,8 @@ export default function App() {
         blameColorFor={blameColorFor}
         onAttributionEnter={onAttributionEnter}
         onAttributionLeave={onAttributionLeave}
+        followingUserId={followingUserId}
+        onStopFollowUser={() => setFollowingUserId(null)}
       />
 
       {/* Empty Canvas Quick-Start Guide */}

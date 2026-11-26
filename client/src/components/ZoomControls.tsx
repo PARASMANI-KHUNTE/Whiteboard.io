@@ -1,5 +1,5 @@
 import React from 'react';
-import { ZoomIn, ZoomOut, RotateCcw } from 'lucide-react';
+import { ZoomIn, ZoomOut, RotateCcw, Maximize2, Map } from 'lucide-react';
 import { getHandToggleMeta } from './ui/toolActions';
 import type { WhiteboardHandToggleAction } from '../hooks/useWhiteboardActions';
 
@@ -8,6 +8,9 @@ interface ZoomControlsProps {
   onZoomIn: () => void;
   onZoomOut: () => void;
   onResetZoom: () => void;
+  onFitToContent?: () => void;
+  isMinimapOpen?: boolean;
+  onToggleMinimap?: () => void;
   isHandTool?: boolean;
   canWrite?: boolean;
   onToggleHand?: () => void;
@@ -19,6 +22,9 @@ export const ZoomControls: React.FC<ZoomControlsProps> = ({
   onZoomIn,
   onZoomOut,
   onResetZoom,
+  onFitToContent,
+  isMinimapOpen = false,
+  onToggleMinimap,
   isHandTool = false,
   canWrite = true,
   onToggleHand,
@@ -106,6 +112,37 @@ export const ZoomControls: React.FC<ZoomControlsProps> = ({
       >
         <RotateCcw className="w-4 h-4" />
       </button>
+
+      {onFitToContent && (
+        <button
+          id="fit-all-btn"
+          type="button"
+          aria-label="Fit all elements to screen"
+          onClick={onFitToContent}
+          className="p-2 sm:p-2 text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100/80 dark:hover:bg-slate-800/80 rounded-xl transition-colors cursor-pointer flex items-center justify-center min-w-[36px] min-h-[36px] sm:min-w-[32px] sm:min-h-[32px] btn-press"
+          title="Fit all content to screen (Shift+1)"
+        >
+          <Maximize2 className="w-4 h-4" />
+        </button>
+      )}
+
+      {onToggleMinimap && (
+        <button
+          id="toggle-minimap-btn"
+          type="button"
+          aria-label={isMinimapOpen ? 'Hide minimap' : 'Show minimap'}
+          aria-pressed={isMinimapOpen}
+          onClick={onToggleMinimap}
+          className={`hidden sm:flex p-2 rounded-xl transition-colors cursor-pointer items-center justify-center min-w-[32px] min-h-[32px] btn-press ${
+            isMinimapOpen
+              ? 'bg-blue-500/15 text-blue-600 dark:text-blue-400 ring-1 ring-blue-500/40'
+              : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100/80 dark:hover:bg-slate-800/80'
+          }`}
+          title={isMinimapOpen ? 'Hide canvas minimap' : 'Show canvas minimap'}
+        >
+          <Map className="w-4 h-4" />
+        </button>
+      )}
     </div>
   );
 };

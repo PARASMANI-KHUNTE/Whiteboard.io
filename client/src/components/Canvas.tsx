@@ -21,6 +21,7 @@ import { ShapeItem } from './ShapeItem';
 import { IconItem } from './IconItem';
 import { WireItem, WireOverlay } from './WireItem';
 import { ZoomControls } from './ZoomControls';
+import { CanvasMinimap } from './ui/CanvasMinimap';
 import { ContextMenu, ContextMenuEntry } from './ContextMenu';
 import { ShortcutsLauncherButton } from './ui/ShortcutsLauncherButton';
 import { CANVAS_TOOL_DEFINITIONS } from './ui/toolActions';
@@ -124,6 +125,9 @@ interface CanvasProps {
   blameMode?: boolean;
   /** Optional snap-to-grid when dragging positioned elements. */
   snapToGrid?: boolean;
+  /** Collaborator follow mode: center camera on this remote user's cursor. */
+  followingUserId?: string | null;
+  onStopFollowUser?: () => void;
   /** Blame mode: callback to get blame overlay colour for an element (null = off). */
   blameColorFor?: (el: CanvasElement) => string | null;
   /** Attribution hover: called when pointer hovers/clicks an element. */
@@ -180,6 +184,8 @@ export const Canvas: React.FC<CanvasProps> = ({
   onCloseShortcuts,
   blameMode = false,
   snapToGrid = false,
+  followingUserId = null,
+  onStopFollowUser,
   blameColorFor,
   onAttributionEnter,
   onAttributionLeave,
@@ -187,6 +193,7 @@ export const Canvas: React.FC<CanvasProps> = ({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [alignmentGuides, setAlignmentGuides] = useState<AlignmentGuide[]>([]);
+  const [showMinimap, setShowMinimap] = useState(false);
 
   // Pan, Zoom & Viewport state
   const [pan, setPan] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
@@ -1118,6 +1125,47 @@ export const Canvas: React.FC<CanvasProps> = ({
     setPan({ x: 0, y: 0 });
   }, [cancelNavAnimation]);
 
+  const fitAllToScreen = useCallback(() => {
+    const allElements = Object.values(elementsRef.current) as CanvasElement[];
+    if (allElements.length === 0) {
+      resetView();
+      return;
+    }
+    const bounds = computeElementsUnionBounds(allElements);
+    if (!bounds) {
+      resetView();
+      return;
+    }
+    const container = containerRef.current;
+    const viewportW = container ? container.clientWidth : window.innerWidth;
+    const viewportH = container ? container.clientHeight : window.innerHeight;
+    const insets = computeSafeViewportInsets(viewportW, viewportH, {
+      isAiChatOpen: document.documentElement.dataset.aiChatOpen === 'true',
+      isSidebarOpen: document.documentElement.dataset.sidebarOpen === 'true',
+    });
+    const camera = computeSafeFitCamera(bounds, viewportW, viewportH, insets, {
+      minZoom: 0.25,
+      maxZoom: 1.5,
+      padding: 72,
+    });
+    animateCameraTo(camera.pan, camera.zoom);
+  }, [animateCameraTo, computeElementsUnionBounds, resetView]);
+
+  // Follow collaborator cursor when follow mode is active.
+  useEffect(() => {
+    if (!followingUserId) return;
+    const cursor = remoteUsers[followingUserId]?.cursor;
+    if (!cursor) return;
+    const container = containerRef.current;
+    const viewportW = container ? container.clientWidth : window.innerWidth;
+    const viewportH = container ? container.clientHeight : window.innerHeight;
+    const safeZoom = Math.max(0.25, zoomRef.current || 1);
+    setPan({
+      x: viewportW / 2 - cursor.x * safeZoom,
+      y: viewportH / 2 - cursor.y * safeZoom,
+    });
+  }, [followingUserId, remoteUsers]);
+
   // Keyboard shortcuts, spacebar pan & selection actions
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -1151,6 +1199,7 @@ export const Canvas: React.FC<CanvasProps> = ({
           setContextMenu(null);
           return;
         }
+        onStopFollowUser?.();
         handleClearSelection();
         setWireDraft(null);
         setWireHoveredElementId(null);
@@ -1260,6 +1309,11 @@ export const Canvas: React.FC<CanvasProps> = ({
         resetView();
         return;
       }
+      if (e.shiftKey && (e.code === 'Digit1' || e.key === '!')) {
+        e.preventDefault();
+        fitAllToScreen();
+        return;
+      }
 
       // Single-key tool switching (V, H, P, Y, E, S, T, R, I, W)
       const tool = TOOL_KEY_MAP[key];
@@ -1304,10 +1358,12 @@ export const Canvas: React.FC<CanvasProps> = ({
     zoomIn,
     zoomOut,
     resetView,
+    fitAllToScreen,
     isShortcutsOpen,
     onCloseShortcuts,
     shortcutsBlocked,
     contextMenu,
+    onStopFollowUser,
   ]);
 
   // Native Wheel listener for Zooming (Ctrl+Wheel / Pinch) and Panning
@@ -1724,6 +1780,7 @@ export const Canvas: React.FC<CanvasProps> = ({
       if ('preventDefault' in e && typeof (e as any).preventDefault === 'function') {
         e.preventDefault();
       }
+      onStopFollowUser?.();
       setIsPanning(true);
       const clientX = 'clientX' in e ? e.clientX : e.touches[0].clientX;
       const clientY = 'clientY' in e ? e.clientY : e.touches[0].clientY;
@@ -2781,12 +2838,31 @@ export const Canvas: React.FC<CanvasProps> = ({
         })}
       </div>
 
+      {/* Collapsible Canvas Minimap */}
+      <CanvasMinimap
+        visible={showMinimap}
+        elements={elements}
+        pan={pan}
+        zoom={zoom}
+        viewportWidth={containerRef.current?.clientWidth || (typeof window !== 'undefined' ? window.innerWidth : 1280)}
+        viewportHeight={containerRef.current?.clientHeight || (typeof window !== 'undefined' ? window.innerHeight : 720)}
+        onPanTo={(nextPan) => {
+          cancelNavAnimation();
+          onStopFollowUser?.();
+          setPan(nextPan);
+        }}
+        onClose={() => setShowMinimap(false)}
+      />
+
       {/* Floating Zoom & Pan Navigation Controls */}
       <ZoomControls
         zoom={zoom}
         onZoomIn={zoomIn}
         onZoomOut={zoomOut}
         onResetZoom={resetView}
+        onFitToContent={fitAllToScreen}
+        isMinimapOpen={showMinimap}
+        onToggleMinimap={() => setShowMinimap((prev) => !prev)}
         handToggle={actions.handToggle}
       />
 

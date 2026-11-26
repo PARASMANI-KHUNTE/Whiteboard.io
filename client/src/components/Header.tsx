@@ -33,6 +33,8 @@ interface HeaderProps {
   onToggleSimulated: () => void;
   onOpenInNewTab: () => void;
   onAudioLevelChange?: (level: number, isSpeaking: boolean) => void;
+  followingUserId?: string | null;
+  onToggleFollowUser?: (userId: string) => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -63,6 +65,8 @@ export const Header: React.FC<HeaderProps> = ({
   onToggleSimulated,
   onOpenInNewTab,
   onAudioLevelChange,
+  followingUserId = null,
+  onToggleFollowUser,
 }) => {
   const {
     sidebar: sidebarAction,
@@ -217,12 +221,26 @@ export const Header: React.FC<HeaderProps> = ({
           <div className="hidden sm:flex items-center -space-x-1.5 overflow-hidden py-1 px-1">
             {activeUserList.slice(0, 3).map((u) => {
               const userMuted = u.isMuted;
+              const isFollowing = followingUserId === u.id;
               return (
-                <div
+                <button
                   key={u.id}
-                  title={`${u.name}${u.isHost ? ' (Host)' : ''}${userMuted ? ' (Muted)' : ''}`}
+                  id={`follow-user-btn-${u.id}`}
+                  type="button"
+                  onClick={() => onToggleFollowUser?.(u.id)}
+                  aria-pressed={isFollowing}
+                  aria-label={
+                    isFollowing
+                      ? `Stop following ${u.name}`
+                      : `Follow ${u.name}'s cursor`
+                  }
+                  title={`${u.name}${u.isHost ? ' (Host)' : ''}${userMuted ? ' (Muted)' : ''} — ${
+                    isFollowing ? 'Following (click to stop)' : 'Click to follow'
+                  }`}
                   style={{ backgroundColor: u.color || '#3b82f6' }}
-                  className="w-7 h-7 sm:w-8 sm:h-8 rounded-full border-2 border-white dark:border-slate-800 flex items-center justify-center text-white text-[10px] font-bold shadow-2xs relative transition-transform hover:scale-110"
+                  className={`w-7 h-7 sm:w-8 sm:h-8 rounded-full border-2 border-white dark:border-slate-800 flex items-center justify-center text-white text-[10px] font-bold shadow-2xs relative transition-transform hover:scale-110 cursor-pointer ${
+                    isFollowing ? 'ring-2 ring-blue-500 ring-offset-1 dark:ring-offset-slate-900 z-10' : ''
+                  }`}
                 >
                   {u.name.slice(0, 2).toUpperCase()}
                   {u.isHost && (
@@ -233,7 +251,7 @@ export const Header: React.FC<HeaderProps> = ({
                       <MicOff className="w-1.5 h-1.5 text-white" />
                     </div>
                   )}
-                </div>
+                </button>
               );
             })}
             {activeUserList.length > 3 && (
