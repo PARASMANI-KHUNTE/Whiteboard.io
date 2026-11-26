@@ -143,17 +143,43 @@
 }
 
 /* Floating bottom chrome sits above the mobile AI chat sheet when it is open. */
+:root {
+  --wb-ai-chat-offset: 0rem;
+}
+
 html[data-ai-chat-open='true'] .wb-bottom-chat-aware {
   bottom: calc(64vh + 0.5rem);
 }
 
+html[data-ai-chat-open='true'] .wb-bottom-blame-aware {
+  bottom: calc(64vh + 3.75rem);
+}
+
 @media (min-width: 640px) {
+  html[data-ai-chat-open='true'] {
+    --wb-ai-chat-offset: calc(408px + 1.25rem);
+  }
+
+  .wb-right-chat-aware {
+    right: calc(1rem + var(--wb-ai-chat-offset));
+    transition: right 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  html[data-ai-chat-open='true'] .wb-bottom-chat-aware:not(.wb-bottom-zoom):not(.wb-bottom-vote) {
+    bottom: 1.5rem;
+  }
+
+  html[data-ai-chat-open='true'] .wb-bottom-blame-aware {
+    bottom: 4.25rem;
+  }
+
   html[data-ai-chat-open='true'] .wb-bottom-zoom {
     bottom: 1.5rem;
   }
 
   html[data-ai-chat-open='true'] .wb-bottom-vote {
     bottom: 6rem;
+    right: calc(1.5rem + var(--wb-ai-chat-offset));
   }
 }
 
@@ -178,6 +204,12 @@ html[data-ai-chat-open='true'] .wb-bottom-chat-aware {
 
   .wb-sidebar-centered {
     left: calc(50% + var(--wb-sidebar-width) / 2);
+  }
+
+  .wb-canvas-centered {
+    left: calc(50% + var(--wb-sidebar-width) / 2 - var(--wb-ai-chat-offset) / 2);
+    max-width: calc(100vw - var(--wb-sidebar-width) - var(--wb-ai-chat-offset) - 2rem);
+    transition: left 0.2s cubic-bezier(0.16, 1, 0.3, 1);
   }
 
   #whiteboard-zoom-controls {
