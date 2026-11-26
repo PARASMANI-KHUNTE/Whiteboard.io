@@ -22,6 +22,14 @@ import { AttributionTooltip } from './components/ui/AttributionTooltip';
 import { BlameModeLegend } from './components/ui/BlameModeLegend';
 import { FloatingToolDock } from './components/ui/FloatingToolDock';
 import { EmptyCanvasGuide } from './components/ui/EmptyCanvasGuide';
+import { CommandPaletteModal, type CommandPaletteItem } from './components/CommandPaletteModal';
+import { ActivityTimelineDrawer } from './components/ActivityTimelineDrawer';
+import {
+  appendActivityEntry,
+  buildInitialActivityFromElements,
+  describeElementKind,
+  type ActivityEntry,
+} from './utils/activityFeed';
 import { Header } from './components/Header';
 import Sidebar from './components/Sidebar';
 import { Canvas } from './components/Canvas';
@@ -45,7 +53,7 @@ import { formatAiEngineDisplay } from './ai/providerLabels';
 import { buildGlobalAiContext } from './ai/sessionContext';
 import { diffAiElements, type AiElementDiffResult } from './ai/elementDiff';
 import { ErrorBoundary } from './components/ErrorBoundary';
-import { Info, AlertCircle, CheckCircle2, UserX, X } from 'lucide-react';
+import { Info, AlertCircle, CheckCircle2, UserX, X, History } from 'lucide-react';
 import { isColorBlack, isColorWhite } from './utils/themeColors';
 import { shouldRecolorBoardOnThemeToggle } from './utils/themeBoardEdit';
 import type { ExportViewportInfo } from './utils/exportTypes';
@@ -118,6 +126,9 @@ export default function App() {
   const [showEmptyGuide, setShowEmptyGuide] = useState<boolean>(true);
   const [snapToGrid, setSnapToGrid] = useState<boolean>(false);
   const [followingUserId, setFollowingUserId] = useState<string | null>(null);
+  const [showCommandPalette, setShowCommandPalette] = useState<boolean>(false);
+  const [showActivityTimeline, setShowActivityTimeline] = useState<boolean>(false);
+  const [activityEntries, setActivityEntries] = useState<ActivityEntry[]>([]);
   const [hasChosenSessionMode, setHasChosenSessionMode] = useState<boolean>(false);
 
   const [showAuthModal, setShowAuthModal] = useState<boolean>(false);
@@ -250,6 +261,106 @@ export default function App() {
 
   const handleToggleFollowUser = useCallback((targetUserId: string) => {
     setFollowingUserId((prev) => (prev === targetUserId ? null : targetUserId));
+  }, []);
+
+  // Seed / reset activity timeline when entering a room or restoring initial elements.
+  const activitySeededRoomRef = useRef<string | null | undefined>(undefined);
+  useEffect(() => {
+    if (activitySeededRoomRef.current !== roomId) {
+      activitySeededRoomRef.current = roomId;
+      setActivityEntries(buildInitialActivityFromElements(elements, users));
+      return;
+    }
+    if (Object.keys(elements).length > 0 && activityEntries.length === 0) {
+      setActivityEntries(buildInitialActivityFromElements(elements, users));
+    }
+  }, [roomId, elements, users, activityEntries.length]);
+
+  // Append remote collaboration & clear events to the Activity Timeline.
+  useEffect(() => {
+    if (!socket) return;
+    const onRemoteCreate = (el: CanvasElement) => {
+      const attr = el.attribution;
+      setActivityEntries((prev) =>
+        appendActivityEntry(prev, {
+          id: `create_${el.id}_${Date.now()}`,
+          userId: attr?.lastModifiedBy ?? el.userId,
+          userName: attr?.lastModifiedByName ?? ('userName' in el ? el.userName : undefined) ?? 'Collaborator',
+          userColor: attr?.lastModifiedByColor ?? '#3b82f6',
+          action: 'created',
+          summary: `Added ${describeElementKind(el)}`,
+          elementId: el.id,
+          timestamp: attr?.lastModifiedAt ?? Date.now(),
+        })
+      );
+    };
+    const onRemoteUpdate = (el: CanvasElement) => {
+      const attr = el.attribution;
+      setActivityEntries((prev) =>
+        appendActivityEntry(prev, {
+          id: `edit_${el.id}_${Date.now()}`,
+          userId: attr?.lastModifiedBy ?? el.userId,
+          userName: attr?.lastModifiedByName ?? ('userName' in el ? el.userName : undefined) ?? 'Collaborator',
+          userColor: attr?.lastModifiedByColor ?? '#3b82f6',
+          action: 'edited',
+          summary: `Edited ${describeElementKind(el)}`,
+          elementId: el.id,
+          timestamp: attr?.lastModifiedAt ?? Date.now(),
+        })
+      );
+    };
+    const onRemoteBatchCreate = (batch: CanvasElement[]) => {
+      if (!Array.isArray(batch) || batch.length === 0) return;
+      const first = batch[0];
+      const attr = first.attribution;
+      setActivityEntries((prev) =>
+        appendActivityEntry(prev, {
+          id: `batch_${first.id}_${Date.now()}`,
+          userId: attr?.lastModifiedBy ?? first.userId,
+          userName: attr?.lastModifiedByName ?? 'Collaborator',
+          userColor: attr?.lastModifiedByColor ?? '#6366f1',
+          action: 'created',
+          summary: `Added ${batch.length} element${batch.length === 1 ? '' : 's'}`,
+          elementId: first.id,
+          timestamp: attr?.lastModifiedAt ?? Date.now(),
+        })
+      );
+    };
+    const onBoardCleared = (info: { initiatorName: string; clearedBy?: { userId: string; name: string } }) => {
+      setActivityEntries((prev) =>
+        appendActivityEntry(prev, {
+          id: `clear_${Date.now()}`,
+          userId: info.clearedBy?.userId ?? 'system',
+          userName: info.clearedBy?.name ?? info.initiatorName ?? 'Host',
+          userColor: '#e11d48',
+          action: 'cleared',
+          summary: 'Cleared the whiteboard',
+          timestamp: Date.now(),
+        })
+      );
+    };
+    socket.on('element-created', onRemoteCreate);
+    socket.on('element-updated', onRemoteUpdate);
+    socket.on('elements-batch-created', onRemoteBatchCreate);
+    socket.on('board-cleared', onBoardCleared);
+    return () => {
+      socket.off('element-created', onRemoteCreate);
+      socket.off('element-updated', onRemoteUpdate);
+      socket.off('elements-batch-created', onRemoteBatchCreate);
+      socket.off('board-cleared', onBoardCleared);
+    };
+  }, [socket]);
+
+  // Global Ctrl+K / Cmd+K launcher for Command Palette.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setShowCommandPalette((prev) => !prev);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
   }, []);
 
   // Surface session expiry from REST/AI/socket callers. useAuth performs the
@@ -677,8 +788,20 @@ export default function App() {
       }
       emitElementCreate(element);
       pushHistory({ kind: 'create', elements: [element], at: Date.now() });
+      setActivityEntries((prev) =>
+        appendActivityEntry(prev, {
+          id: `local_create_${element.id}_${Date.now()}`,
+          userId: currentUser.id,
+          userName: currentUser.name,
+          userColor: currentUser.color,
+          action: 'created',
+          summary: `Added ${describeElementKind(element)}`,
+          elementId: element.id,
+          timestamp: Date.now(),
+        })
+      );
     },
-    [canWrite, emitElementCreate, addNotification, pushHistory]
+    [canWrite, emitElementCreate, addNotification, pushHistory, currentUser.id, currentUser.name, currentUser.color]
   );
 
   // Element updates (drag, nudge, style changes) are recorded with the pre-edit
@@ -690,8 +813,20 @@ export default function App() {
         pushHistory({ kind: 'update', before: [before], after: [element], at: Date.now() });
       }
       emitElementUpdate(element);
+      setActivityEntries((prev) =>
+        appendActivityEntry(prev, {
+          id: `local_edit_${element.id}_${Date.now()}`,
+          userId: currentUser.id,
+          userName: currentUser.name,
+          userColor: currentUser.color,
+          action: 'edited',
+          summary: `Edited ${describeElementKind(element)}`,
+          elementId: element.id,
+          timestamp: Date.now(),
+        })
+      );
     },
-    [emitElementUpdate, pushHistory]
+    [emitElementUpdate, pushHistory, currentUser.id, currentUser.name, currentUser.color]
   );
 
   const handleElementDelete = useCallback(
@@ -699,10 +834,21 @@ export default function App() {
       const target = elementsRef.current[elementId];
       if (target) {
         pushHistory({ kind: 'delete', elements: [target], at: Date.now() });
+        setActivityEntries((prev) =>
+          appendActivityEntry(prev, {
+            id: `local_del_${elementId}_${Date.now()}`,
+            userId: currentUser.id,
+            userName: currentUser.name,
+            userColor: currentUser.color,
+            action: 'deleted',
+            summary: `Deleted ${describeElementKind(target)}`,
+            timestamp: Date.now(),
+          })
+        );
       }
       emitElementDelete(elementId);
     },
-    [emitElementDelete, pushHistory]
+    [emitElementDelete, pushHistory, currentUser.id, currentUser.name, currentUser.color]
   );
 
   const handleElementsBatchCreate = useCallback(
@@ -1187,6 +1333,45 @@ export default function App() {
     [aiBoardKey, roomName, isSoloMode, users, theme, elements, aiSession, boardAiLedger]
   );
 
+  const commandPaletteItems = useMemo<CommandPaletteItem[]>(() => {
+    const toolItems: CommandPaletteItem[] = whiteboardActions.tools.map((t) => ({
+      id: `cmd-${t.id}`,
+      label: `Tool: ${t.label}`,
+      category: 'Tools',
+      shortcut: t.shortcut,
+      icon: t.icon,
+      disabled: t.disabled,
+      onSelect: t.handler,
+    }));
+    const actionEntries: CommandPaletteItem[] = Object.values(whiteboardActions.actions).map((a) => ({
+      id: `cmd-action-${a.id}`,
+      label: a.label,
+      category: 'Workspace',
+      shortcut: a.shortcut,
+      icon: a.icon,
+      disabled: a.disabled,
+      onSelect: a.handler,
+    }));
+    return [
+      ...actionEntries,
+      {
+        id: 'cmd-blame-mode',
+        label: blameMode ? 'Exit Blame Mode' : 'Enable Blame Mode',
+        category: 'Attribution',
+        icon: History,
+        onSelect: toggleBlameMode,
+      },
+      {
+        id: 'cmd-activity-timeline',
+        label: showActivityTimeline ? 'Hide Activity Timeline' : 'Open Activity Timeline',
+        category: 'Attribution',
+        icon: History,
+        onSelect: () => setShowActivityTimeline((prev) => !prev),
+      },
+      ...toolItems,
+    ];
+  }, [whiteboardActions, blameMode, toggleBlameMode, showActivityTimeline]);
+
   useModalA11y({
     isOpen: isKicked,
     onClose: () => {
@@ -1221,6 +1406,7 @@ export default function App() {
     showAdminModal ||
     showExportModal ||
     showAiModal ||
+    showCommandPalette ||
     isAiChatOpen ||
     confirmModalState.isOpen ||
     voteToClear?.active === true ||
@@ -1384,6 +1570,49 @@ export default function App() {
         undo={whiteboardActions.actions.undo}
         redo={whiteboardActions.actions.redo}
         aiDiagram={whiteboardActions.actions.aiDiagram}
+      />
+
+      {/* Attribution: Activity Timeline Toggle */}
+      <button
+        id="activity-timeline-btn"
+        type="button"
+        aria-pressed={showActivityTimeline}
+        aria-label={showActivityTimeline ? 'Close activity timeline' : 'Open room activity timeline'}
+        title="Activity Timeline & Command Palette (Ctrl+K)"
+        onClick={() => setShowActivityTimeline((prev) => !prev)}
+        className={`fixed right-3 sm:right-4 bottom-[calc(env(safe-area-inset-bottom,0px)+7.25rem)] sm:bottom-[112px] wb-right-chat-aware z-40 flex items-center gap-1.5 px-2.5 sm:px-3 py-2 rounded-2xl backdrop-blur-md border shadow-lg text-xs font-semibold transition-all cursor-pointer select-none ${
+          showActivityTimeline
+            ? 'bg-blue-600/95 border-blue-400 text-white shadow-blue-500/30 ring-2 ring-blue-400/40'
+            : 'bg-white/95 dark:bg-slate-900/95 border-slate-200/90 dark:border-slate-800 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800'
+        }`}
+      >
+        <History className="w-3.5 h-3.5 shrink-0" aria-hidden />
+        <span className="hidden sm:inline">Activity</span>
+      </button>
+
+      {/* Activity & Attribution Timeline Drawer */}
+      <ActivityTimelineDrawer
+        isOpen={showActivityTimeline}
+        onClose={() => setShowActivityTimeline(false)}
+        entries={activityEntries}
+        elements={elements}
+        onFocusElement={(elementId) => {
+          const target = elementsRef.current[elementId];
+          if (!target) return;
+          navigateToElementsRef.current?.([target]);
+          highlightElementsRef.current?.([target], {
+            navigateIfHidden: false,
+            durationMs: 2200,
+            badgeLabel: 'Focused',
+          });
+        }}
+      />
+
+      {/* Fuzzy Command Palette (Ctrl+K / Cmd+K) */}
+      <CommandPaletteModal
+        isOpen={showCommandPalette}
+        onClose={() => setShowCommandPalette(false)}
+        items={commandPaletteItems}
       />
 
       {/* Attribution: Blame Mode toggle button */}
