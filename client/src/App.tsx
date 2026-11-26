@@ -1338,7 +1338,7 @@ export default function App() {
         aria-label={blameMode ? 'Exit blame mode' : 'Enable blame mode — see who drew what'}
         title={blameMode ? 'Exit Blame Mode' : 'Blame Mode — see who drew what'}
         onClick={toggleBlameMode}
-        className={`fixed right-3 sm:right-4 bottom-[calc(env(safe-area-inset-bottom,0px)+4.25rem)] sm:bottom-[68px] z-40 flex items-center gap-1.5 px-2.5 sm:px-3 py-2 rounded-2xl backdrop-blur-md border shadow-lg text-xs font-semibold transition-all cursor-pointer select-none ${
+        className={`fixed right-3 sm:right-4 bottom-[calc(env(safe-area-inset-bottom,0px)+4.25rem)] sm:bottom-[68px] wb-bottom-blame-aware wb-right-chat-aware z-40 flex items-center gap-1.5 px-2.5 sm:px-3 py-2 rounded-2xl backdrop-blur-md border shadow-lg text-xs font-semibold transition-all cursor-pointer select-none ${
           blameMode
             ? 'bg-indigo-600/95 border-indigo-400 text-white shadow-indigo-500/30 ring-2 ring-indigo-400/40'
             : 'bg-white/95 dark:bg-slate-900/95 border-slate-200/90 dark:border-slate-800 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800'
@@ -1624,7 +1624,7 @@ export default function App() {
         aria-live="polite"
         aria-atomic="false"
         aria-label="Notifications"
-        className="fixed top-16 sm:bottom-12 right-3 sm:right-6 z-40 flex flex-col gap-2 pointer-events-none max-w-[90vw]"
+        className="fixed top-16 sm:top-20 right-3 sm:right-4 wb-right-chat-aware z-40 flex flex-col items-end gap-2 pointer-events-none max-w-[90vw]"
       >
         {notifications.map((n) => (
           <div

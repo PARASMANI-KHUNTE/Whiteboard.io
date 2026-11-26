@@ -11,64 +11,30 @@ interface Props {
 
 /**
  * Bottom strip shown in blame mode listing all contributing users and their
- * colour swatch. Purely informational; does not intercept events.
+ * colour swatch. Centered within the active canvas area (accounting for both
+ * the desktop sidebar and AI chat panel) and pointer-transparent.
  */
 export function BlameModeLegend({ users }: Props) {
   if (users.length === 0) return null;
 
   return (
     <div
+      id="blame-mode-legend"
       aria-label="Blame mode legend"
-      style={{
-        position: 'fixed',
-        bottom: 56,
-        left: '50%',
-        transform: 'translateX(-50%)',
-        zIndex: 1000,
-        display: 'flex',
-        alignItems: 'center',
-        gap: 12,
-        background: 'rgba(15,23,42,0.92)',
-        border: '1px solid rgba(99,102,241,0.35)',
-        borderRadius: 999,
-        padding: '6px 16px',
-        backdropFilter: 'blur(8px)',
-        boxShadow: '0 4px 20px rgba(0,0,0,0.35)',
-        flexWrap: 'wrap',
-        maxWidth: '90vw',
-        justifyContent: 'center',
-      }}
+      className="fixed bottom-[4.75rem] sm:bottom-11 left-1/2 -translate-x-1/2 wb-canvas-centered wb-bottom-chat-aware z-30 flex flex-wrap items-center justify-center gap-2.5 px-3.5 py-1.5 max-w-[calc(100vw-2rem)] wb-surface-glass rounded-full pointer-events-none select-none shadow-lg"
     >
-      <span style={{ fontSize: 11, color: '#64748b', fontWeight: 600, whiteSpace: 'nowrap' }}>
-        👤 BLAME MODE
+      <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 whitespace-nowrap">
+        👤 Blame Mode
       </span>
-      <div style={{ width: 1, height: 14, background: 'rgba(99,102,241,0.3)' }} />
+      <div className="w-px h-3.5 bg-slate-300/80 dark:bg-slate-700" aria-hidden="true" />
       {users.map((u) => (
-        <div
-          key={u.id}
-          style={{ display: 'flex', alignItems: 'center', gap: 5, whiteSpace: 'nowrap' }}
-        >
+        <div key={u.id} className="flex items-center gap-1.5 whitespace-nowrap">
           <span
-            style={{
-              width: 10,
-              height: 10,
-              borderRadius: '50%',
-              background: u.color,
-              display: 'inline-block',
-              flexShrink: 0,
-              boxShadow: `0 0 6px ${u.color}88`,
-            }}
+            style={{ backgroundColor: u.color, boxShadow: `0 0 6px ${u.color}88` }}
+            className="w-2.5 h-2.5 rounded-full shrink-0 inline-block"
           />
-          <span style={{ fontSize: 11, color: '#e2e8f0' }}>{u.name}</span>
-          <span
-            style={{
-              fontSize: 10,
-              color: '#475569',
-              background: 'rgba(255,255,255,0.06)',
-              borderRadius: 4,
-              padding: '0 4px',
-            }}
-          >
+          <span className="text-[11px] font-medium text-slate-700 dark:text-slate-200">{u.name}</span>
+          <span className="text-[10px] font-mono text-slate-500 dark:text-slate-400 bg-slate-200/70 dark:bg-slate-800/80 rounded px-1">
             {u.count}
           </span>
         </div>
