@@ -212,7 +212,8 @@ html[data-ai-chat-open='true'] .wb-bottom-blame-aware {
     transition: left 0.2s cubic-bezier(0.16, 1, 0.3, 1);
   }
 
-  #whiteboard-zoom-controls {
+  #whiteboard-zoom-controls,
+  .wb-sidebar-minimap {
     left: calc(1rem + var(--wb-sidebar-width));
   }
 
