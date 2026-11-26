@@ -17,6 +17,7 @@ import {
 } from '../utils/soloSync';
 import { notifySessionExpired } from '../utils/authSession';
 import { shouldKeepSoloMigrationAfterConnectError } from '../utils/soloMigration';
+import { stampLocalAttribution } from '../utils/attributionColor';
 
 function getInitialUser() {
   if (typeof window === 'undefined') {
@@ -886,22 +887,32 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
   }, [roomId]);
 
   const emitElementCreate = useCallback((element: CanvasElement) => {
+    const stamped = stampLocalAttribution(
+      element,
+      elementsRef.current[element.id],
+      currentUserRef.current
+    );
     // Optimistic local update
-    setElements((prev) => ({ ...prev, [element.id]: element }));
+    setElements((prev) => ({ ...prev, [stamped.id]: stamped }));
     if (socketRef.current?.connected && roomId) {
-      socketRef.current.emit('element-create', element);
+      socketRef.current.emit('element-create', stamped);
     }
   }, [roomId]);
 
   const emitElementUpdate = useCallback((element: CanvasElement) => {
+    const stamped = stampLocalAttribution(
+      element,
+      elementsRef.current[element.id],
+      currentUserRef.current
+    );
     setElements((prev) => ({
       ...prev,
-      [element.id]: { ...(prev[element.id] || {}), ...element },
+      [stamped.id]: { ...(prev[stamped.id] || {}), ...stamped },
     }));
     if (socketRef.current?.connected && roomId) {
       // Queue the latest state per element; the timer flushes at most once per
       // 50ms so a drag emits ~20 messages/second instead of per pointer event.
-      pendingElementUpdatesRef.current.set(element.id, element);
+      pendingElementUpdatesRef.current.set(stamped.id, stamped);
       if (elementUpdateTimerRef.current === null) {
         elementUpdateTimerRef.current = setTimeout(flushElementUpdates, 50);
       }
@@ -935,15 +946,19 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
 
   const emitElementsBatchCreate = useCallback((newElements: CanvasElement[]) => {
     if (!Array.isArray(newElements) || newElements.length === 0) return;
+    const now = Date.now();
+    const stampedBatch = newElements.map((el) =>
+      stampLocalAttribution(el, elementsRef.current[el.id], currentUserRef.current, now)
+    );
     setElements((prev) => {
       const next = { ...prev };
-      newElements.forEach((el) => {
+      stampedBatch.forEach((el) => {
         next[el.id] = el;
       });
       return next;
     });
     if (socketRef.current?.connected && roomId) {
-      socketRef.current.emit('elements-batch-create', newElements);
+      socketRef.current.emit('elements-batch-create', stampedBatch);
     }
   }, [roomId]);
 

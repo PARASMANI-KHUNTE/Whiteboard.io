@@ -13,6 +13,7 @@ import {
   ShapeType,
   RemoteUser,
   Point,
+  AttributionMeta,
 } from '../types';
 import { StickyNoteItem } from './StickyNoteItem';
 import { TextItem } from './TextItem';
@@ -68,6 +69,8 @@ import {
   segmentIntersectsRect,
 } from '../utils/strokeSimplification';
 import { finalizeStrokeForCommit } from '../utils/strokeCommit';
+import { blameOverlayColor, getEffectiveAttribution } from '../utils/attributionColor';
+import { findHoveredElementAtPoint } from '../utils/attributionHitTest';
 
 interface CanvasProps {
   currentTool: ToolType;
@@ -116,6 +119,19 @@ interface CanvasProps {
   onRegisterGetViewport?: (fn: () => { pan: { x: number; y: number }; zoom: number }) => void;
   isShortcutsOpen?: boolean;
   onCloseShortcuts?: () => void;
+  /** Blame mode: whether author colour overlays are active. */
+  blameMode?: boolean;
+  /** Blame mode: callback to get blame overlay colour for an element (null = off). */
+  blameColorFor?: (el: CanvasElement) => string | null;
+  /** Attribution hover: called when pointer hovers/clicks an element. */
+  onAttributionEnter?: (
+    elementId: string,
+    attribution: AttributionMeta | undefined,
+    clientX: number,
+    clientY: number,
+    immediate?: boolean
+  ) => void;
+  onAttributionLeave?: () => void;
 }
 
 const TOOL_KEY_MAP: Record<string, ToolType> = Object.fromEntries(
@@ -159,6 +175,10 @@ export const Canvas: React.FC<CanvasProps> = ({
   onRegisterGetViewport,
   isShortcutsOpen = false,
   onCloseShortcuts,
+  blameMode = false,
+  blameColorFor,
+  onAttributionEnter,
+  onAttributionLeave,
 }) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -1438,6 +1458,17 @@ export const Canvas: React.FC<CanvasProps> = ({
 
     for (const item of visibleStrokes) {
       const stroke = item.element as DrawingStroke;
+      const blameColor = blameColorFor?.(stroke);
+      if (blameColor) {
+        ctx.save();
+        drawSingleStroke(ctx, {
+          ...stroke,
+          color: blameColor,
+          size: (stroke.isHighlighter ? stroke.size * 2.5 : stroke.size) + 8 / zoom,
+          isHighlighter: true,
+        });
+        ctx.restore();
+      }
       drawSingleStroke(ctx, stroke);
 
       // Highlight selected stroke
@@ -1470,7 +1501,7 @@ export const Canvas: React.FC<CanvasProps> = ({
     }
 
     ctx.restore();
-  }, [elements, liveStrokes, currentStroke, drawSingleStroke, pan, zoom, selectedElementIds, theme, getSpatialIndex]);
+  }, [elements, liveStrokes, currentStroke, drawSingleStroke, pan, zoom, selectedElementIds, theme, getSpatialIndex, blameColorFor]);
 
   // The sizing effect runs once, so it reads the latest draw function through a ref.
   const renderCanvasRef = useRef(renderCanvas);
@@ -1713,7 +1744,17 @@ export const Canvas: React.FC<CanvasProps> = ({
 
       if (clicked) {
         handleSelectElement(clicked.id, isMulti);
+        if (blameMode && 'clientX' in e) {
+          onAttributionEnter?.(
+            clicked.id,
+            getEffectiveAttribution(clicked, remoteUsers),
+            e.clientX,
+            e.clientY,
+            true
+          );
+        }
       } else {
+        onAttributionLeave?.();
         if (!isMulti) {
           handleClearSelection();
         }
@@ -1728,6 +1769,9 @@ export const Canvas: React.FC<CanvasProps> = ({
       }
       return;
     }
+
+    // Dismiss hover tooltip when starting any drawing / placement tool
+    onAttributionLeave?.();
 
     // Handle Wire tool (connect 2 objects with line or curve)
     if (currentTool === 'wire') {
@@ -2027,6 +2071,29 @@ export const Canvas: React.FC<CanvasProps> = ({
       setMarqueeRect((prev) => (prev ? { ...prev, currentX: coords.x, currentY: coords.y } : null));
     }
 
+    // Attribution hover tooltip detection (only while idle / hovering)
+    if (!isDrawing && !isMarqueeRef.current && !wireDraft && onAttributionEnter && 'clientX' in e) {
+      const hoveredEl = findHoveredElementAtPoint(
+        coords,
+        positionedElements,
+        getSpatialIndex(),
+        wireElements,
+        elements,
+        zoom
+      );
+      if (hoveredEl) {
+        onAttributionEnter(
+          hoveredEl.id,
+          getEffectiveAttribution(hoveredEl, remoteUsers),
+          e.clientX,
+          e.clientY,
+          false
+        );
+      } else {
+        onAttributionLeave?.();
+      }
+    }
+
     if (!isDrawing) return;
 
     if (currentTool === 'eraser') {
@@ -2257,6 +2324,7 @@ export const Canvas: React.FC<CanvasProps> = ({
       onMouseLeave={() => {
         handlePointerUp();
         setEraserCursor(null);
+        onAttributionLeave?.();
       }}
       onTouchStart={handlePointerDown}
       onTouchMove={handlePointerMove}
@@ -2323,6 +2391,36 @@ export const Canvas: React.FC<CanvasProps> = ({
                   />
                 );
               })}
+
+          {/* Blame Mode Wire Highlights */}
+          {blameMode && blameColorFor && wireElements.map((wire) => {
+            const fromEl = elements[wire.fromId];
+            const toEl = elements[wire.toId];
+            if (!fromEl || !toEl) return null;
+            const blameColor = blameColorFor(wire);
+            if (!blameColor) return null;
+            const route = routeWire(
+              fromEl,
+              toEl,
+              wire.wireType || 'curve',
+              wire.fromAnchor,
+              wire.toAnchor
+            );
+            if (!route) return null;
+            return (
+              <path
+                key={`blame-wire-${wire.id}`}
+                d={route.svgPath}
+                fill="none"
+                stroke={blameColor}
+                strokeWidth={(wire.strokeWidth || 3) + 10}
+                strokeOpacity={0.35}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="pointer-events-none"
+              />
+            );
+          })}
 
           {wireElements.map((wire) => (
             <WireItem
@@ -2492,6 +2590,37 @@ export const Canvas: React.FC<CanvasProps> = ({
           />
         ))}
 
+
+        {/* Blame Mode Overlays (author tint + creator pill on positioned elements) */}
+        {blameMode && blameColorFor && positionedElements.map((el) => {
+          const blameColor = blameColorFor(el);
+          if (!blameColor) return null;
+          const bounds = getElementBounds(el);
+          const attr = getEffectiveAttribution(el, remoteUsers);
+          return (
+            <div
+              key={`blame-overlay-${el.id}`}
+              data-blame-overlay
+              style={{
+                left: bounds.x - 4,
+                top: bounds.y - 4,
+                width: bounds.width + 8,
+                height: bounds.height + 8,
+                borderColor: blameColor,
+                backgroundColor: blameOverlayColor(blameColor, 0.14),
+                boxShadow: `0 0 0 1px ${blameColor}55`,
+              }}
+              className="pointer-events-none absolute z-20 rounded-xl border-2"
+            >
+              <span
+                style={{ backgroundColor: blameColor }}
+                className="absolute -top-5 left-0 inline-flex items-center rounded-full px-1.5 py-0.5 text-[9px] font-bold text-white shadow-sm whitespace-nowrap"
+              >
+                {attr.createdByName}
+              </span>
+            </div>
+          );
+        })}
 
         {/* AI Change Highlight Spotlight Overlays */}
         {aiHighlightIds.size > 0 && (() => {
