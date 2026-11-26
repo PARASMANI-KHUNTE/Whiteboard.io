@@ -20,6 +20,8 @@ import { useAttributionHover } from './hooks/useAttributionHover';
 import { useBlameMode } from './hooks/useBlameMode';
 import { AttributionTooltip } from './components/ui/AttributionTooltip';
 import { BlameModeLegend } from './components/ui/BlameModeLegend';
+import { FloatingToolDock } from './components/ui/FloatingToolDock';
+import { EmptyCanvasGuide } from './components/ui/EmptyCanvasGuide';
 import { Header } from './components/Header';
 import Sidebar from './components/Sidebar';
 import { Canvas } from './components/Canvas';
@@ -113,6 +115,7 @@ export default function App() {
   const [selectedIconName, setSelectedIconName] = useState<string>('star');
   const [selectedWireStyle, setSelectedWireStyle] = useState<WireStyle>('curve');
   const [showWelcomeHint, setShowWelcomeHint] = useState<boolean>(true);
+  const [showEmptyGuide, setShowEmptyGuide] = useState<boolean>(true);
   const [hasChosenSessionMode, setHasChosenSessionMode] = useState<boolean>(false);
 
   const [showAuthModal, setShowAuthModal] = useState<boolean>(false);
@@ -1328,6 +1331,39 @@ export default function App() {
         blameColorFor={blameColorFor}
         onAttributionEnter={onAttributionEnter}
         onAttributionLeave={onAttributionLeave}
+      />
+
+      {/* Empty Canvas Quick-Start Guide */}
+      <EmptyCanvasGuide
+        visible={
+          showEmptyGuide &&
+          Object.keys(elements).length === 0 &&
+          canWrite &&
+          !isBlockingOverlayOpen
+        }
+        isSoloMode={isSoloMode}
+        onStartDrawing={() => {
+          setCurrentTool('pen');
+          setShowEmptyGuide(false);
+        }}
+        onAddSticky={() => {
+          setCurrentTool('sticky');
+          setShowEmptyGuide(false);
+        }}
+        onOpenAiDiagram={() => {
+          setShowEmptyGuide(false);
+          whiteboardActions.actions.aiDiagram.handler();
+        }}
+        onDismiss={() => setShowEmptyGuide(false)}
+      />
+
+      {/* Compact Floating Tool Dock when sidebar is collapsed */}
+      <FloatingToolDock
+        visible={!isSidebarOpen && !isBlockingOverlayOpen}
+        tools={whiteboardActions.tools}
+        undo={whiteboardActions.actions.undo}
+        redo={whiteboardActions.actions.redo}
+        aiDiagram={whiteboardActions.actions.aiDiagram}
       />
 
       {/* Attribution: Blame Mode toggle button */}
