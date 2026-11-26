@@ -21,7 +21,7 @@ export function BlameModeLegend({ users }: Props) {
     <div
       id="blame-mode-legend"
       aria-label="Blame mode legend"
-      className="fixed bottom-[4.75rem] sm:bottom-11 left-1/2 -translate-x-1/2 wb-canvas-centered wb-bottom-chat-aware z-30 flex flex-wrap items-center justify-center gap-2.5 px-3.5 py-1.5 max-w-[calc(100vw-2rem)] wb-surface-glass rounded-full pointer-events-none select-none shadow-lg"
+      className="fixed bottom-[8rem] sm:bottom-[4.5rem] left-1/2 -translate-x-1/2 wb-canvas-centered wb-bottom-chat-aware z-30 flex flex-wrap items-center justify-center gap-2.5 px-3.5 py-1.5 max-w-[calc(100vw-2rem)] wb-surface-glass rounded-full pointer-events-none select-none shadow-lg"
     >
       <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 whitespace-nowrap">
         👤 Blame Mode
