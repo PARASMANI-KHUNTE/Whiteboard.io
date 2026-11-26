@@ -8,100 +8,85 @@
 [![React 19](https://img.shields.io/badge/React_19-20232A?style=for-the-badge&logo=react&logoColor=61DAFB)](https://react.dev/)
 [![Node.js](https://img.shields.io/badge/Node.js-43853D?style=for-the-badge&logo=node.js&logoColor=white)](https://nodejs.org/)
 [![Socket.io](https://img.shields.io/badge/Socket.io-010101?style=for-the-badge&logo=socket.io&logoColor=white)](https://socket.io/)
-[![Google Gemini](https://img.shields.io/badge/Google_Gemini_3.8_Flash-4285F4?style=for-the-badge&logo=google&logoColor=white)](https://ai.google.dev/)
+[![Multi-Provider AI](https://img.shields.io/badge/Multi--LLM_AI-Gemini_|_Groq_|_NVIDIA_|_Ollama-6366F1?style=for-the-badge)](docs/ARCHITECTURE.md)
 
 <br />
 
-**An enterprise-grade, real-time collaborative digital whiteboard with infinite canvas, WebRTC spatial voice chat, and Gemini & Ollama AI diagram synthesis.**
+**A real-time distributed collaborative digital whiteboard with infinite canvas ergonomics, WebRTC P2P voice mesh, multi-provider AI diagram synthesis, element attribution & Blame Mode, and live multi-format export.**
 
-[🌐 Explore the Live Application](https://whiteboard-io-1.onrender.com/) · [📖 Documentation](docs/ARCHITECTURE.md) · [📊 Presentation Deck](docs/report-tooling/Whiteboard_io_Presentation.pptx) · [🐛 Report Issue](https://github.com/PARASMANI-KHUNTE/Whiteboard.io/issues)
+[🌐 Explore the Live Application](https://whiteboard-io-1.onrender.com/) · [📖 Architecture](docs/ARCHITECTURE.md) · [📊 Presentation Deck](docs/Whiteboard_io_Presentation.pptx) · [📝 Speaker Script](docs/Whiteboard_io_Presentation_Script.docx) · [📄 Project Report](docs/report-tooling/Generated_Project_Report.docx) · [🐛 Report Issue](https://github.com/PARASMANI-KHUNTE/Whiteboard.io/issues)
+
+<br />
+
+![Whiteboard.io Showcase](whiteboard_io_linkedin_post.jpg)
 
 </div>
 
 ---
 
 > [!TIP]
-> **Live Production Deployment**: Experience Whiteboard.io in real time at **[https://whiteboard-io-1.onrender.com/](https://whiteboard-io-1.onrender.com/)**. Open the link across multiple devices or browser windows to test real-time multiplayer drawing, WebRTC mesh voice chat, and AI diagram synthesis.
+> **Live Production Deployment**: Experience Whiteboard.io in real time at **[https://whiteboard-io-1.onrender.com/](https://whiteboard-io-1.onrender.com/)**. Open the link across multiple devices or browser windows to test real-time multiplayer drawing, Blame Mode attribution, WebRTC mesh voice chat, and multi-provider AI diagram synthesis.
 
 ---
 
 ## 💡 What is Whiteboard.io?
 
-**Whiteboard.io** is an all-in-one collaborative visual workspace engineered from the ground up for modern distributed engineering teams, product designers, educators, and creative thinkers. 
+**Whiteboard.io** is an all-in-one collaborative visual workspace built for distributed engineering teams, product designers, educators, and technical creators.
 
-Rather than treating a digital whiteboard as just a flat drawing canvas or an expensive enterprise subscription silo, Whiteboard.io merges **instant visual ideation**, **built-in spatial voice communication**, and **state-of-the-art AI diagram generation** into an open, frictionless platform that runs anywhere with zero setup.
+Rather than treating a digital whiteboard as just a flat drawing canvas or a gated enterprise SaaS tool, Whiteboard.io combines **low-latency Canvas 2D + SVG collaboration**, **element-level author accountability**, **built-in WebRTC voice communication**, **switchable cloud/local AI diagramming**, and **offline-first solo continuity** in one self-hostable MIT-licensed platform.
 
 ---
 
 ## 🥊 Why Whiteboard.io? (How It Differs From Alternatives)
 
-Most existing whiteboards force compromises: either you pay heavy per-seat monthly subscriptions for closed-source corporate platforms, or you use simple drawing tools that lack integrated voice, AI synthesis, or room governance. Here is how Whiteboard.io stands out:
-
-### Feature Comparison Matrix
-
 | Capability | Whiteboard.io | Miro | Excalidraw | FigJam | Google Jamboard |
 | :--- | :---: | :---: | :---: | :---: | :---: |
-| **Integrated AI Diagrams (Cloud & Local)** | ✅ **Free & Built-In** (Gemini 3.8/3.6, local Ollama llama3.2, offline procedural) | 💰 Paid Add-on | ⚠️ Limited / External Plugin | 💰 Paid / Credit Capped | ❌ Deprecated / Dead |
-| **AI Failover Chain & Rate-Limit Shield** | ✅ **High-Availability Resilience** (Failover chain, queue pacing, 2hr cache, procedural fallback) | ❌ Standard 429 errors | ❌ N/A | ❌ Hard caps | ❌ No AI |
-| **Interactive AI Follow-up Chat** | ✅ **In-Canvas Conversational Drawer** (Iterate, refine, and diff diagrams with natural language) | ❌ Static generation | ❌ None | ⚠️ Basic text | ❌ None |
-| **Built-in Peer-to-Peer Voice Mesh** | ✅ **Native WebRTC Audio** with Live Waveform Visualizer | 💰 Enterprise Only | ❌ Requires Zoom/Discord | ⚠️ Basic Audio | ❌ Requires Google Meet |
-| **Consensus Vote-to-Clear Protection** | ✅ **Democratic 15s Countdown** (Prevents accidental/troll board wipes) | ❌ Host wipe or undo | ❌ Anyone can clear | ❌ Anyone can clear | ❌ Anyone can clear |
-| **Host Moderation & Governance** | ✅ **Lock Room, Toggle User Drawing Privileges, Kick Users** | 💰 Team/Enterprise Tier | ❌ Basic / None | 💰 Paid Tier | ❌ Minimal |
-| **Self-Hostable & 100% Open Source** | ✅ **MIT License** (Run on Render, Railway, or VPS) | ❌ Proprietary SaaS | ⚠️ Client only (Backend custom) | ❌ Proprietary SaaS | ❌ Shut Down |
-| **Frictionless Identity & Persistence** | ✅ **Solo Autosave, Persistent Guest Profiles, Recent Rooms & MongoDB** | ⚠️ Requires account for full tools | ⚠️ Ephemeral / LocalStorage | ⚠️ Requires Figma account | ⚠️ Requires Google account |
+| **Multi-Provider AI Diagrams** | ✅ **Built-In Switcher** (Gemini, Groq, NVIDIA NIM, OpenRouter, DeepSeek, Ollama, Procedural) | 💰 Paid Add-on | ⚠️ Limited / External Plugin | 💰 Paid / Credit Capped | ❌ Deprecated |
+| **AI Failover Chain & Rate-Limit Shield** | ✅ **Automatic Failover** (404/503 circuit breaker, queue pacing, 2hr cache, procedural fallback) | ❌ Standard errors | ❌ N/A | ❌ Hard caps | ❌ No AI |
+| **Interactive AI Follow-up Chat** | ✅ **In-Canvas Chat Drawer** (Conversational revisions + visual element diff highlights) | ❌ Static generation | ❌ None | ⚠️ Basic text | ❌ None |
+| **Attribution, Blame Mode & Timeline** | ✅ **Built-In** (`createdBy`/`lastModifiedBy`, hover tooltips, Blame Mode, Activity Timeline) | 💰 Enterprise history | ❌ None | ⚠️ Cursor names only | ❌ None |
+| **Built-in Peer-to-Peer Voice Mesh** | ✅ **Native WebRTC Audio** with live cursor speaking halos & waveform | 💰 Enterprise Only | ❌ Requires external call | ⚠️ Basic Audio | ❌ Requires Google Meet |
+| **Consensus Vote-to-Clear & Governance** | ✅ **15s Democratic Vote** + Host lock, per-user write toggle, kick | ❌ Host wipe / undo | ❌ Anyone can clear | ❌ Anyone can clear | ❌ Anyone can clear |
+| **Live Export Preview & Formats** | ✅ **PNG, SVG, JPEG, WEBP, JSON** (1x–3x scale, board/viewport, transparency) | ⚠️ Full features paid | ✅ PNG/SVG/JSON | ⚠️ Paid tiers | ⚠️ PDF/PNG only |
+| **Offline Solo + Cross-Tab Merge** | ✅ **IndexedDB + BroadcastChannel Sync** + 1-click Go Live migration | ❌ Account required | ✅ LocalStorage | ❌ Online account | ❌ Online account |
+| **Self-Hostable & Open Source** | ✅ **MIT License** (Render, Railway, VPS) | ❌ Proprietary SaaS | ⚠️ Client open / backend custom | ❌ Proprietary SaaS | ❌ Shut Down |
 
 ### Key Differentiators Explained
 
-1. **⚡ Native AI Diagram Generation with Zero Failure Rate**:
-   Unlike platforms where AI features are gated behind $20/user/month paywalls or frequently crash with `429 Too Many Requests`, Whiteboard.io integrates Google Gemini 3.8 Flash, Gemini 3.6 Flash, and local Ollama (`llama3.2`) with an automated failover chain and a 5-layer rate-limit shield. It paces outbound requests, caches popular structures for 2 hours, and includes an offline procedural generator that guarantees your brainstorming flow is never interrupted.
-
-2. **💬 Conversational Diagram Revisions**:
-   Diagramming is an iterative process. With the integrated AI Chat panel, teams can revise generated diagrams directly on the canvas using natural language (e.g. *"Add an authentication middleware between Gateway and Service"*, *"Switch to a horizontal layout"*). Revisions are calculated as differential updates with atomic undo/redo support.
-
-3. **🎙️ No More "Can You Send the Zoom Link?"**:
-   Whiteboard.io eliminates meeting tab fatigue. With native WebRTC mesh voice chat and real-time audio visualizers, participants speak directly through the whiteboard. Green audio rings pulsate around multiplayer cursors as team members talk, creating a genuine sense of co-presence.
-
-4. **🛡️ Anti-Troll & Accidental Wipe Protection**:
-   In large collaborative sessions, a single rogue click can clear hours of work. Whiteboard.io introduces a **Consensus Vote-to-Clear** mechanism: wiping the canvas requires a 15-second democratic vote where participants cast their ballots in real time. For organized presentations, hosts can lock the canvas into view-only mode or revoke drawing privileges for specific attendees.
-
-5. **💾 Multi-Tier Persistence & Session Continuity**:
-   Whiteboard.io ensures you never lose your work: solo whiteboards autosave to browser storage, guest user profiles remain stable across room switching, recent rooms are tracked in an LRU history, and collaborative rooms persist to MongoDB with native pooling and debounced atomic element syncing.
+1. **⚡ Resilient Multi-Provider AI Engine**:
+   Switch directly inside the AI Generate and AI Chat dialogs between **Google Gemini**, **Groq**, **NVIDIA NIM**, **OpenRouter**, **DeepSeek**, local **Ollama** (`llama3.2`), or `Auto` failover. A 5-layer shield — IP rate limiting, 2-hour response cache, outbound queue pacing, 404/503 circuit breakers, and an offline procedural fallback — ensures diagram generation never leaves users stuck.
+2. **🕵️ Drawing Accountability ("Who Drew What?")**:
+   Every stroke, sticky note, shape, text box, icon, and wire carries server-stamped `createdBy` and `lastModifiedBy` attribution persisted in MongoDB. Hover any element for an author tooltip, toggle **Blame Mode** to colorize the canvas by contributor with a live legend, or open the **Activity Timeline** drawer for a chronological feed with 1-click camera focus.
+3. **🎙️ Built-In WebRTC P2P Voice Mesh**:
+   Collaborate by voice directly inside the room over `RTCPeerConnection` mesh signaling — complete with `AudioContext` frequency waveform visualizers, animated speaking halos around remote cursors, mute/deafen controls, per-user volume, and custom STUN/TURN support.
+4. **🛡️ Anti-Troll Governance & Vote-to-Clear**:
+   Prevent accidental wipes with a democratic 15-second **Vote-to-Clear** consensus banner, host view-only room locking, per-participant write toggles, element locking, and multi-tab kick enforcement.
+5. **💾 Offline-First Continuity**:
+   Start drawing immediately in **Solo Mode** with automatic **IndexedDB** persistence (`localStorage` fallback), cross-tab **BroadcastChannel** conflict-merging, stable guest profiles, and **1-click migration** into a live collaborative room.
 
 ---
 
 ## 🚀 Key Features
 
-* **✨ Multi-Engine AI Diagram & Mind Map Generator**:
-  * Generate instant visual diagrams using Google Gemini 3.8 Flash or local Ollama models (`llama3.2`) from natural language prompts.
-  * 4 Specialized styles: 🧠 **Mind Maps** (radial hubs), 🔀 **Flowcharts** (decision diamonds & step boxes), 📋 **Sticky Boards** (SWOT / Kanban columns), and 🏗️ **System Architectures**.
-  * **Model Failover Chain**: Automatically fails over across Gemini models, local Ollama, and offline procedural synthesis when demand spikes or networks degrade.
-  * **Interactive AI Chat Drawer**: Refine, expand, and reshape diagrams iteratively with natural language follow-up instructions.
-  * **5-Layer Rate-Limit Shield**: Inbound IP rate limiter, in-memory LRU response cache (2hr TTL), outbound request pacing queue (3s spacing), multi-model failover with exponential backoff retries, and offline procedural fallback engine.
-* **⚡ Real-Time Collaboration**: Sub-50ms drawing synchronization across unlimited concurrent users powered by Socket.io and optimistic rendering.
-* **🚀 2D Spatial Acceleration**: Uniform grid spatial index cuts viewport culling, bounding-box selection, and hit tests to $O(\log N + K)$ complexity.
-* **🖌️ Infinite Canvas Engine**: Smooth pan, pinch-to-zoom, high-DPI Retina scaling, and Ramer-Douglas-Peucker (RDP) stroke simplification.
-* **📐 Rich Creative Toolset**:
-  * **Freehand & Highlighter**: Configurable stroke thickness, opacity, and color palette.
-  * **Smart Shapes & Connectors**: Rectangles, circles, diamonds, triangles, stars, and directional arrows with magnetic anchor wire snapping.
-  * **Sticky Notes**: Draggable, colored sticky notes with real-time text editing.
-  * **Rich Text**: Custom font sizes, bold, italic, underline, and alignments.
-  * **Icon Library**: Built-in searchable Lucide icons with scaling and background shapes.
-* **🎙️ Peer-to-Peer Voice Chat**: Integrated WebRTC audio mesh with mute, deafen, and live audio-frequency waveform visualizers.
-* **👥 Multiplayer Cursors & Presence**: Real-time cursor tracking with participant names, colors, and audio-reactive speaking indicators.
-* **🗳️ Consensus Vote-to-Clear**: Democratic 15-second countdown voting mechanism to prevent accidental board wipes.
-* **🛡️ Admin & Host Governance**:
-  * Lock canvas into View-Only mode for participants.
-  * Grant or revoke drawing permissions per user.
-  * Kick/eject disruptive participants with custom reasons.
-  * Automatic host election/migration when the original room owner leaves.
-* **🔐 Complete Authentication Suite**:
-  * Secure Email & Password accounts using PBKDF2-SHA512 (100,000 iterations, a unique 16-byte salt, and a 64-byte derived key).
-  * **Google OAuth 2.0** with popup handling and direct URL hash redirect fallback (`#auth_token=`).
-  * One-click Anonymous Guest identities with persistent session tokens.
-* **💾 Multi-Tier Storage**:
-  * Collaborative boards persist to MongoDB.
-  * Offline solo boards autosave to browser `localStorage`.
-  * Stable guest identity and recent room launcher.
+* **✨ Multi-Provider AI Diagram & Mind Map Engine**:
+  * In-app provider & model switcher across **Google Gemini** (`gemini-3.8-flash`), **Groq**, **NVIDIA NIM**, **OpenRouter**, **DeepSeek**, local **Ollama** (`llama3.2`), and offline **Procedural Synthesis**.
+  * 4 layouts: 🧠 **Mind Maps**, 🔀 **Flowcharts**, 📋 **Sticky Boards**, and 🏗️ **System Architectures**.
+  * Interactive **AI Chat Drawer** for conversational diagram edits with visual diff highlights and atomic undo/redo.
+* **🕵️ Version & Author Attribution**:
+  * **Server-Stamped Attribution**: Tracks `createdBy`, `createdAt`, `lastModifiedBy`, and `lastModifiedAt` across all element types and board clears.
+  * **Hover Tooltips & Blame Mode**: 200ms hover tooltips on any element plus a toggleable **Blame Mode** overlay with creator badges and legend counts.
+  * **Live Activity Timeline**: Chronological room feed with 10s edit coalescing and click-to-focus camera navigation.
+* **🎨 High-Performance Infinite Canvas**:
+  * **HTML5 Canvas 2D + SVG Hybrid Engine** with 256px **2D Spatial Indexing** ($O(\log N + K)$ culling/hit-tests), **Ramer-Douglas-Peucker** stroke simplification, and 50ms drag-update coalescing.
+  * **Pro Ergonomics**: Smart edge/center **Alignment Guides**, optional **24px Grid Snap** (`Alt` bypass), collapsible **Floating Quick-Tool Dock**, **Empty-Canvas Quick-Start Guide**, **Fit-to-Screen** (`Shift+1`), collapsible **Canvas Minimap**, and **Click-to-Follow Collaborator** cursors.
+* **📐 Complete Creative Toolset**:
+  * Freehand Pen & Highlighter, Eraser, **Resizable Sticky Notes** (4-corner handles & color swatches), Rich Text formatting, Shapes (Rectangle, Circle, Diamond, Triangle, Star, Arrow) with rotation & opacity, searchable Lucide Icon Library, and magnetic anchor-snapping Bézier/Line **Wire Connectors**.
+* **⌨️ Power Productivity & Export**:
+  * **`Ctrl+K` / `Cmd+K` Command Palette**: Fuzzy-searchable launcher across all tools and workspace actions.
+  * **Live Preview Multi-Format Exporter (`Ctrl+Shift+E`)**: Export **PNG**, **SVG**, **JPEG**, **WEBP**, or **JSON** with `1x–3x` scale, `Board` vs `Viewport` scope, light/dark/checkerboard transparency preview, and clipboard copy.
+* **🔐 Authentication & Governance**:
+  * Email/password auth (`PBKDF2-SHA512`, 100k iterations), **Google OAuth 2.0** (nonce/state binding), and 7-day TTL **Guest** sessions.
+  * Host lock, per-user write permissions, user kick, automatic host handoff, and Vote-to-Clear.
 
 ---
 
@@ -109,50 +94,49 @@ Most existing whiteboards force compromises: either you pay heavy per-seat month
 
 | Layer | Technologies |
 | :--- | :--- |
-| **Frontend** | React 19, TypeScript, Vite, TailwindCSS, Lucide Icons |
-| **Canvas Engine** | HTML5 Canvas 2D API, 2D Spatial Index, Web Audio API, AnalyserNode |
-| **Artificial Intelligence**| Google Gemini 3.8 / 3.6 Flash, Local Ollama (llama3.2), Structured JSON Schema |
-| **Real-Time Signaling** | Socket.io Client, WebRTC `RTCPeerConnection` (Mesh) |
-| **Backend** | Node.js (ESM), Express 4, Socket.io Server |
-| **Database** | MongoDB 7 / MongoDB Atlas Native Node Driver (required) |
-| **Security** | PBKDF2-SHA512 Password Hashing (100,000 iterations), 32-byte Random Bearer Tokens, Rate Limiting, CORS Allowlist |
-| **Hosting & CI/CD** | Render, Railway, Vercel |
+| **Frontend** | React 19, TypeScript (~5.8), Vite 6, Tailwind CSS 4, `motion`, Lucide Icons |
+| **Canvas Engine** | HTML5 Canvas 2D + SVG, 2D Spatial Index, Web Audio API (`AnalyserNode`) |
+| **Artificial Intelligence** | Google Gemini, Groq, NVIDIA NIM, OpenRouter, DeepSeek, Local Ollama (`llama3.2`), Procedural Layout Engine |
+| **Real-Time & Voice** | Socket.io Client/Server 4.8, WebRTC `RTCPeerConnection` (P2P Audio Mesh) |
+| **Backend** | Node.js (ESM, >=20.19), Express 4, `esbuild` |
+| **Database & Storage** | MongoDB 7 Native Driver (required on server), IndexedDB + `BroadcastChannel` (client solo mode) |
+| **Security** | PBKDF2-SHA512 (100k iterations), 32-byte Opaque Bearer Tokens, OAuth Nonce/State CSRF Binding, Rate Limiting, Strict Payload Allowlists |
+| **Quality & CI/CD** | GitHub Actions CI (`tsc --noEmit`, 222 `tsx --test` assertions, Vite/`esbuild` production builds, Python report freshness & secret scans), Render |
 
 ---
 
 ## 📚 In-Depth Project Documentation
 
-For exhaustive technical guides, explore the dedicated documentation modules:
-
-* 🏛️ **[System Architecture & Data Flow](docs/ARCHITECTURE.md)**: Deep dive into the real-time event pipeline, state conflict resolution, debounced persistence, spatial indexing, and MongoDB database schemas.
-* 📡 **[REST API & Socket.io Events Reference](docs/API_AND_EVENTS.md)**: Complete specification of all REST endpoints (`/api/auth/*`, `/api/rooms/*`, `/api/ai/*`, `/health`) and real-time Socket.io emitter/listener protocols.
-* 💻 **[Client Architecture & Component Guide](docs/CLIENT_GUIDE.md)**: Detailed overview of React component hierarchy, custom hooks (`useSocket`, `useAuth`, `useVoiceChat`), canvas rendering maths, persistence utilities, and keyboard shortcuts.
-* 🚢 **[Deployment & Cloud Hosting Guide](docs/DEPLOYMENT_GUIDE.md)**: Step-by-step instructions for deploying to Render (Fullstack Web Service vs Split Static Site + Web Service), Vercel, Google OAuth Console setup, and MongoDB Atlas.
+* 🏛️ **[System Architecture & Data Flow](docs/ARCHITECTURE.md)**: Real-time event pipeline, state conflict resolution, debounced persistence, spatial indexing, and MongoDB schemas.
+* 📡 **[REST API & Socket.io Events Reference](docs/API_AND_EVENTS.md)**: Full specification of REST endpoints and Socket.io emitter/listener protocols.
+* 💻 **[Client Architecture & Component Guide](docs/CLIENT_GUIDE.md)**: React component hierarchy, custom hooks, canvas geometry/rendering math, and persistence utilities.
+* 🚢 **[Deployment & Cloud Hosting Guide](docs/DEPLOYMENT_GUIDE.md)**: Render, Vercel, Google OAuth setup, and MongoDB Atlas guide.
+* 📊 **[Project Presentation Deck](docs/Whiteboard_io_Presentation.pptx)** & **[Speaker Script](docs/Whiteboard_io_Presentation_Script.docx)**: 11-slide visual overview and companion walkthrough script.
 
 ---
 
 ## ⚡ Quick Start (Local Development)
 
 ### Prerequisites
-* **Node.js**: v20.19.0 or higher (22 LTS recommended — the MongoDB 7 driver requires >=20.19)
+* **Node.js**: v20.19.0 or higher (22 LTS recommended — the MongoDB 7 driver requires `>=20.19`)
 * **npm**: v10.0.0 or higher
-* **MongoDB (required)**: A running local MongoDB instance (`mongodb://127.0.0.1:27017`) or a [MongoDB Atlas](https://www.mongodb.com/atlas) connection string. The server connects at startup and will not listen without a reachable MongoDB; there is no in-memory database fallback.
+* **MongoDB (required)**: A running local MongoDB instance (`mongodb://127.0.0.1:27017`) or a [MongoDB Atlas](https://www.mongodb.com/atlas) connection string. The server connects at startup and will not listen without a reachable MongoDB.
 
-### 1. Clone & Install Dependencies
+### 1. Clone, Build & Verify
 ```bash
 git clone https://github.com/PARASMANI-KHUNTE/Whiteboard.io.git
 cd Whiteboard.io
 
-# Install client and server dependencies
+# Install client and server dependencies & build bundles
 npm run build
 
-# Run the checks used by CI
+# Run the full verification suite used by CI
 npm run typecheck
 npm test
+npm run secret:scan
 ```
 
 ### 2. Configure Environment Variables
-Create your local environment files:
 
 **Server Environment** (`server/.env`):
 ```env
@@ -166,17 +150,20 @@ AI_PROVIDER=
 # Google Gemini API Key for AI Diagram & Mind Map Generation
 GEMINI_API_KEY=your_gemini_api_key_here
 GEMINI_MODEL=gemini-3.8-flash
-# Models tried in order if the primary is rate-limited or unavailable.
 GEMINI_FALLBACK_MODELS=gemini-flash-lite-latest,gemini-3.6-flash
-# Optional additional OpenAI-compatible AI providers (selectable in-app too)
-GROQ_API_KEY=
-NVIDIA_API_KEY=
-OPENROUTER_API_KEY=
-DEEPSEEK_API_KEY=
-# Set to false to stop cloud/auto mode from falling back to a local Ollama model.
-AI_ALLOW_OLLAMA_FALLBACK=true
 
-# Local Ollama engine (no API key needed). See "Local AI with Ollama" below.
+# Optional additional OpenAI-compatible AI providers (selectable in-app)
+GROQ_API_KEY=
+GROQ_BASE_URL=https://api.groq.com/openai/v1
+NVIDIA_API_KEY=
+NVIDIA_BASE_URL=https://integrate.api.nvidia.com/v1
+OPENROUTER_API_KEY=
+OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
+DEEPSEEK_API_KEY=
+DEEPSEEK_BASE_URL=https://api.deepseek.com
+
+# Local Ollama engine (no API key needed)
+AI_ALLOW_OLLAMA_FALLBACK=true
 OLLAMA_BASE_URL=http://127.0.0.1:11434
 OLLAMA_MODEL=llama3.2
 
@@ -187,77 +174,20 @@ GOOGLE_CLIENT_SECRET=
 
 #### Local AI with Ollama (optional)
 
-You can run diagram generation entirely on your own machine with
-[Ollama](https://ollama.com). Install Ollama, pull a model, and set
-`AI_PROVIDER=ollama`:
+Install [Ollama](https://ollama.com), pull a model, and set `AI_PROVIDER=ollama`:
 
 ```bash
 ollama pull llama3.2
-ollama serve   # usually already running as a background service
+ollama serve
 ```
-
-```env
-AI_PROVIDER=ollama
-OLLAMA_MODEL=llama3.2
-OLLAMA_BASE_URL=http://127.0.0.1:11434
-```
-
-Good model choices for structured diagram output:
 
 | Model | Size | Notes |
 | :--- | :---: | :--- |
-| `llama3.2` | ~2 GB | Default. Fast and reliably emits valid schema-constrained JSON. |
+| `llama3.2` | ~2 GB | Default. Fast and reliably emits schema-constrained JSON. |
 | `qwen2.5-coder:14b` | ~9 GB | Stronger structure/labels if you have the VRAM. |
-| `qwen2.5:7b-instruct` | ~4.7 GB | Good reasoning, but some quantized builds loop under JSON constraints — test before relying on it. |
+| `qwen2.5:7b-instruct` | ~4.7 GB | Good reasoning; test quantized builds under JSON constraints. |
 
-Any Ollama model with structured-output/JSON support can be used; set
-`OLLAMA_MODEL` to its exact `ollama list` name.
-
-Tuning variables (all optional):
-
-| Variable | Default | Purpose |
-| :--- | :--- | :--- |
-| `OLLAMA_TIMEOUT_MS` | `180000` | Per-request timeout. Raise it for first-run model loading. |
-| `OLLAMA_NUM_CTX` | `12288` | Context window. |
-| `OLLAMA_NUM_PREDICT` | `6144` | Max tokens generated (raise for very detailed boards). |
-| `OLLAMA_KEEP_ALIVE` | `10m` | How long the model stays loaded between requests. |
-| `OLLAMA_MIN_INTERVAL_MS` | `250` | Minimum gap between two local model calls. |
-| `OLLAMA_API_KEY` | *(empty)* | Only for a remote/protected Ollama server; sent as a bearer token. |
-
-If Ollama is down or returns an unusable graph, the server automatically falls
-back to the built-in offline generator, so the board still gets a diagram.
-
-#### Model failover (optional)
-
-An AI turn walks an ordered chain of backends, so a single unavailable model
-never drops the board straight to the offline generator:
-
-| Mode | Chain |
-| :--- | :--- |
-| unset / `auto` | Configured primary provider -> remaining configured cloud providers (`gemini`, `groq`, `nvidia`, `openrouter`, `deepseek`) -> Ollama (unless disabled) |
-| Explicit provider (`gemini`, `groq`, `nvidia`, `openrouter`, `deepseek`) | Selected provider & model first -> backup configured providers -> Ollama (unless disabled) |
-| `AI_PROVIDER=ollama` | Ollama only |
-| `AI_PROVIDER=fallback` | Offline generator only |
-
-`GEMINI_FALLBACK_MODELS` is a comma-separated list (default
-`gemini-flash-lite-latest,gemini-3.6-flash`); set it to `none` to keep a single Gemini model. Ollama is
-the last resort in `auto` mode even when `OLLAMA_MODEL` is not set — it uses
-`llama3.2` at `http://127.0.0.1:11434` by default. If Ollama is not running the
-attempt fails in milliseconds, so it costs nothing. Disable it with
-`AI_ALLOW_OLLAMA_FALLBACK=false`.
-
-When a failover happens the generated diagram reports the engine that actually
-answered. Notices are composed, so a failover and a quality-gate finding are
-both shown when they apply:
-
-> Gemini 3.8 Flash unavailable — Ollama · llama3.2 produced this diagram. Quality checks reported: Only 10 nodes were produced; at least 12 are required.
-
-A provider that answers with an empty graph is reported as such, while a total
-provider outage is reported as “No AI model responded”. Both cases fall back to
-the local procedural engine and say so in the notice.
-
-The active engine is shown in the generation dialog badge and exposed at
-`GET /api/ai/config`.
+Tuning variables (`OLLAMA_TIMEOUT_MS`, `OLLAMA_NUM_CTX`, `OLLAMA_NUM_PREDICT`, `OLLAMA_KEEP_ALIVE`, `OLLAMA_MIN_INTERVAL_MS`, `OLLAMA_API_KEY`) are documented in `server/.env.example`.
 
 **Client Environment** (`client/.env`):
 ```env
@@ -266,19 +196,17 @@ VITE_BACKEND_URL=http://127.0.0.1:3000
 ```
 
 ### 3. Run the Development Servers
-Open two terminal windows:
-
 ```bash
-# Terminal 1: Start Backend Server (runs on http://localhost:3000)
+# Terminal 1: Backend Server (http://localhost:3000)
 cd server
 npm run dev
 
-# Terminal 2: Start Frontend Client (runs on http://localhost:5173)
+# Terminal 2: Frontend Client (http://localhost:5173)
 cd client
 npm run dev
 ```
 
-Open [http://localhost:5173](http://localhost:5173) in your browser. Open multiple tabs or incognito windows to test live multiplayer collaboration!
+Open [http://localhost:5173](http://localhost:5173) in your browser and open another tab or incognito window to test live multiplayer collaboration.
 
 ---
 
@@ -286,23 +214,14 @@ Open [http://localhost:5173](http://localhost:5173) in your browser. Open multip
 
 ### Option A: Full-Stack Web Service (Recommended)
 Deploying on **Render**, **Railway**, or a single VPS:
-1. Create a **Web Service** with **Node** runtime.
+1. Create a **Web Service** with **Node** runtime (`>=20.19`).
 2. **Build Command**: `npm run build`
 3. **Start Command**: `npm start`
-4. Set environment variables:
-   * `APP_URL`: `https://whiteboard-io-1.onrender.com`
-   * `MONGODB_URI`: `<your_atlas_connection_string>`
-   * `GEMINI_API_KEY`: `your_gemini_api_key_here`
-   * `GOOGLE_CLIENT_ID` & `GOOGLE_CLIENT_SECRET`: *(From Google Cloud Console)*
+4. Set environment variables (`APP_URL`, `MONGODB_URI`, configured AI API keys, and optional `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`).
 
 ### Option B: Split Frontend (Static) & Backend (Web Service)
-* **Backend (Render Web Service)**:
-  * Runs Node server on `https://whiteboard-io-1.onrender.com`.
-  * Set `APP_URL=https://<your-frontend>.onrender.com` to allow CORS and OAuth redirects.
-  * Set `GEMINI_API_KEY=your_gemini_api_key_here`.
-* **Frontend (Render Static Site or Vercel)**:
-  * Publishes `client/dist`.
-  * Set `VITE_BACKEND_URL=https://whiteboard-io-1.onrender.com`.
+* **Backend**: Node Web Service with `APP_URL` pointing to your frontend origin (for CORS & OAuth redirects).
+* **Frontend**: Static site publishing `client/dist` with `VITE_BACKEND_URL` pointing to the backend URL.
 
 ---
 
@@ -310,17 +229,19 @@ Deploying on **Render**, **Railway**, or a single VPS:
 
 | Key | Tool / Action | Key | Tool / Action |
 | :---: | :--- | :---: | :--- |
-| `V` / `1` | Select / Move | `S` / `6` | Sticky Note |
-| `H` / `2` | Hand / Pan | `T` / `7` | Text Box |
-| `P` / `3` | Freehand Pen | `R` / `8` | Shapes |
-| `M` / `4` | Highlighter | `I` / `9` | Icon Library |
-| `E` / `5` | Eraser | `Ctrl + Z` / `Cmd + Z` | Undo |
-| `Space + Drag` | Pan Canvas | `Ctrl + Y` / `Cmd + Shift + Z` | Redo |
-| `Ctrl + C` / `Cmd + C` | Copy Element | `Ctrl + V` / `Cmd + V` | Paste Element |
-| `Ctrl + D` / `Cmd + D` | Duplicate Element | `Ctrl + A` / `Cmd + A` | Select All |
-| `Delete` / `Backspace` | Delete Element | `[` / `]` | Send Backward / Bring Forward |
-| `Arrow Keys` | Nudge (1px) | `Shift + Arrow Keys` | Fast Nudge (10px) |
-| `?` or `Shift + /` | Shortcut Cheat Sheet | `Right Click` | Context Menu |
+| `V` | Select / Move | `S` | Sticky Note |
+| `H` | Hand / Pan | `T` | Text Box |
+| `P` | Freehand Pen | `R` | Shapes |
+| `Y` | Highlighter | `I` | Icon Library |
+| `E` | Eraser | `W` | Wire Connector |
+| `Ctrl + K` / `Cmd + K` | **Command Palette** | `Ctrl + Shift + E` | **Export & Preview** |
+| `Shift + 1` | **Fit All to Screen** | `0` / `+` / `-` | Reset / Zoom In / Out |
+| `Space + Drag` / `Middle` | Pan Canvas | `Ctrl + Wheel` | Zoom to Cursor |
+| `Ctrl + Z` / `Ctrl + Shift + Z` | Undo / Redo | `Ctrl + A` | Select All |
+| `Ctrl + C` / `Ctrl + X` / `Ctrl + V` | Copy / Cut / Paste | `Ctrl + D` / `Alt + Drag` | Duplicate |
+| `Delete` / `Backspace` | Delete Selection | `[` / `]` | Send Backward / Bring Forward |
+| `Arrow Keys` / `Shift + Arrow` | Nudge 1px / 10px | `?` or `Shift + /` | Shortcut Cheat Sheet |
+| `Esc` | Clear Selection / Close Overlay | `Right Click` | Context Menu |
 
 ---
 
