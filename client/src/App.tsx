@@ -16,6 +16,10 @@ import { useTheme } from './hooks/useTheme';
 import { useModalA11y } from './hooks/useModalA11y';
 import { useTouchPointerBridge } from './hooks/useTouchPointerBridge';
 import { useWhiteboardActions } from './hooks/useWhiteboardActions';
+import { useAttributionHover } from './hooks/useAttributionHover';
+import { useBlameMode } from './hooks/useBlameMode';
+import { AttributionTooltip } from './components/ui/AttributionTooltip';
+import { BlameModeLegend } from './components/ui/BlameModeLegend';
 import { Header } from './components/Header';
 import Sidebar from './components/Sidebar';
 import { Canvas } from './components/Canvas';
@@ -223,6 +227,14 @@ export default function App() {
     dismissNotification,
     socket,
   } = useSocket(undefined, authUser, token);
+
+  // Attribution: blame mode + hover tooltip
+  const { blameMode, toggleBlameMode, legendUsers, blameColorFor } = useBlameMode(elements, users);
+  const {
+    hovered: attributionHovered,
+    onElementMouseEnter: onAttributionEnter,
+    onElementMouseLeave: onAttributionLeave,
+  } = useAttributionHover();
 
   // Surface session expiry from REST/AI/socket callers. useAuth performs the
   // actual recovery; this only keeps the user informed.
@@ -1312,7 +1324,41 @@ export default function App() {
         onRegisterGetViewport={(fn) => {
           getViewportRef.current = fn;
         }}
+        blameMode={blameMode}
+        blameColorFor={blameColorFor}
+        onAttributionEnter={onAttributionEnter}
+        onAttributionLeave={onAttributionLeave}
       />
+
+      {/* Attribution: Blame Mode toggle button */}
+      <button
+        id="blame-mode-toggle-btn"
+        type="button"
+        aria-pressed={blameMode}
+        aria-label={blameMode ? 'Exit blame mode' : 'Enable blame mode — see who drew what'}
+        title={blameMode ? 'Exit Blame Mode' : 'Blame Mode — see who drew what'}
+        onClick={toggleBlameMode}
+        className={`fixed right-3 sm:right-4 bottom-[calc(env(safe-area-inset-bottom,0px)+4.25rem)] sm:bottom-[68px] z-40 flex items-center gap-1.5 px-2.5 sm:px-3 py-2 rounded-2xl backdrop-blur-md border shadow-lg text-xs font-semibold transition-all cursor-pointer select-none ${
+          blameMode
+            ? 'bg-indigo-600/95 border-indigo-400 text-white shadow-indigo-500/30 ring-2 ring-indigo-400/40'
+            : 'bg-white/95 dark:bg-slate-900/95 border-slate-200/90 dark:border-slate-800 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800'
+        }`}
+      >
+        <span aria-hidden className="text-sm leading-none">👤</span>
+        <span className="hidden sm:inline">{blameMode ? 'Exit Blame' : 'Blame Mode'}</span>
+      </button>
+
+      {/* Attribution: Blame Mode Legend */}
+      {blameMode && <BlameModeLegend users={legendUsers} />}
+
+      {/* Attribution: Hover tooltip */}
+      {attributionHovered && (
+        <AttributionTooltip
+          attribution={attributionHovered.attribution}
+          x={attributionHovered.x}
+          y={attributionHovered.y}
+        />
+      )}
 
       {/* Vote to Clear Modal Banner */}
       {voteToClear && voteToClear.active && (

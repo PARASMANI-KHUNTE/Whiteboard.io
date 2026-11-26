@@ -1,5 +1,25 @@
 export type ToolType = 'select' | 'hand' | 'pen' | 'highlighter' | 'eraser' | 'sticky' | 'text' | 'shape' | 'icon' | 'wire';
 
+/** Lightweight attribution snapshot attached to every canvas element. */
+export interface AttributionMeta {
+  /** User id of the original creator. */
+  createdBy: string;
+  /** Display name of the original creator. */
+  createdByName: string;
+  /** Accent colour of the original creator (hex). */
+  createdByColor: string;
+  /** Unix ms timestamp of creation. */
+  createdAt: number;
+  /** User id of whoever last touched this element. */
+  lastModifiedBy: string;
+  /** Display name of whoever last touched this element. */
+  lastModifiedByName: string;
+  /** Accent colour of whoever last touched this element (hex). */
+  lastModifiedByColor: string;
+  /** Unix ms timestamp of last modification. */
+  lastModifiedAt: number;
+}
+
 export type ShapeType = 'rectangle' | 'circle' | 'diamond' | 'triangle' | 'star' | 'arrow';
 
 export type WireStyle = 'line' | 'curve';
@@ -21,6 +41,8 @@ export interface DrawingStroke {
   isLocked?: boolean;
   userId: string;
   createdAt: number;
+  /** Attribution metadata — who created / last modified this element. */
+  attribution?: AttributionMeta;
 }
 
 export interface StickyNote {
@@ -38,6 +60,7 @@ export interface StickyNote {
   isLocked?: boolean;
   /** Explicit stacking order within the element's own layer. */
   zIndex?: number;
+  attribution?: AttributionMeta;
 }
 
 export interface TextElement {
@@ -58,6 +81,7 @@ export interface TextElement {
   userName: string;
   updatedAt: number;
   zIndex?: number;
+  attribution?: AttributionMeta;
 }
 
 export interface ShapeElement {
@@ -82,6 +106,7 @@ export interface ShapeElement {
   userName?: string;
   updatedAt: number;
   zIndex?: number;
+  attribution?: AttributionMeta;
 }
 
 export interface IconElement {
@@ -103,6 +128,7 @@ export interface IconElement {
   userName?: string;
   updatedAt: number;
   zIndex?: number;
+  attribution?: AttributionMeta;
 }
 
 export interface WireElement {
@@ -123,6 +149,7 @@ export interface WireElement {
   userId: string;
   userName?: string;
   updatedAt: number;
+  attribution?: AttributionMeta;
 }
 
 export type CanvasElement = DrawingStroke | StickyNote | TextElement | ShapeElement | IconElement | WireElement;

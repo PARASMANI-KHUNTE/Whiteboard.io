@@ -64,6 +64,7 @@ import {
   MAX_POINTS_PER_STROKE,
 } from "./socketPayload";
 import { guardSocketHandler } from "./socketHandler";
+import { stampElementAttribution } from "./attribution";
 
 /** Live strokes expire after this long without a new point. */
 const LIVE_STROKE_TTL_MS = 30_000;
@@ -1713,10 +1714,16 @@ async function startServer() {
         });
         return;
       }
-      room.elements[clean.id] = clean as CanvasElement;
+      const actor = {
+        id: currentUser?.id ?? (clean.userId as string),
+        name: currentUser?.name ?? (clean.userName as string | undefined) ?? "Unknown",
+        color: currentUser?.color ?? "#6b7280",
+      };
+      const attributed = stampElementAttribution(clean, room.elements[clean.id], actor);
+      room.elements[clean.id] = attributed as CanvasElement;
       liveStrokes.delete(clean.id);
       saveRoomElementsDebounced(currentRoomId, room.elements, 400);
-      socket.to(currentRoomId).emit("element-created", clean);
+      socket.to(currentRoomId).emit("element-created", attributed);
     });
 
     // Batch element creation (e.g. converting solo canvas to multiplayer room, Guarded)
@@ -1732,11 +1739,19 @@ async function startServer() {
         });
         return;
       }
-      clean.forEach((el) => {
-        room.elements[el.id] = el as CanvasElement;
+      const now = Date.now();
+      const actor = {
+        id: currentUser?.id ?? "unknown",
+        name: currentUser?.name ?? "Unknown",
+        color: currentUser?.color ?? "#6b7280",
+      };
+      const attributedBatch = clean.map((el) => {
+        const stamped = stampElementAttribution(el, room.elements[el.id], actor, now);
+        room.elements[el.id] = stamped as CanvasElement;
+        return stamped;
       });
       saveRoomElementsDebounced(currentRoomId, room.elements, 400);
-      socket.to(currentRoomId).emit("elements-batch-created", clean);
+      socket.to(currentRoomId).emit("elements-batch-created", attributedBatch);
     });
 
     // Element update (e.g. moving sticky note or updating text, Guarded)
@@ -1752,13 +1767,19 @@ async function startServer() {
         });
         return;
       }
+      const actor = {
+        id: currentUser?.id ?? (clean.userId as string),
+        name: currentUser?.name ?? (clean.userName as string | undefined) ?? "Unknown",
+        color: currentUser?.color ?? "#6b7280",
+      };
+      const attributed = stampElementAttribution(clean, room.elements[clean.id], actor);
       if (room.elements[clean.id]) {
-        room.elements[clean.id] = { ...room.elements[clean.id], ...clean } as CanvasElement;
+        room.elements[clean.id] = { ...room.elements[clean.id], ...attributed } as CanvasElement;
       } else {
-        room.elements[clean.id] = clean as CanvasElement;
+        room.elements[clean.id] = attributed as CanvasElement;
       }
       saveRoomElementsDebounced(currentRoomId, room.elements, 800);
-      socket.to(currentRoomId).emit("element-updated", clean);
+      socket.to(currentRoomId).emit("element-updated", attributed);
     });
 
     // Element delete (Guarded)
@@ -1926,6 +1947,7 @@ async function startServer() {
         void saveRoomElements(targetRoomId, {});
         io.to(targetRoomId).emit("board-cleared", {
           initiatorName: currentUser.name,
+          clearedBy: { userId: currentUser.id, name: currentUser.name },
           wasVoted: false,
         });
         return;
@@ -1971,6 +1993,10 @@ async function startServer() {
           void saveRoomElements(targetRoomId, {});
           io.to(targetRoomId).emit("board-cleared", {
             initiatorName: currentRoom.voteToClear.initiatorName,
+            clearedBy: {
+              userId: currentRoom.voteToClear.initiatorId,
+              name: currentRoom.voteToClear.initiatorName,
+            },
             wasVoted: true,
           });
         }
@@ -2012,6 +2038,10 @@ async function startServer() {
         void saveRoomElements(currentRoomId, {});
         io.to(currentRoomId).emit("board-cleared", {
           initiatorName: room.voteToClear.initiatorName,
+          clearedBy: {
+            userId: room.voteToClear.initiatorId,
+            name: room.voteToClear.initiatorName,
+          },
           wasVoted: true,
         });
         io.to(currentRoomId).emit("vote-clear-ended", {
@@ -2097,6 +2127,7 @@ async function startServer() {
       void saveRoomElements(currentRoomId, {});
       io.to(currentRoomId).emit("board-cleared", {
         initiatorName: currentUser.name,
+        clearedBy: { userId: currentUser.id, name: currentUser.name },
         wasVoted: false,
       });
       respond(true);
