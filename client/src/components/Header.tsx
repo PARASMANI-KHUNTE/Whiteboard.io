@@ -2,7 +2,7 @@ import React from 'react';
 import { RemoteUser } from '../types';
 import { AudioVisualizerBar } from './AudioVisualizerBar';
 import type { WhiteboardActionRegistry } from '../hooks/useWhiteboardActions';
-import { Crown, Lock, MicOff } from 'lucide-react';
+import { Crown, Lock, MicOff, Users } from 'lucide-react';
 
 interface HeaderProps {
   roomId: string | null;
@@ -66,7 +66,9 @@ export const Header: React.FC<HeaderProps> = ({
 }) => {
   const {
     sidebar: sidebarAction,
+    share: shareAction,
     shareGoLive: shareGoLiveAction,
+    admin: adminAction,
     voiceToggle: voiceToggleAction,
     voiceMute: voiceMuteAction,
   } = actions.actions;
@@ -117,10 +119,13 @@ export const Header: React.FC<HeaderProps> = ({
 
         {/* Active Session Status Indicators */}
         <div className="flex items-center gap-1.5 min-w-0">
-          <div
+          <button
             id="room-status-pill"
-            title={isSoloMode ? 'Personal canvas (switch rooms from sidebar)' : `Active room: ${roomName || roomId}`}
-            className="flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1.5 rounded-xl bg-slate-100/90 dark:bg-slate-800/80 text-slate-700 dark:text-slate-200 border border-slate-200/70 dark:border-slate-700/80 max-w-[140px] sm:max-w-[200px]"
+            type="button"
+            onClick={isSoloMode ? shareGoLiveAction.handler : shareAction.handler}
+            aria-label={isSoloMode ? 'Solo canvas — click to share and go live' : `Room ${roomName || roomId} — click to share or manage`}
+            title={isSoloMode ? 'Personal canvas — click to Share & Go Live' : `Active room: ${roomName || roomId} (click to share)`}
+            className="flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1.5 rounded-xl bg-slate-100/90 dark:bg-slate-800/80 hover:bg-slate-200/80 dark:hover:bg-slate-700/80 text-slate-700 dark:text-slate-200 border border-slate-200/70 dark:border-slate-700/80 max-w-[140px] sm:max-w-[200px] transition-colors cursor-pointer"
           >
             <span className="relative flex h-2 w-2 shrink-0">
               {isConnected && !isSoloMode && (
@@ -142,7 +147,7 @@ export const Header: React.FC<HeaderProps> = ({
             <span className="hidden md:inline font-mono text-[10px] text-slate-400 dark:text-slate-400">
               {isSoloMode ? '· Private' : isConnected ? '· Live' : '· Syncing'}
             </span>
-          </div>
+          </button>
 
           {isLocked && (
             <div
@@ -193,6 +198,21 @@ export const Header: React.FC<HeaderProps> = ({
 
       {/* Right Workspace Live Context: Collaborator Avatars & Solo Go Live CTA */}
       <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
+        {!isSoloMode && activeUserList.length > 0 && (
+          <button
+            id="mobile-participants-btn"
+            type="button"
+            onClick={adminAction.handler}
+            disabled={adminAction.disabled}
+            aria-label={`View ${activeUserList.length} active participant${activeUserList.length === 1 ? '' : 's'}`}
+            title={`${activeUserList.length} participant${activeUserList.length === 1 ? '' : 's'} — tap to view`}
+            className="flex sm:hidden items-center gap-1 px-2 py-1.5 min-h-[36px] rounded-xl bg-slate-100/90 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-200/70 dark:border-slate-700/80 text-xs font-semibold cursor-pointer transition-colors"
+          >
+            <Users className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400 shrink-0" aria-hidden />
+            <span className="tabular-nums">{activeUserList.length}</span>
+          </button>
+        )}
+
         {activeUserList.length > 0 && (
           <div className="hidden sm:flex items-center -space-x-1.5 overflow-hidden py-1 px-1">
             {activeUserList.slice(0, 3).map((u) => {
