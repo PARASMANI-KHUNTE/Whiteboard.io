@@ -192,7 +192,7 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
       socketRef.current.emit('join-room', {
         roomId,
         user: nextUser,
-        token: authToken,
+        ...(authToken !== 'cookie' ? { token: authToken } : {}),
       });
     }
   }, [authUser, authToken, roomId]);
@@ -452,6 +452,7 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
     setVoteToClear(null);
 
     const socket = io(BACKEND_URL || undefined, {
+      withCredentials: true,
       transports: ['polling', 'websocket'],
       upgrade: true,
       rememberUpgrade: true,
@@ -469,7 +470,7 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
       socket.emit('join-room', {
         roomId,
         user: currentUserRef.current,
-        token: authToken,
+        ...(authToken && authToken !== 'cookie' ? { token: authToken } : {}),
       });
     });
 
@@ -1033,7 +1034,7 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
       socketRef.current.emit('join-room', {
         roomId,
         user: updatedUser,
-        token: authToken,
+        ...(authToken !== 'cookie' ? { token: authToken } : {}),
       });
     }
   }, [roomId, authToken]);
@@ -1046,7 +1047,7 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
       socketRef.current.emit('join-room', {
         roomId,
         user: updatedUser,
-        token: authToken,
+        ...(authToken !== 'cookie' ? { token: authToken } : {}),
       });
     }
   }, [roomId, authToken]);

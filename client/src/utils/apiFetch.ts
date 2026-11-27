@@ -1,8 +1,7 @@
 import { BACKEND_URL } from '../config';
 import { notifySessionExpired } from './authSession';
-import { safeGetItem, safeRemoveItem } from './safeStorage';
+import { safeRemoveItem } from './safeStorage';
 
-export const AUTH_TOKEN_KEY = 'whiteboard_auth_token';
 export const AUTH_USER_KEY = 'whiteboard_cached_user';
 
 export interface ApiErrorData {
@@ -22,25 +21,23 @@ export class ApiError extends Error {
   }
 }
 
-/** Drop credentials that the server has already rejected. */
+/** Drop cached user metadata when the server has rejected the session. */
 export function clearStoredAuth(): void {
-  safeRemoveItem(AUTH_TOKEN_KEY);
   safeRemoveItem(AUTH_USER_KEY);
 }
 
 /**
- * Single entry point for authenticated REST/AI calls. Injects the current
- * token and turns a 401 into one session-expiry notification, so every caller
- * recovers consistently instead of showing a generic error.
+ * Single entry point for authenticated REST/AI calls. Sends credentials
+ * (httpOnly auth cookie) and turns a 401 into one session-expiry notification.
  */
 export async function apiFetch(path: string, init: RequestInit = {}): Promise<Response> {
-  const token = safeGetItem(AUTH_TOKEN_KEY);
   const headers = new Headers(init.headers);
-  if (token && !headers.has('Authorization')) {
-    headers.set('Authorization', `Bearer ${token}`);
-  }
 
-  const res = await fetch(`${BACKEND_URL}${path}`, { ...init, headers });
+  const res = await fetch(`${BACKEND_URL}${path}`, {
+    ...init,
+    credentials: init.credentials ?? 'include',
+    headers,
+  });
   if (res.status === 401) {
     clearStoredAuth();
     notifySessionExpired();

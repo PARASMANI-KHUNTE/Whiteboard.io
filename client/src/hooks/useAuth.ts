@@ -4,7 +4,6 @@ import { BACKEND_URL } from '../config';
 import { getGuestIdentity } from '../utils/guestIdentity';
 import {
   apiFetchJson,
-  AUTH_TOKEN_KEY,
   AUTH_USER_KEY,
 } from '../utils/apiFetch';
 import { subscribeToSessionExpired } from '../utils/authSession';
@@ -12,7 +11,6 @@ import { safeGetItem, safeRemoveItem, safeSetItem } from '../utils/safeStorage';
 
 export type { AuthUser, SessionRoom };
 
-const TOKEN_KEY = AUTH_TOKEN_KEY;
 const USER_KEY = AUTH_USER_KEY;
 
 /** Origins that are allowed to deliver OAuth credentials via postMessage. */
@@ -66,9 +64,7 @@ export function useAuth() {
       return null;
     }
   });
-  const [token, setToken] = useState<string | null>(() => {
-    return safeGetItem(TOKEN_KEY) || null;
-  });
+  const [token, setToken] = useState<string | null>(null);
   const [myRooms, setMyRooms] = useState<SessionRoom[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   /** Set when a rejected session could not be replaced by a guest session. */
@@ -82,11 +78,10 @@ export function useAuth() {
   const oauthResolveRef = useRef<((result: OAuthResult) => void) | null>(null);
   const oauthTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const saveAuth = useCallback((newUser: AuthUser, newToken: string) => {
+  const saveAuth = useCallback((newUser: AuthUser, newToken = 'cookie') => {
     authGenerationRef.current += 1;
     setUser(newUser);
     setToken(newToken);
-    safeSetItem(TOKEN_KEY, newToken);
     safeSetItem(USER_KEY, JSON.stringify(newUser));
   }, []);
 
@@ -96,7 +91,6 @@ export function useAuth() {
     setToken(null);
     setMyRooms([]);
     setAuthError(null);
-    safeRemoveItem(TOKEN_KEY);
     safeRemoveItem(USER_KEY);
   }, []);
 
@@ -119,6 +113,7 @@ export function useAuth() {
     try {
       const res = await fetch(`${BACKEND_URL}/api/auth/guest`, {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name, color }),
       });
@@ -130,7 +125,7 @@ export function useAuth() {
       if (expectedGeneration !== undefined && authGenerationRef.current !== expectedGeneration) {
         return { success: false, error: 'Session changed while creating guest account.' };
       }
-      saveAuth(data.user, data.token);
+      saveAuth(data.user);
       setAuthError(null);
       return { success: true };
     } catch (err: any) {
@@ -170,65 +165,21 @@ export function useAuth() {
     void recoverSession();
   }), [recoverSession]);
 
-  // Fetch current user on mount (with support for OAuth redirect tokens)
+  // Fetch current user on mount — session lives in an httpOnly cookie so the
+  // server call verifies it without us touching localStorage for the token.
   useEffect(() => {
     const checkAuth = async () => {
       const generation = authGenerationRef.current;
-      // 1. Extract auth_token from URL hash (#auth_token=...) or query parameter if redirected
-      let incomingToken: string | null = null;
-      if (typeof window !== 'undefined') {
-        try {
-          if (window.location.hash) {
-            const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ''));
-            const hashToken = hashParams.get('auth_token');
-            if (hashToken) {
-              incomingToken = hashToken;
-              hashParams.delete('auth_token');
-              const remainingHash = hashParams.toString();
-              const newUrl = window.location.pathname + window.location.search + (remainingHash ? '#' + remainingHash : '');
-              window.history.replaceState({}, document.title, newUrl);
-            }
-          }
-          if (!incomingToken && window.location.search) {
-            const searchParams = new URLSearchParams(window.location.search);
-            const queryToken = searchParams.get('auth_token');
-            if (queryToken) {
-              incomingToken = queryToken;
-              searchParams.delete('auth_token');
-              const newSearch = searchParams.toString();
-              const newUrl = window.location.pathname + (newSearch ? '?' + newSearch : '') + window.location.hash;
-              window.history.replaceState({}, document.title, newUrl);
-            }
-          }
-        } catch (e) {
-          console.warn('Could not parse URL auth token:', e);
-        }
-      }
-
-      if (incomingToken) {
-        safeSetItem(TOKEN_KEY, incomingToken);
-        setToken(incomingToken);
-      }
-
-      const currentToken = incomingToken || safeGetItem(TOKEN_KEY);
-      if (!currentToken) {
-        // Room identity must be issued by the server. Provision a guest session
-        // before the socket connects so joins never carry a client-made id.
-        await recoverSession();
-        setIsLoading(false);
-        return;
-      }
 
       try {
         const res = await fetch(`${BACKEND_URL}/api/auth/me`, {
-          headers: { Authorization: `Bearer ${currentToken}` },
+          credentials: 'include',
         });
         const data = await res.json();
         // OAuth/guest login may have completed while this request was in flight.
         if (authGenerationRef.current !== generation) return;
         if (res.ok && data.success && data.user) {
-          setUser(data.user);
-          safeSetItem(USER_KEY, JSON.stringify(data.user));
+          saveAuth(data.user);
         } else {
           // Expired/invalid token: never leave user/token null with no recovery,
           // otherwise AuthModal opens and cannot be dismissed.
@@ -263,11 +214,11 @@ export function useAuth() {
       if (!isTrustedOAuthOrigin(event.origin)) return;
 
       if (type === 'GOOGLE_OAUTH_SUCCESS') {
-        if (!event.data.token || !event.data.user) {
+        if (!event.data.user) {
           finishOAuth({ success: false, error: 'Google authentication returned invalid credentials.' });
           return;
         }
-        saveAuth(event.data.user, event.data.token);
+        saveAuth(event.data.user);
         finishOAuth({ success: true });
       } else {
         finishOAuth({ success: false, error: event.data.error || 'Google authentication failed' });
@@ -283,8 +234,7 @@ export function useAuth() {
 
   // Fetch user's created rooms
   const fetchMyRooms = useCallback(async () => {
-    const currentToken = token || safeGetItem(TOKEN_KEY);
-    if (!currentToken) return;
+    if (!token && !user) return;
 
     try {
       const data = await apiFetchJson<{ success: boolean; rooms: SessionRoom[] }>(
@@ -310,6 +260,7 @@ export function useAuth() {
     try {
       const res = await fetch(`${BACKEND_URL}/api/auth/login`, {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ identifier, password }),
       });
@@ -317,7 +268,7 @@ export function useAuth() {
       if (!res.ok || !data.success) {
         return { success: false, error: data.error || 'Login failed' };
       }
-      saveAuth(data.user, data.token);
+      saveAuth(data.user);
       return { success: true };
     } catch (err: any) {
       return { success: false, error: err.message || 'Network error during login' };
@@ -335,6 +286,7 @@ export function useAuth() {
     try {
       const res = await fetch(`${BACKEND_URL}/api/auth/register`, {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(params),
       });
@@ -342,7 +294,7 @@ export function useAuth() {
       if (!res.ok || !data.success) {
         return { success: false, error: data.error || 'Registration failed' };
       }
-      saveAuth(data.user, data.token);
+      saveAuth(data.user);
       return { success: true };
     } catch (err: any) {
       return { success: false, error: err.message || 'Network error during registration' };
@@ -352,6 +304,12 @@ export function useAuth() {
   // Logout action
   const logout = async () => {
     clearAuth();
+    try {
+      await fetch(`${BACKEND_URL}/api/auth/logout`, {
+        method: 'POST',
+        credentials: 'include',
+      });
+    } catch {}
     // Re-initialize a fresh guest identity so whiteboard continues seamlessly
     const guest = getGuestIdentity();
     const result = await continueAsGuest(guest.name, guest.color);

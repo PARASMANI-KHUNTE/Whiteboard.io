@@ -74,7 +74,11 @@ import {
   createOAuthState,
   verifyOAuthState,
   oauthCookieOptions,
+  authCookieOptions,
+  extractAuthToken,
+  readCookie,
   OAUTH_NONCE_COOKIE,
+  AUTH_COOKIE_NAME,
 } from "./oauthState";
 import { AiQueueFullError, generateDiagram, reviseDiagram } from "./ai/generate";
 import { bindRequestAbort } from "./ai/abort";
@@ -427,6 +431,41 @@ function setOAuthNonceCookie(
   );
 }
 
+function getRequestServerOrigin(req: express.Request): string | undefined {
+  const protocol = req.get("x-forwarded-proto") || req.protocol;
+  const host = req.get("host");
+  if (process.env.SERVER_URL) return process.env.SERVER_URL.replace(/\/$/, "");
+  return host ? `${protocol}://${host}` : undefined;
+}
+
+function setAuthCookie(
+  req: express.Request,
+  res: express.Response,
+  token: string,
+  frontendOrigin?: string
+): void {
+  const opts = authCookieOptions({
+    frontendOrigin: frontendOrigin || req.headers.origin,
+    serverOrigin: getRequestServerOrigin(req),
+    secure: req.secure || req.get("x-forwarded-proto") === "https",
+  });
+  res.cookie(AUTH_COOKIE_NAME, token, opts);
+}
+
+function clearAuthCookie(req: express.Request, res: express.Response): void {
+  const opts = authCookieOptions({
+    frontendOrigin: req.headers.origin,
+    serverOrigin: getRequestServerOrigin(req),
+    secure: req.secure || req.get("x-forwarded-proto") === "https",
+  });
+  res.clearCookie(AUTH_COOKIE_NAME, {
+    httpOnly: opts.httpOnly,
+    sameSite: opts.sameSite,
+    secure: opts.secure,
+    path: opts.path,
+  });
+}
+
 // In-memory rate limiter to protect against credential stuffing / brute-force.
 // Buckets are namespaced per endpoint so exhausting one limit cannot block others.
 const authRateLimitMap = new Map<string, { count: number; resetTime: number }>();
@@ -601,7 +640,8 @@ async function startServer() {
     try {
       const { username, email, password, name, color } = req.body;
       const result = await registerUser({ username, email, password, name, color });
-      res.json({ success: true, ...result });
+      setAuthCookie(req, res, result.token);
+      res.json({ success: true, user: result.user });
     } catch (err: any) {
       res.status(400).json({ success: false, error: err.message || "Registration failed" });
     }
@@ -611,7 +651,8 @@ async function startServer() {
     try {
       const { identifier, password } = req.body;
       const result = await loginUser(identifier, password);
-      res.json({ success: true, ...result });
+      setAuthCookie(req, res, result.token);
+      res.json({ success: true, user: result.user });
     } catch (err: any) {
       res.status(400).json({ success: false, error: err.message || "Login failed" });
     }
@@ -621,16 +662,21 @@ async function startServer() {
     try {
       const { name, color } = req.body;
       const result = await createGuestUser(name, color);
-      res.json({ success: true, ...result });
+      setAuthCookie(req, res, result.token);
+      res.json({ success: true, user: result.user });
     } catch (err: any) {
       res.status(400).json({ success: false, error: err.message || "Guest session failed" });
     }
   });
 
+  app.post("/api/auth/logout", (_req, res) => {
+    clearAuthCookie(_req, res);
+    res.json({ success: true });
+  });
+
   app.get("/api/auth/me", async (req, res) => {
     try {
-      const authHeader = req.headers.authorization;
-      const token = authHeader?.replace("Bearer ", "")?.trim();
+      const token = extractAuthToken(req.headers.authorization, req.headers.cookie);
       if (!token) {
         res.status(401).json({ success: false, error: "Not authenticated" });
         return;
@@ -690,8 +736,7 @@ async function startServer() {
         return;
       }
 
-      const authHeader = req.headers.authorization;
-      const token = authHeader?.replace("Bearer ", "")?.trim();
+      const token = extractAuthToken(req.headers.authorization, req.headers.cookie);
       const user = token ? await getUserByToken(token) : null;
       // Unauthenticated diagrams are credited to whichever engine actually
       // answered, so the author is resolved after the failover chain runs.
@@ -752,8 +797,7 @@ async function startServer() {
         return;
       }
 
-      const authHeader = req.headers.authorization;
-      const token = authHeader?.replace("Bearer ", "")?.trim();
+      const token = extractAuthToken(req.headers.authorization, req.headers.cookie);
       const user = token ? await getUserByToken(token) : null;
       // Unauthenticated diagrams are credited to whichever engine actually
       // answered, so the author is resolved after the failover chain runs.
@@ -985,8 +1029,10 @@ async function startServer() {
         verified_email: profile.verified_email === true,
       });
 
-      // Send postMessage to main window with validated targetOrigin and close popup
-      const safeTokenJs = safeJsonForScript(result.token);
+      setAuthCookie(req, res, result.token, targetOrigin);
+
+      // Send postMessage to main window with validated targetOrigin and close popup.
+      // Never embed or persist the session token in localStorage or URL hash.
       const safeUserJs = safeJsonForScript(result.user);
       const safeTargetOriginJs = safeJsonForScript(targetOrigin);
       res.send(`
@@ -997,23 +1043,15 @@ async function startServer() {
             <h3>Connected with Google</h3>
             <p>Completing sign in...</p>
             <script>
-              const token = ${safeTokenJs};
               const user = ${safeUserJs};
               const targetOrigin = ${safeTargetOriginJs};
 
-              // 1. Save directly into localStorage for same-origin sessions
-              try {
-                localStorage.setItem('whiteboard_auth_token', token);
-                localStorage.setItem('whiteboard_cached_user', JSON.stringify(user));
-              } catch (e) {}
-
-              // 2. Notify opener window if popup was used
+              // Notify opener window if popup was used (httpOnly cookie is already set)
               let notifiedOpener = false;
               if (window.opener && !window.opener.closed) {
                 try {
                   window.opener.postMessage({
                     type: 'GOOGLE_OAUTH_SUCCESS',
-                    token: token,
                     user: user
                   }, targetOrigin);
                   notifiedOpener = true;
@@ -1023,9 +1061,9 @@ async function startServer() {
                 }
               }
 
-              // 3. Fallback: If no opener (e.g. redirected or popup blocked), redirect to app with auth_token in URL hash
+              // Fallback: If no opener (e.g. redirected or popup blocked), redirect to app cleanly
               if (!notifiedOpener) {
-                const redirectTarget = targetOrigin.replace(/\\/$/, '') + '/#auth_token=' + encodeURIComponent(token);
+                const redirectTarget = targetOrigin.replace(/\\/$/, '') + '/';
                 setTimeout(() => {
                   window.location.href = redirectTarget;
                 }, 200);
@@ -1061,8 +1099,7 @@ async function startServer() {
   // Session Room Creation & Management Routes
   app.post("/api/rooms/create", authRateLimiter(10, 60_000, "rooms-create"), async (req, res) => {
     try {
-      const authHeader = req.headers.authorization;
-      const token = authHeader?.replace("Bearer ", "")?.trim();
+      const token = extractAuthToken(req.headers.authorization, req.headers.cookie);
       const user = token ? await getUserByToken(token) : null;
 
       if (!user) {
@@ -1116,8 +1153,7 @@ async function startServer() {
 
   app.get("/api/rooms/my-rooms", async (req, res) => {
     try {
-      const authHeader = req.headers.authorization;
-      const token = authHeader?.replace("Bearer ", "")?.trim();
+      const token = extractAuthToken(req.headers.authorization, req.headers.cookie);
       const user = token ? await getUserByToken(token) : null;
       if (!user) {
         res.json({ success: true, rooms: [] });
@@ -1161,8 +1197,7 @@ async function startServer() {
   app.delete("/api/rooms/:roomId", async (req, res) => {
     try {
       const roomId = req.params.roomId;
-      const authHeader = req.headers.authorization;
-      const token = authHeader?.replace("Bearer ", "")?.trim();
+      const token = extractAuthToken(req.headers.authorization, req.headers.cookie);
       const user = token ? await getUserByToken(token) : null;
 
       if (!user) {
@@ -1305,8 +1340,12 @@ async function startServer() {
       // Every participant must have a server-issued identity. The id broadcast
       // in room presence is public, so accepting a client-supplied id would let
       // any guest claim the host's moderation rights.
-      const authenticatedUser = typeof data.token === "string" && data.token
-        ? await getUserByToken(data.token)
+      const rawToken =
+        typeof data.token === "string" && data.token
+          ? data.token
+          : readCookie(socket.handshake.headers.cookie, AUTH_COOKIE_NAME);
+      const authenticatedUser = rawToken
+        ? await getUserByToken(rawToken)
         : null;
       const identity = resolveSocketIdentity(authenticatedUser, data.user);
       if (!identity) {
