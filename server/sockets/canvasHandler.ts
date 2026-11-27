@@ -22,6 +22,7 @@ import {
 } from "../socketPayload";
 import { stampElementAttribution } from "../attribution";
 import { clearStoredBoardContext } from "../ai/context";
+import { recordBoardEvent } from "../boardChangeLog";
 import { rooms } from "../roomStore";
 import type { CanvasElement, VoteState } from "../roomTypes";
 import type { SocketHandlerParams } from "./types";
@@ -104,6 +105,17 @@ export function registerCanvasHandlers({ io, socket, state }: SocketHandlerParam
     state.liveStrokes.delete(clean.id);
     saveRoomElementsDebounced(state.currentRoomId, room.elements, 400);
     socket.to(state.currentRoomId).emit("element-created", attributed);
+
+    void recordBoardEvent({
+      roomId: state.currentRoomId,
+      type: "create",
+      actor,
+      elementId: clean.id,
+      elementType: clean.type,
+      details: { x: clean.x, y: clean.y },
+    }).then((ev) => {
+      io.to(state.currentRoomId!).emit("board-event", ev);
+    });
   });
 
   // Batch element creation (e.g. converting solo canvas to multiplayer room, Guarded)
@@ -132,6 +144,16 @@ export function registerCanvasHandlers({ io, socket, state }: SocketHandlerParam
     });
     saveRoomElementsDebounced(state.currentRoomId, room.elements, 400);
     socket.to(state.currentRoomId).emit("elements-batch-created", attributedBatch);
+
+    void recordBoardEvent({
+      roomId: state.currentRoomId,
+      type: "batch-create",
+      actor,
+      elementIds: clean.map((el) => el.id),
+      details: { count: clean.length },
+    }).then((ev) => {
+      io.to(state.currentRoomId!).emit("board-event", ev);
+    });
   });
 
   // Element update (e.g. moving sticky note or updating text, Guarded)
@@ -160,6 +182,17 @@ export function registerCanvasHandlers({ io, socket, state }: SocketHandlerParam
     }
     saveRoomElementsDebounced(state.currentRoomId, room.elements, 800);
     socket.to(state.currentRoomId).emit("element-updated", attributed);
+
+    void recordBoardEvent({
+      roomId: state.currentRoomId,
+      type: "update",
+      actor,
+      elementId: clean.id,
+      elementType: clean.type,
+      details: { x: clean.x, y: clean.y, text: clean.text },
+    }).then((ev) => {
+      io.to(state.currentRoomId!).emit("board-event", ev);
+    });
   });
 
   // Element delete (Guarded)
@@ -176,9 +209,25 @@ export function registerCanvasHandlers({ io, socket, state }: SocketHandlerParam
       });
       return;
     }
+    const targetElement = room.elements[elementId];
     delete room.elements[elementId];
     saveRoomElementsDebounced(state.currentRoomId, room.elements, 400);
     socket.to(state.currentRoomId).emit("element-deleted", { elementId });
+
+    const actor = {
+      id: state.currentUser?.id ?? "unknown",
+      name: state.currentUser?.name ?? "Unknown",
+      color: state.currentUser?.color ?? "#6b7280",
+    };
+    void recordBoardEvent({
+      roomId: state.currentRoomId,
+      type: "delete",
+      actor,
+      elementId,
+      elementType: targetElement?.type,
+    }).then((ev) => {
+      io.to(state.currentRoomId!).emit("board-event", ev);
+    });
   });
 
   // Batch elements delete (e.g. eraser dragged across multiple strokes, Guarded)
@@ -201,6 +250,21 @@ export function registerCanvasHandlers({ io, socket, state }: SocketHandlerParam
     });
     saveRoomElementsDebounced(state.currentRoomId, room.elements, 400);
     socket.to(state.currentRoomId).emit("elements-batch-deleted", { elementIds });
+
+    const actor = {
+      id: state.currentUser?.id ?? "unknown",
+      name: state.currentUser?.name ?? "Unknown",
+      color: state.currentUser?.color ?? "#6b7280",
+    };
+    void recordBoardEvent({
+      roomId: state.currentRoomId,
+      type: "batch-delete",
+      actor,
+      elementIds,
+      details: { count: elementIds.length },
+    }).then((ev) => {
+      io.to(state.currentRoomId!).emit("board-event", ev);
+    });
   });
 
   // Multiplayer cursor movement
@@ -240,6 +304,19 @@ export function registerCanvasHandlers({ io, socket, state }: SocketHandlerParam
         initiatorName: state.currentUser.name,
         clearedBy: { userId: state.currentUser.id, name: state.currentUser.name },
         wasVoted: false,
+      });
+
+      void recordBoardEvent({
+        roomId: targetRoomId,
+        type: "clear",
+        actor: {
+          id: state.currentUser.id,
+          name: state.currentUser.name,
+          color: state.currentUser.color,
+        },
+        details: { wasVoted: false, singleUser: true },
+      }).then((ev) => {
+        io.to(targetRoomId).emit("board-event", ev);
       });
       return;
     }
@@ -290,6 +367,19 @@ export function registerCanvasHandlers({ io, socket, state }: SocketHandlerParam
           },
           wasVoted: true,
         });
+
+        void recordBoardEvent({
+          roomId: targetRoomId,
+          type: "clear",
+          actor: {
+            id: currentRoom.voteToClear.initiatorId,
+            name: currentRoom.voteToClear.initiatorName,
+            color: currentRoom.users[currentRoom.voteToClear.initiatorId]?.color || "#6b7280",
+          },
+          details: { wasVoted: true, reason: "timed_out" },
+        }).then((ev) => {
+          io.to(targetRoomId).emit("board-event", ev);
+        });
       }
 
       io.to(targetRoomId).emit("vote-clear-ended", {
@@ -334,6 +424,19 @@ export function registerCanvasHandlers({ io, socket, state }: SocketHandlerParam
           name: room.voteToClear.initiatorName,
         },
         wasVoted: true,
+      });
+
+      void recordBoardEvent({
+        roomId: state.currentRoomId,
+        type: "clear",
+        actor: {
+          id: room.voteToClear.initiatorId,
+          name: room.voteToClear.initiatorName,
+          color: room.users[room.voteToClear.initiatorId]?.color || "#6b7280",
+        },
+        details: { wasVoted: true, reason: "majority_reached" },
+      }).then((ev) => {
+        io.to(state.currentRoomId!).emit("board-event", ev);
       });
       io.to(state.currentRoomId).emit("vote-clear-ended", {
         passed: true,
@@ -420,6 +523,19 @@ export function registerCanvasHandlers({ io, socket, state }: SocketHandlerParam
       initiatorName: state.currentUser.name,
       clearedBy: { userId: state.currentUser.id, name: state.currentUser.name },
       wasVoted: false,
+    });
+
+    void recordBoardEvent({
+      roomId: state.currentRoomId,
+      type: "clear",
+      actor: {
+        id: state.currentUser.id,
+        name: state.currentUser.name,
+        color: state.currentUser.color,
+      },
+      details: { wasVoted: false, direct: true },
+    }).then((ev) => {
+      io.to(state.currentRoomId!).emit("board-event", ev);
     });
     respond(true);
   });
