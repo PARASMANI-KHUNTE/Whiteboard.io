@@ -1,6 +1,7 @@
 import { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
 import { Socket } from 'socket.io-client';
 import { RemoteUser } from '../types';
+import { apiFetch, apiFetchJson } from '../utils/apiFetch';
 import {
   PEER_RECOVERY_TIMEOUT_MS,
   isCurrentPeerConnection,
@@ -76,12 +77,16 @@ export function useVoiceChat({
   const [error, setError] = useState<string | null>(null);
   const [isIframeRestricted, setIsIframeRestricted] = useState<boolean>(false);
   const [activeSpeakers, setActiveSpeakers] = useState<string[]>([]);
+  const [isRecording, setIsRecording] = useState<boolean>(false);
+  const [recordingDurationMs, setRecordingDurationMs] = useState<number>(0);
 
   // Synchronized ref for callback access without stale closures
   const isVoiceConnectedRef = useRef<boolean>(false);
   isVoiceConnectedRef.current = isVoiceConnected;
   const isMutedRef = useRef<boolean>(false);
   isMutedRef.current = isMuted;
+  const isRecordingRef = useRef<boolean>(false);
+  isRecordingRef.current = isRecording;
 
   // Web Audio refs
   const audioCtxRef = useRef<AudioContext | null>(null);
@@ -104,6 +109,14 @@ export function useVoiceChat({
   const pendingCandidatesRef = useRef<Record<string, RTCIceCandidateInit[]>>({});
   // Pending ICE-restart grace periods for transiently disconnected peers.
   const peerRecoveryTimersRef = useRef<Record<string, number>>({});
+
+  // MediaRecorder state. The server owns authorization and storage; this peer
+  // owns the microphone/peer audio mix and uploads the finished WebM blob.
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const recordingChunksRef = useRef<Blob[]>([]);
+  const recordingStartedAtRef = useRef<number | null>(null);
+  const recordingTimerRef = useRef<number | null>(null);
+  const stopRecordingRef = useRef<() => void>(() => {});
 
   const clearPeerRecoveryTimer = useCallback((targetUserId: string) => {
     const timer = peerRecoveryTimersRef.current[targetUserId];
@@ -194,8 +207,24 @@ export function useVoiceChat({
     });
   }, [volume, isDeafened, isSimulated]);
 
+  // Stopping the recorder triggers `onstop`, which uploads the final chunk.
+  // Kept stable so room switches and unmounts can share it.
+  const stopRecording = useCallback(() => {
+    const recorder = mediaRecorderRef.current;
+    if (recorder && recorder.state !== 'inactive') recorder.stop();
+    if (recordingTimerRef.current !== null) {
+      window.clearInterval(recordingTimerRef.current);
+      recordingTimerRef.current = null;
+    }
+  }, []);
+  stopRecordingRef.current = stopRecording;
+
   // Clean up all voice resources
   const cleanupAll = useCallback(() => {
+    stopRecordingRef.current();
+    setIsRecording(false);
+    setRecordingDurationMs(0);
+
     if (animFrameRef.current) {
       cancelAnimationFrame(animFrameRef.current);
       animFrameRef.current = null;
@@ -642,6 +671,124 @@ export function useVoiceChat({
     roomId,
   ]);
 
+  // Upload a finished recording as raw WebM/Opus. Metadata is sent in bounded
+  // headers; the server stores the bytes and returns a signed playback URL.
+  const uploadRecording = useCallback(
+    async (blob: Blob, startedAt: number, durationMs: number, snapshotId?: string) => {
+      if (!roomId) return;
+      const headers = new Headers({
+        'Content-Type': blob.type || 'audio/webm',
+        'X-Recording-Duration': String(Math.round(durationMs)),
+        'X-Recording-Started-At': String(Math.round(startedAt)),
+      });
+      if (snapshotId) headers.set('X-Recording-Snapshot-Id', snapshotId);
+
+      const res = await apiFetch(`/api/rooms/${encodeURIComponent(roomId)}/recordings`, {
+        method: 'POST',
+        body: await blob.arrayBuffer(),
+        headers,
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data?.error || 'Could not save the recording');
+      }
+      onNotification?.('Voice recording saved to this room.', 'success');
+    },
+    [roomId, onNotification]
+  );
+
+  const startRecording = useCallback(async () => {
+    if (!roomId || !currentUser.id || isRecordingRef.current) return;
+    if (!isVoiceConnectedRef.current) {
+      onNotification?.('Connect to voice before starting a recording.', 'warning');
+      return;
+    }
+    if (typeof MediaRecorder === 'undefined') {
+      onNotification?.('This browser does not support voice recording.', 'warning');
+      return;
+    }
+
+    let snapshotId: string | undefined;
+    try {
+      const res = await apiFetchJson<{ success: boolean; snapshots: Array<{ id: string }> }>(
+        `/api/rooms/${encodeURIComponent(roomId)}/snapshots?limit=1`
+      );
+      snapshotId = res.snapshots?.[0]?.id;
+    } catch {
+      // Board context is best-effort; the audio recording must still work.
+    }
+
+    const tracks: MediaStreamTrack[] = [];
+    localStreamRef.current?.getAudioTracks().forEach((track) => tracks.push(track));
+    Object.values(remoteAudioElementsRef.current).forEach((el) => {
+      const stream = el.srcObject as MediaStream | null;
+      stream?.getAudioTracks().forEach((track) => tracks.push(track));
+    });
+
+    if (isSimulated && audioCtxRef.current && masterGainRef.current) {
+      const destination = audioCtxRef.current.createMediaStreamDestination();
+      masterGainRef.current.connect(destination);
+      tracks.push(...destination.stream.getAudioTracks());
+    }
+
+    if (tracks.length === 0) {
+      onNotification?.('No voice audio is available to record yet.', 'warning');
+      return;
+    }
+
+    const candidates = ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus'];
+    const mimeType = candidates.find(
+      (type) => typeof MediaRecorder.isTypeSupported === 'function' && MediaRecorder.isTypeSupported(type)
+    );
+
+    try {
+      const stream = new MediaStream(tracks);
+      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+      const startedAt = Date.now();
+      recordingStartedAtRef.current = startedAt;
+      recordingChunksRef.current = [];
+
+      recorder.ondataavailable = (event) => {
+        if (event.data && event.data.size > 0) recordingChunksRef.current.push(event.data);
+      };
+      recorder.onstop = () => {
+        if (recordingTimerRef.current !== null) {
+          window.clearInterval(recordingTimerRef.current);
+          recordingTimerRef.current = null;
+        }
+        mediaRecorderRef.current = null;
+        recordingStartedAtRef.current = null;
+        setIsRecording(false);
+        setRecordingDurationMs(0);
+
+        const blob = new Blob(recordingChunksRef.current, {
+          type: recorder.mimeType || mimeType || 'audio/webm',
+        });
+        recordingChunksRef.current = [];
+        if (blob.size > 0) {
+          void uploadRecording(blob, startedAt, Date.now() - startedAt, snapshotId).catch((err) => {
+            onNotification?.(err?.message || 'Could not save the recording.', 'warning');
+          });
+        }
+        socket?.emit('recording-toggle', { isRecording: false });
+      };
+
+      mediaRecorderRef.current = recorder;
+      recorder.start(1000);
+      setIsRecording(true);
+      setRecordingDurationMs(0);
+      recordingTimerRef.current = window.setInterval(() => {
+        const start = recordingStartedAtRef.current;
+        if (start !== null) setRecordingDurationMs(Date.now() - start);
+      }, 500);
+      socket?.emit('recording-toggle', { isRecording: true });
+      onNotification?.('Recording this voice session.', 'info');
+    } catch (err: any) {
+      mediaRecorderRef.current = null;
+      onNotification?.(err?.message || 'Could not start recording.', 'warning');
+    }
+  }, [roomId, currentUser.id, isSimulated, onNotification, socket, uploadRecording]);
+
   // Leave Voice Chat
   const leaveVoiceChat = useCallback(() => {
     invalidateVoiceSession(voiceEpochRef);
@@ -971,5 +1118,9 @@ export function useVoiceChat({
     toggleDeafen,
     toggleSimulated,
     openInNewTab,
+    isRecording,
+    recordingDurationMs,
+    startRecording,
+    stopRecording,
   };
 }

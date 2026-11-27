@@ -9,6 +9,7 @@ import {
   StoredUserDoc,
   SessionRoomDoc,
 } from './db';
+import type { VoiceRecordingMeta } from './voiceRecordings';
 
 export interface StoredUser {
   id: string;
@@ -61,6 +62,8 @@ export interface SessionRoomMeta {
   kickedUserIds?: string[];
   /** Explicit host-granted/revoked permissions keyed by user id. */
   userPermissions?: Record<string, RoomPermission>;
+  /** Capped, retention-bounded voice recording history for async replay. */
+  recordings?: VoiceRecordingMeta[];
 }
 
 function pbkdf2Async(password: string, salt: string, iterations: number, keylen: number): Promise<Buffer> {
@@ -493,6 +496,7 @@ export async function getRoomMeta(roomId: string): Promise<SessionRoomMeta | nul
     isLocked: !!doc.isLocked,
     kickedUserIds: Array.isArray(doc.kickedUserIds) ? doc.kickedUserIds : [],
     userPermissions: doc.userPermissions || {},
+    recordings: Array.isArray(doc.recordings) ? doc.recordings : [],
   };
 }
 

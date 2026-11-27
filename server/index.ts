@@ -140,6 +140,10 @@ async function startServer() {
       res.status(400).json({ success: false, error: "Malformed JSON payload" });
       return;
     }
+    if (err?.type === "entity.too.large" || err?.status === 413) {
+      res.status(413).json({ success: false, error: "Uploaded payload is too large" });
+      return;
+    }
     next(err);
   });
 

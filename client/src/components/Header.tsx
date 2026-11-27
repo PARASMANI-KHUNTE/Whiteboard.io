@@ -2,7 +2,7 @@ import React from 'react';
 import { RemoteUser } from '../types';
 import { AudioVisualizerBar } from './AudioVisualizerBar';
 import type { WhiteboardActionRegistry } from '../hooks/useWhiteboardActions';
-import { Crown, Lock, MicOff, Users } from 'lucide-react';
+import { Crown, Lock, Mic, MicOff, Users } from 'lucide-react';
 
 interface HeaderProps {
   roomId: string | null;
@@ -33,6 +33,8 @@ interface HeaderProps {
   onToggleSimulated: () => void;
   onOpenInNewTab: () => void;
   onAudioLevelChange?: (level: number, isSpeaking: boolean) => void;
+  /** Optional live recording notice shown beside the voice controls. */
+  recordingIndicator?: string | null;
   followingUserId?: string | null;
   onToggleFollowUser?: (userId: string) => void;
 }
@@ -65,6 +67,7 @@ export const Header: React.FC<HeaderProps> = ({
   onToggleSimulated,
   onOpenInNewTab,
   onAudioLevelChange,
+  recordingIndicator,
   followingUserId = null,
   onToggleFollowUser,
 }) => {
@@ -176,6 +179,22 @@ export const Header: React.FC<HeaderProps> = ({
 
       {/* Voice Chat & Audio Visualizer Bar */}
       <div className="flex items-center gap-2">
+        {recordingIndicator && (
+          <div
+            role="status"
+            aria-live="polite"
+            aria-label={recordingIndicator}
+            title={recordingIndicator}
+            className="flex items-center gap-1 px-1.5 sm:px-2 py-1 rounded-lg bg-rose-50 dark:bg-rose-950/60 border border-rose-200 dark:border-rose-900/70 text-rose-700 dark:text-rose-300 text-[10px] font-semibold shrink-0"
+          >
+            <span className="relative flex h-1.5 w-1.5 shrink-0" aria-hidden>
+              <span className="absolute inline-flex h-full w-full rounded-full bg-rose-500 animate-ping" />
+              <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-rose-600" />
+            </span>
+            <Mic className="w-3 h-3 shrink-0" aria-hidden />
+            <span className="hidden sm:inline max-w-[120px] truncate">{recordingIndicator}</span>
+          </div>
+        )}
         <AudioVisualizerBar
           roomId={roomId}
           isVoiceConnected={isVoiceConnected}

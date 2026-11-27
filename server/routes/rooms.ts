@@ -22,6 +22,21 @@ import {
 } from "../roomStore";
 import { getBoardEvents } from "../boardChangeLog";
 import { getBoardSnapshot, listBoardSnapshots } from "../boardSnapshots";
+import {
+  MAX_UPLOAD_BYTES,
+  addRoomRecording,
+  canManageRecordings,
+  createRecordingId,
+  getRoomRecording,
+  isValidRecordingId,
+  listRoomRecordings,
+  readRecordingFile,
+  saveRecordingFile,
+  verifySignedDownloadToken,
+  withDownloadUrl,
+  type VoiceRecordingMeta,
+} from "../voiceRecordings";
+import { readFiniteNumber, readString } from "../socketPayload";
 
 const SAFE_SNAPSHOT_ID = /^[A-Za-z0-9_-]{2,128}$/;
 
@@ -187,6 +202,154 @@ export function setupRoomsRoutes(app: express.Express, options: RoomsRoutesOptio
       res.json({ success: true, snapshot });
     } catch (err: any) {
       res.status(500).json({ success: false, error: err.message || "Could not retrieve board snapshot" });
+    }
+  });
+
+  // Voice recordings (#239). Uploads are raw audio bodies so the global JSON
+  // parser leaves them untouched; metadata travels in bounded request headers.
+  app.post(
+    "/api/rooms/:roomId/recordings",
+    authRateLimiter(10, 60_000, "rooms-recordings-upload"),
+    express.raw({ type: ["audio/*", "application/octet-stream"], limit: `${MAX_UPLOAD_BYTES}b` }),
+    async (req, res) => {
+      try {
+        const roomId = req.params.roomId;
+        if (!isValidRecordingId(roomId)) {
+          res.status(400).json({ success: false, error: "Invalid room id" });
+          return;
+        }
+
+        const token = extractAuthToken(req.headers.authorization, req.headers.cookie);
+        const user = token ? await getUserByToken(token) : null;
+        if (!user) {
+          res.status(401).json({ success: false, error: "You must be signed in to save a recording" });
+          return;
+        }
+
+        const roomMeta = await getRoomMeta(roomId);
+        if (!roomMeta) {
+          res.status(404).json({ success: false, error: "Room not found" });
+          return;
+        }
+        if (!canManageRecordings(roomMeta, user.id)) {
+          res.status(403).json({ success: false, error: "Only the host can save a room recording" });
+          return;
+        }
+
+        const bytes = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
+        if (bytes.length === 0) {
+          res.status(400).json({ success: false, error: "Recording audio is empty" });
+          return;
+        }
+        if (bytes.length > MAX_UPLOAD_BYTES) {
+          res.status(413).json({ success: false, error: "Recording is too large" });
+          return;
+        }
+
+        const rawMime = (req.header("content-type") || "audio/webm").split(";")[0].trim().toLowerCase();
+        const mimeType = ["audio/webm", "audio/ogg", "audio/mp4", "application/octet-stream"].includes(rawMime)
+          ? rawMime
+          : "audio/webm";
+        const durationMs = readFiniteNumber(req.header("x-recording-duration"));
+        const startedAt = readFiniteNumber(req.header("x-recording-started-at"));
+        if (durationMs === null || durationMs < 0 || durationMs > 2 * 60 * 60 * 1000) {
+          res.status(400).json({ success: false, error: "Invalid recording duration" });
+          return;
+        }
+        if (startedAt === null || startedAt < Date.now() - 24 * 60 * 60 * 1000 || startedAt > Date.now() + 5 * 60 * 1000) {
+          res.status(400).json({ success: false, error: "Invalid recording timestamp" });
+          return;
+        }
+
+        const snapshotHeader = readString(req.header("x-recording-snapshot-id"), 128);
+        const snapshotId = isValidRecordingId(snapshotHeader) ? snapshotHeader : undefined;
+        const id = createRecordingId();
+        await saveRecordingFile(roomId, id, bytes);
+
+        const meta: VoiceRecordingMeta = {
+          id,
+          roomId,
+          actor: {
+            id: user.id,
+            name: readString(user.name, 80) || "Unknown",
+            color: readString(user.color, 32) || "#64748b",
+          },
+          startedAt: Math.round(startedAt),
+          durationMs: Math.round(durationMs),
+          sizeBytes: bytes.length,
+          mimeType,
+          snapshotId,
+          createdAt: Date.now(),
+          storageKey: `${roomId}/${id}.webm`,
+        };
+
+        const saved = await addRoomRecording(meta);
+        io.to(roomId).emit("voice-recording-saved", {
+          recordingId: id,
+          durationMs: meta.durationMs,
+          startedAt: meta.startedAt,
+        });
+        res.json({
+          success: true,
+          recording: withDownloadUrl(saved.find((item) => item.id === id) || meta),
+        });
+      } catch (err: any) {
+        res.status(500).json({ success: false, error: err.message || "Could not save recording" });
+      }
+    }
+  );
+
+  app.get("/api/rooms/:roomId/recordings", async (req, res) => {
+    try {
+      const roomId = req.params.roomId;
+      if (!isValidRecordingId(roomId)) {
+        res.status(400).json({ success: false, error: "Invalid room id" });
+        return;
+      }
+      const token = extractAuthToken(req.headers.authorization, req.headers.cookie);
+      const user = token ? await getUserByToken(token) : null;
+      if (!user) {
+        res.status(401).json({ success: false, error: "You must be signed in to view recordings" });
+        return;
+      }
+      const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 20;
+      const recordings = await listRoomRecordings(roomId, limit);
+      const now = Date.now();
+      res.json({ success: true, recordings: recordings.map((meta) => withDownloadUrl(meta, now)) });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message || "Could not retrieve recordings" });
+    }
+  });
+
+  // Pre-signed download: the token authorizes this exact recording for a short
+  // window, so <audio src> works without putting a bearer token in the URL.
+  app.get("/api/rooms/:roomId/recordings/:recordingId/download", async (req, res) => {
+    try {
+      const { roomId, recordingId } = req.params;
+      if (!isValidRecordingId(roomId) || !isValidRecordingId(recordingId)) {
+        res.status(400).json({ success: false, error: "Invalid recording id" });
+        return;
+      }
+      if (!verifySignedDownloadToken(roomId, recordingId, req.query.expires, req.query.token)) {
+        res.status(403).json({ success: false, error: "Download link is invalid or has expired" });
+        return;
+      }
+      const recording = await getRoomRecording(roomId, recordingId);
+      if (!recording) {
+        res.status(404).json({ success: false, error: "Recording not found" });
+        return;
+      }
+      const bytes = await readRecordingFile(roomId, recordingId);
+      if (!bytes) {
+        res.status(404).json({ success: false, error: "Recording audio is no longer available" });
+        return;
+      }
+      res.setHeader("Content-Type", recording.mimeType || "audio/webm");
+      res.setHeader("Content-Disposition", `inline; filename="${recordingId}.webm"`);
+      res.setHeader("Cache-Control", "private, max-age=300");
+      res.send(bytes);
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message || "Could not download recording" });
     }
   });
 
