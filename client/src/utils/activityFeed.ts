@@ -85,3 +85,56 @@ export function appendActivityEntry(
   }
   return [entry, ...prev].slice(0, maxEntries);
 }
+
+/** Convert a durable server board event into a frontend timeline ActivityEntry. */
+export function boardEventToActivityEntry(event: {
+  id: string;
+  type: string;
+  actor: { id: string; name: string; color: string };
+  elementId?: string;
+  elementIds?: string[];
+  elementType?: string;
+  details?: Record<string, any>;
+  timestamp: number;
+}): ActivityEntry {
+  let action: ActivityActionKind = 'edited';
+  let summary = 'Modified canvas';
+
+  switch (event.type) {
+    case 'create':
+      action = 'created';
+      summary = `Added ${event.elementType || 'element'}`;
+      break;
+    case 'batch-create':
+      action = 'created';
+      summary = `Added ${event.elementIds?.length || event.details?.count || 'multiple'} elements`;
+      break;
+    case 'update':
+      action = 'edited';
+      summary = `Edited ${event.elementType || 'element'}`;
+      break;
+    case 'delete':
+      action = 'deleted';
+      summary = `Deleted ${event.elementType || 'element'}`;
+      break;
+    case 'batch-delete':
+      action = 'deleted';
+      summary = `Deleted ${event.elementIds?.length || event.details?.count || 'multiple'} elements`;
+      break;
+    case 'clear':
+      action = 'cleared';
+      summary = 'Cleared the whiteboard';
+      break;
+  }
+
+  return {
+    id: event.id,
+    userId: event.actor.id,
+    userName: event.actor.name,
+    userColor: event.actor.color,
+    action,
+    summary,
+    elementId: event.elementId || (event.elementIds && event.elementIds[0]),
+    timestamp: event.timestamp,
+  };
+}

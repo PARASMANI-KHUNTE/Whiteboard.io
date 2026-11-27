@@ -28,8 +28,10 @@ import {
   appendActivityEntry,
   buildInitialActivityFromElements,
   describeElementKind,
+  boardEventToActivityEntry,
   type ActivityEntry,
 } from './utils/activityFeed';
+import { apiFetchJson } from './utils/apiFetch';
 import { Header } from './components/Header';
 import Sidebar from './components/Sidebar';
 import { Canvas } from './components/Canvas';
@@ -129,6 +131,7 @@ export default function App() {
   const [showCommandPalette, setShowCommandPalette] = useState<boolean>(false);
   const [showActivityTimeline, setShowActivityTimeline] = useState<boolean>(false);
   const [activityEntries, setActivityEntries] = useState<ActivityEntry[]>([]);
+  const [isLoadingActivity, setIsLoadingActivity] = useState<boolean>(false);
   const [hasChosenSessionMode, setHasChosenSessionMode] = useState<boolean>(false);
 
   const [showAuthModal, setShowAuthModal] = useState<boolean>(false);
@@ -339,17 +342,83 @@ export default function App() {
         })
       );
     };
+    const onRemoteDelete = (payload: { elementId: string }) => {
+      if (!payload?.elementId) return;
+      const target = elementsRef.current[payload.elementId];
+      setActivityEntries((prev) =>
+        appendActivityEntry(prev, {
+          id: `del_${payload.elementId}_${Date.now()}`,
+          userId: 'collaborator',
+          userName: 'Collaborator',
+          userColor: '#ef4444',
+          action: 'deleted',
+          summary: `Deleted ${target ? describeElementKind(target) : 'element'}`,
+          elementId: payload.elementId,
+          timestamp: Date.now(),
+        })
+      );
+    };
+    const onRemoteBatchDelete = (payload: { elementIds: string[] }) => {
+      if (!Array.isArray(payload?.elementIds) || payload.elementIds.length === 0) return;
+      setActivityEntries((prev) =>
+        appendActivityEntry(prev, {
+          id: `batch_del_${Date.now()}`,
+          userId: 'collaborator',
+          userName: 'Collaborator',
+          userColor: '#ef4444',
+          action: 'deleted',
+          summary: `Deleted ${payload.elementIds.length} element${payload.elementIds.length === 1 ? '' : 's'}`,
+          timestamp: Date.now(),
+        })
+      );
+    };
+    const onBoardEvent = (event: any) => {
+      if (!event || !event.type) return;
+      const entry = boardEventToActivityEntry(event);
+      setActivityEntries((prev) => appendActivityEntry(prev, entry));
+    };
+
     socket.on('element-created', onRemoteCreate);
     socket.on('element-updated', onRemoteUpdate);
     socket.on('elements-batch-created', onRemoteBatchCreate);
+    socket.on('element-deleted', onRemoteDelete);
+    socket.on('elements-batch-deleted', onRemoteBatchDelete);
     socket.on('board-cleared', onBoardCleared);
+    socket.on('board-event', onBoardEvent);
     return () => {
       socket.off('element-created', onRemoteCreate);
       socket.off('element-updated', onRemoteUpdate);
       socket.off('elements-batch-created', onRemoteBatchCreate);
+      socket.off('element-deleted', onRemoteDelete);
+      socket.off('elements-batch-deleted', onRemoteBatchDelete);
       socket.off('board-cleared', onBoardCleared);
+      socket.off('board-event', onBoardEvent);
     };
   }, [socket]);
+
+  // Load durable change log events from server when activity timeline is opened
+  useEffect(() => {
+    if (!showActivityTimeline || !roomId) return;
+    let cancelled = false;
+    setIsLoadingActivity(true);
+    apiFetchJson<{ success: boolean; events: any[] }>(`/api/rooms/${encodeURIComponent(roomId)}/events?limit=80`)
+      .then((res) => {
+        if (cancelled || !res.success || !Array.isArray(res.events)) return;
+        const fetchedEntries = res.events.map(boardEventToActivityEntry);
+        setActivityEntries((prev) => {
+          const existingIds = new Set(prev.map((e) => e.id));
+          const novel = fetchedEntries.filter((e) => !existingIds.has(e.id));
+          return [...prev, ...novel].sort((a, b) => b.timestamp - a.timestamp).slice(0, 80);
+        });
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setIsLoadingActivity(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [showActivityTimeline, roomId]);
 
   // Global Ctrl+K / Cmd+K launcher for Command Palette.
   useEffect(() => {
@@ -1596,6 +1665,7 @@ export default function App() {
         onClose={() => setShowActivityTimeline(false)}
         entries={activityEntries}
         elements={elements}
+        isLoading={isLoadingActivity}
         onFocusElement={(elementId) => {
           const target = elementsRef.current[elementId];
           if (!target) return;
