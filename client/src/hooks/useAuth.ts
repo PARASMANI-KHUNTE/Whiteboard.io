@@ -19,10 +19,12 @@ function getTrustedOAuthOrigins(): Set<string> {
   if (typeof window === 'undefined') return allowed;
 
   allowed.add(window.location.origin);
-  allowed.add('http://localhost:5173');
-  allowed.add('http://localhost:3000');
-  allowed.add('http://127.0.0.1:5173');
-  allowed.add('http://127.0.0.1:3000');
+  if (import.meta.env.DEV) {
+    allowed.add('http://localhost:5173');
+    allowed.add('http://localhost:3000');
+    allowed.add('http://127.0.0.1:5173');
+    allowed.add('http://127.0.0.1:3000');
+  }
 
   if (BACKEND_URL) {
     try {

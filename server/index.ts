@@ -80,6 +80,7 @@ import {
   OAUTH_NONCE_COOKIE,
   AUTH_COOKIE_NAME,
 } from "./oauthState";
+import { buildAllowedOriginSet, resolveTrustedOriginFromSet } from "./corsOrigins";
 import { AiQueueFullError, generateDiagram, reviseDiagram } from "./ai/generate";
 import { bindRequestAbort } from "./ai/abort";
 import { clearStoredBoardContext, sanitizeGlobalContext } from "./ai/context";
@@ -337,36 +338,10 @@ function syncVoteEligibility(io: SocketIOServer, room: RoomData): void {
   io.to(room.id).emit("vote-clear-updated", vote);
 }
 
-const ALLOWED_ORIGIN_SET = new Set([
-  "http://localhost:5173",
-  "http://localhost:3000",
-  "http://127.0.0.1:5173",
-  "http://127.0.0.1:3000",
-]);
-
-const rawAllowed = [process.env.APP_URL, process.env.CLIENT_URL, process.env.ALLOWED_ORIGINS]
-  .filter(Boolean)
-  .flatMap((val) => (val as string).split(","));
-
-for (const raw of rawAllowed) {
-  try {
-    const trimmed = raw.trim();
-    if (trimmed) {
-      const parsed = new URL(trimmed);
-      ALLOWED_ORIGIN_SET.add(parsed.origin);
-    }
-  } catch {}
-}
+const ALLOWED_ORIGIN_SET = buildAllowedOriginSet(process.env);
 
 function resolveTrustedOrigin(rawOrigin?: string): string {
-  if (!rawOrigin) return (process.env.APP_URL || "http://localhost:5173").replace(/\/$/, "");
-  try {
-    const originUrl = new URL(rawOrigin).origin;
-    if (ALLOWED_ORIGIN_SET.has(originUrl)) {
-      return originUrl;
-    }
-  } catch {}
-  return (process.env.APP_URL || "http://localhost:5173").replace(/\/$/, "");
+  return resolveTrustedOriginFromSet(ALLOWED_ORIGIN_SET, rawOrigin, process.env.APP_URL);
 }
 
 function getGoogleRedirectUri(req: express.Request): string {
