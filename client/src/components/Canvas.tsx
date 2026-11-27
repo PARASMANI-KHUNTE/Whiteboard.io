@@ -2846,6 +2846,8 @@ export const Canvas: React.FC<CanvasProps> = ({
         zoom={zoom}
         viewportWidth={containerRef.current?.clientWidth || (typeof window !== 'undefined' ? window.innerWidth : 1280)}
         viewportHeight={containerRef.current?.clientHeight || (typeof window !== 'undefined' ? window.innerHeight : 720)}
+        collaborators={remoteUsers}
+        currentUserId={currentUserId}
         onPanTo={(nextPan) => {
           cancelNavAnimation();
           onStopFollowUser?.();

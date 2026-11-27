@@ -13,6 +13,22 @@ export interface MinimapElementBox extends MinimapRect {
   color: string;
 }
 
+export interface MinimapCollaborator {
+  id: string;
+  name: string;
+  color: string;
+  cursor?: { x: number; y: number; isDrawing?: boolean };
+}
+
+export interface MinimapCursorMarker {
+  id: string;
+  name: string;
+  color: string;
+  x: number;
+  y: number;
+  isDrawing: boolean;
+}
+
 export interface MinimapScene {
   worldMinX: number;
   worldMinY: number;
@@ -24,6 +40,7 @@ export interface MinimapScene {
   boxWidth: number;
   boxHeight: number;
   elements: MinimapElementBox[];
+  cursors: MinimapCursorMarker[];
   viewport: MinimapRect;
 }
 
@@ -38,7 +55,8 @@ export function computeMinimapScene(
   viewportW: number,
   viewportH: number,
   boxWidth = 176,
-  boxHeight = 112
+  boxHeight = 112,
+  collaborators: MinimapCollaborator[] = []
 ): MinimapScene {
   const safeZoom = Math.max(0.1, zoom || 1);
   const vpWorldX = -pan.x / safeZoom;
@@ -71,6 +89,17 @@ export function computeMinimapScene(
     });
   }
 
+  // Keep collaborator cursors in frame even when they are outside the visible
+  // viewport or beyond the bounds of every element on the board.
+  for (const collaborator of collaborators) {
+    const cursor = collaborator.cursor;
+    if (!cursor || !isFinite(cursor.x) || !isFinite(cursor.y)) continue;
+    minX = Math.min(minX, cursor.x);
+    minY = Math.min(minY, cursor.y);
+    maxX = Math.max(maxX, cursor.x);
+    maxY = Math.max(maxY, cursor.y);
+  }
+
   const pad = 120;
   const worldMinX = minX - pad;
   const worldMinY = minY - pad;
@@ -87,7 +116,7 @@ export function computeMinimapScene(
   const projectX = (wx: number) => offsetX + (wx - worldMinX) * scale;
   const projectY = (wy: number) => offsetY + (wy - worldMinY) * scale;
 
-  return {
+  const scene: MinimapScene = {
     worldMinX,
     worldMinY,
     worldWidth,
@@ -105,6 +134,7 @@ export function computeMinimapScene(
       height: Math.max(2.5, item.height * scale),
       color: item.color,
     })),
+    cursors: [],
     viewport: {
       x: projectX(vpWorldX),
       y: projectY(vpWorldY),
@@ -112,6 +142,27 @@ export function computeMinimapScene(
       height: Math.max(8, vpWorldH * scale),
     },
   };
+
+  return { ...scene, cursors: projectMinimapCursors(collaborators, scene) };
+}
+
+/** Projects live collaborator cursors from world space into minimap coordinates. */
+export function projectMinimapCursors(
+  collaborators: MinimapCollaborator[],
+  scene: MinimapScene
+): MinimapCursorMarker[] {
+  return collaborators.flatMap((collaborator) => {
+    const cursor = collaborator.cursor;
+    if (!cursor || !isFinite(cursor.x) || !isFinite(cursor.y)) return [];
+    return [{
+      id: collaborator.id,
+      name: collaborator.name || 'Collaborator',
+      color: collaborator.color || '#3b82f6',
+      x: scene.offsetX + (cursor.x - scene.worldMinX) * scene.scale,
+      y: scene.offsetY + (cursor.y - scene.worldMinY) * scene.scale,
+      isDrawing: Boolean(cursor.isDrawing),
+    }];
+  });
 }
 
 /**
