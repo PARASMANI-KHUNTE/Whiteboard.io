@@ -20,6 +20,7 @@ import {
   MAX_LIVE_ROOMS,
   ROOM_CAPACITY_ERROR,
 } from "../roomStore";
+import { getBoardEvents } from "../boardChangeLog";
 
 export interface RoomsRoutesOptions {
   io: SocketIOServer;
@@ -123,6 +124,19 @@ export function setupRoomsRoutes(app: express.Express, options: RoomsRoutesOptio
       });
     } catch (err: any) {
       res.status(500).json({ success: false, error: err.message || "Could not retrieve room details" });
+    }
+  });
+
+  // Durable board events timeline endpoint (#225)
+  app.get("/api/rooms/:roomId/events", async (req, res) => {
+    try {
+      const roomId = req.params.roomId;
+      const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 50;
+      const before = req.query.before ? parseInt(req.query.before as string, 10) : undefined;
+      const events = await getBoardEvents(roomId, { limit, before });
+      res.json({ success: true, events });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message || "Could not retrieve board events" });
     }
   });
 
