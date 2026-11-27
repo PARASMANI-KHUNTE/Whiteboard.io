@@ -2,6 +2,11 @@ import { readIceCandidate, readSessionDescription } from "../voiceSignaling";
 import { SlidingWindowRateLimiter } from "../joinRateLimiter";
 import { isRecord, readBoolean, readFiniteNumber, readId } from "../socketPayload";
 import { rooms } from "../roomStore";
+import {
+  beginRoomRecording,
+  canManageRecordings,
+  endRoomRecording,
+} from "../voiceRecordings";
 import type { SocketHandlerParams } from "./types";
 
 /** ICE trickle can be chatty, but 60 signals per 10s is ample for voice chat. */
@@ -53,6 +58,30 @@ export function registerVoiceHandlers({ io, socket, state }: SocketHandlerParams
       isDeafened: state.currentUser.isDeafened,
       voiceConnected: state.currentUser.voiceConnected,
     });
+  });
+
+  // Host-controlled recording state. The actual MediaRecorder lives on the
+  // initiating peer; the server only authorizes the toggle and broadcasts it.
+  safeOn("recording-toggle", (data: { isRecording?: boolean }) => {
+    if (!state.currentRoomId || !state.currentUser) return;
+    if (!isRecord(data)) return;
+    const isRecording = readBoolean(data.isRecording);
+    if (isRecording === null) return;
+
+    const room = rooms.get(state.currentRoomId);
+    if (!room) return;
+    if (!canManageRecordings(room, state.currentUser.id)) {
+      socket.emit("permission-denied", { message: "Only the host can record voice sessions." });
+      return;
+    }
+
+    const nextState = isRecording
+      ? beginRoomRecording(state.currentRoomId, {
+          id: state.currentUser.id,
+          name: state.currentUser.name,
+        })
+      : endRoomRecording(state.currentRoomId);
+    io.to(state.currentRoomId).emit("recording-state", nextState);
   });
 
   // WebRTC Voice Signaling Mesh

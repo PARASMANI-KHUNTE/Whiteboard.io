@@ -25,6 +25,7 @@ import { EmptyCanvasGuide } from './components/ui/EmptyCanvasGuide';
 import { CommandPaletteModal, type CommandPaletteItem } from './components/CommandPaletteModal';
 import { ActivityTimelineDrawer } from './components/ActivityTimelineDrawer';
 import { VersionHistoryPanel } from './components/VersionHistoryPanel';
+import { RecordingsPanel } from './components/RecordingsPanel';
 import {
   appendActivityEntry,
   buildInitialActivityFromElements,
@@ -33,6 +34,7 @@ import {
   type ActivityEntry,
 } from './utils/activityFeed';
 import type { BoardSnapshotDetail, BoardSnapshotMeta } from './utils/boardSnapshots';
+import type { VoiceRecordingMeta, VoiceRecordingState } from './utils/voiceRecordings';
 import { apiFetchJson } from './utils/apiFetch';
 import { Header } from './components/Header';
 import Sidebar from './components/Sidebar';
@@ -57,7 +59,7 @@ import { formatAiEngineDisplay } from './ai/providerLabels';
 import { buildGlobalAiContext } from './ai/sessionContext';
 import { diffAiElements, type AiElementDiffResult } from './ai/elementDiff';
 import { ErrorBoundary } from './components/ErrorBoundary';
-import { Info, AlertCircle, CheckCircle2, UserX, X, History, Clock } from 'lucide-react';
+import { Info, AlertCircle, CheckCircle2, UserX, X, History, Clock, Mic } from 'lucide-react';
 import { isColorBlack, isColorWhite } from './utils/themeColors';
 import { shouldRecolorBoardOnThemeToggle } from './utils/themeBoardEdit';
 import type { ExportViewportInfo } from './utils/exportTypes';
@@ -139,6 +141,12 @@ export default function App() {
   const [selectedSnapshot, setSelectedSnapshot] = useState<BoardSnapshotDetail | null>(null);
   const [isLoadingSnapshots, setIsLoadingSnapshots] = useState<boolean>(false);
   const [isRestoringSnapshot, setIsRestoringSnapshot] = useState<boolean>(false);
+  const [showRecordings, setShowRecordings] = useState<boolean>(false);
+  const [roomRecordings, setRoomRecordings] = useState<VoiceRecordingMeta[]>([]);
+  const [isLoadingRecordings, setIsLoadingRecordings] = useState<boolean>(false);
+  const [recordingsError, setRecordingsError] = useState<string | null>(null);
+  const [recordingsRefreshToken, setRecordingsRefreshToken] = useState<number>(0);
+  const [activeRecording, setActiveRecording] = useState<VoiceRecordingState | null>(null);
   const [hasChosenSessionMode, setHasChosenSessionMode] = useState<boolean>(false);
 
   const [showAuthModal, setShowAuthModal] = useState<boolean>(false);
@@ -449,6 +457,56 @@ export default function App() {
     };
   }, [showVersionHistory, roomId]);
 
+  // Voice recordings belong to a room; never show stale clips after a switch.
+  useEffect(() => {
+    setRoomRecordings([]);
+    setRecordingsError(null);
+    setActiveRecording(null);
+  }, [roomId, isSoloMode]);
+
+  // Load room recordings when the panel opens, the room changes, or a new
+  // recording is saved. A cancelled request never overwrites newer results.
+  useEffect(() => {
+    if (!showRecordings || !roomId || isSoloMode) return;
+    let cancelled = false;
+    setIsLoadingRecordings(true);
+    setRecordingsError(null);
+    apiFetchJson<{ success: boolean; recordings: VoiceRecordingMeta[] }>(
+      `/api/rooms/${encodeURIComponent(roomId)}/recordings?limit=20`
+    )
+      .then((res) => {
+        if (cancelled || !Array.isArray(res.recordings)) return;
+        setRoomRecordings(res.recordings);
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        setRecordingsError(err instanceof Error ? err.message : 'Could not load recordings.');
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoadingRecordings(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [showRecordings, roomId, isSoloMode, recordingsRefreshToken]);
+
+  // Live "someone is recording" indicator plus refresh-on-save.
+  useEffect(() => {
+    if (!socket || !roomId || isSoloMode) return;
+    const onRecordingState = (state: VoiceRecordingState) => {
+      setActiveRecording(state?.isRecording ? state : null);
+    };
+    const onRecordingSaved = () => {
+      setRecordingsRefreshToken((token) => token + 1);
+    };
+    socket.on('recording-state', onRecordingState);
+    socket.on('voice-recording-saved', onRecordingSaved);
+    return () => {
+      socket.off('recording-state', onRecordingState);
+      socket.off('voice-recording-saved', onRecordingSaved);
+    };
+  }, [socket, roomId, isSoloMode]);
+
   // A restore completes (or fails) asynchronously; always clear the local busy flag.
   useEffect(() => {
     if (!socket) return;
@@ -475,6 +533,30 @@ export default function App() {
       }
     },
     [roomId]
+  );
+
+  // Preview a recording's board snapshot alongside the audio without touching
+  // the live board: the existing version-history panel owns the read-only view.
+  const handlePreviewRecordingSnapshot = useCallback(
+    async (snapshotId: string) => {
+      if (!roomId || isSoloMode) return;
+      try {
+        const res = await apiFetchJson<{ success: boolean; snapshot: BoardSnapshotDetail }>(
+          `/api/rooms/${encodeURIComponent(roomId)}/snapshots/${encodeURIComponent(snapshotId)}`
+        );
+        if (!res.success || !res.snapshot) return;
+        setSelectedSnapshot(res.snapshot);
+        setShowVersionHistory(true);
+        setShowRecordings(false);
+        setShowActivityTimeline(false);
+      } catch (err) {
+        addNotification(
+          err instanceof Error ? err.message : 'That board snapshot is no longer available.',
+          'warning'
+        );
+      }
+    },
+    [roomId, isSoloMode, addNotification]
   );
 
   const handleRequestRestoreSnapshot = useCallback(
@@ -888,6 +970,10 @@ export default function App() {
     toggleDeafen,
     toggleSimulated,
     openInNewTab,
+    isRecording,
+    recordingDurationMs,
+    startRecording,
+    stopRecording,
   } = useVoiceChat({
     socket,
     currentUser,
@@ -1457,6 +1543,11 @@ export default function App() {
     onToggleSidebar: () => setIsSidebarOpen((open) => !open),
     onToggleVoice: handleToggleVoice,
     onToggleMute: toggleMute,
+    onOpenRecordings: () => {
+      setShowRecordings(true);
+      setShowVersionHistory(false);
+      setShowActivityTimeline(false);
+    },
     onOpenShortcuts: () => setShowShortcutsModal(true),
     onOpenProfile: () => setShowProfileModal(true),
     onOpenAuth: () => setShowAuthModal(true),
@@ -1514,6 +1605,7 @@ export default function App() {
         onSelect: () => {
           setShowActivityTimeline((prev) => !prev);
           setShowVersionHistory(false);
+          setShowRecordings(false);
         },
       },
       {
@@ -1525,11 +1617,32 @@ export default function App() {
         onSelect: () => {
           setShowVersionHistory((prev) => !prev);
           setShowActivityTimeline(false);
+          setShowRecordings(false);
+        },
+      },
+      {
+        id: 'cmd-recordings',
+        label: showRecordings ? 'Hide Voice Recordings' : 'Open Voice Recordings',
+        category: 'Attribution',
+        icon: Mic,
+        disabled: isSoloMode,
+        onSelect: () => {
+          setShowRecordings((prev) => !prev);
+          setShowVersionHistory(false);
+          setShowActivityTimeline(false);
         },
       },
       ...toolItems,
     ];
-  }, [whiteboardActions, blameMode, toggleBlameMode, showActivityTimeline, showVersionHistory, isSoloMode]);
+  }, [
+    whiteboardActions,
+    blameMode,
+    toggleBlameMode,
+    showActivityTimeline,
+    showVersionHistory,
+    showRecordings,
+    isSoloMode,
+  ]);
 
   useModalA11y({
     isOpen: isKicked,
@@ -1608,6 +1721,14 @@ export default function App() {
         onToggleSimulated={toggleSimulated}
         onOpenInNewTab={openInNewTab}
         onAudioLevelChange={emitAudioLevel}
+        recordingIndicator={
+          activeRecording && !isSoloMode
+            ? `Recording · ${
+                activeRecording.userName ||
+                (activeRecording.userId === currentUser.id ? 'You' : 'a collaborator')
+              }`
+            : null
+        }
         followingUserId={followingUserId}
         onToggleFollowUser={handleToggleFollowUser}
       />
@@ -1742,6 +1863,7 @@ export default function App() {
         onClick={() => {
           setShowVersionHistory((prev) => !prev);
           setShowActivityTimeline(false);
+          setShowRecordings(false);
         }}
         className={`fixed right-3 sm:right-4 bottom-[calc(env(safe-area-inset-bottom,0px)+9.75rem)] sm:bottom-[158px] wb-right-chat-aware z-40 flex items-center gap-1.5 px-2.5 sm:px-3 py-2 rounded-2xl backdrop-blur-md border shadow-lg text-xs font-semibold transition-all cursor-pointer select-none disabled:opacity-40 disabled:cursor-not-allowed ${
           showVersionHistory
@@ -1762,6 +1884,7 @@ export default function App() {
         onClick={() => {
           setShowActivityTimeline((prev) => !prev);
           setShowVersionHistory(false);
+          setShowRecordings(false);
         }}
         className={`fixed right-3 sm:right-4 bottom-[calc(env(safe-area-inset-bottom,0px)+7.25rem)] sm:bottom-[112px] wb-right-chat-aware z-40 flex items-center gap-1.5 px-2.5 sm:px-3 py-2 rounded-2xl backdrop-blur-md border shadow-lg text-xs font-semibold transition-all cursor-pointer select-none ${
           showActivityTimeline
@@ -1803,6 +1926,23 @@ export default function App() {
         canRestore={isHost && !isSoloMode}
         onPreview={handlePreviewSnapshot}
         onRestore={handleRequestRestoreSnapshot}
+      />
+
+      {/* Voice sessions saved to the room, with read-only board snapshots */}
+      <RecordingsPanel
+        isOpen={showRecordings}
+        onClose={() => setShowRecordings(false)}
+        roomId={roomId}
+        recordings={roomRecordings}
+        isLoading={isLoadingRecordings}
+        error={recordingsError}
+        isRecording={isRecording}
+        recordingDurationMs={recordingDurationMs}
+        canRecord={Boolean(roomId) && !isSoloMode && isHost && isVoiceConnected}
+        onStartRecording={startRecording}
+        onStopRecording={stopRecording}
+        onRefresh={() => setRecordingsRefreshToken((token) => token + 1)}
+        onPlaySnapshot={handlePreviewRecordingSnapshot}
       />
 
       {/* Fuzzy Command Palette (Ctrl+K / Cmd+K) */}

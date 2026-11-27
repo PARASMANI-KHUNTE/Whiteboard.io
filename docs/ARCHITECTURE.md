@@ -65,13 +65,15 @@ Whiteboard.io is built as a real-time, distributed collaborative workspace consi
 │                                                                             │
 │    - users: Credentials, salt, hash, Google profile, owned room IDs         │
 │    - tokens: 32-byte random hex bearer tokens with TTL expiration index     │
-│    - rooms: Room metadata, host identity, locked status                     │
+│    - rooms: Room metadata, host identity, lock state, recording history      │
 │    - elements: Batch-persisted canvas elements (strokes, sticky, shapes)    │
 │    - room_elements: Granular atomic document per element index              │
 │    - board_events: Append-only room change log with 30-day TTL               │
 │    - board_snapshots: Periodic board versions with 30-day TTL               │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
+
+Voice recordings (#239) keep only metadata in the `rooms` document. Audio bytes are written to the server's recording directory (configurable with `VOICE_RECORDING_DIR`), capped at 20 files per room and retained for 30 days. Playback uses short-lived HMAC-signed URLs so the client can use a plain `<audio>` element without a bearer token in the URL. Set `VOICE_RECORDING_SIGNING_SECRET` in production; the storage module is isolated so a cloud object-store adapter can replace the local filesystem without changing the API.
 
 ---
 

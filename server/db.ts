@@ -1,5 +1,6 @@
 import { MongoClient, Db, Collection } from 'mongodb';
 import type { BoardSnapshotDoc } from './boardSnapshots';
+import type { VoiceRecordingMeta } from './voiceRecordings';
 
 export interface StoredUserDoc {
   id: string;
@@ -38,6 +39,8 @@ export interface SessionRoomDoc {
   kickedUserIds?: string[];
   /** Explicit host-granted/revoked permissions keyed by user id. */
   userPermissions?: Record<string, { canWrite: boolean; role: 'admin' | 'editor' | 'viewer' }>;
+  /** Capped, retention-bounded voice recording history for async replay. */
+  recordings?: VoiceRecordingMeta[];
 }
 
 export interface RoomElementsDoc {
@@ -185,6 +188,10 @@ export function getDb(): Db {
     throw new Error('Database is not initialized. Call connectDb() first.');
   }
   return db;
+}
+
+export function isDbConnected(): boolean {
+  return !!db;
 }
 
 export function getUsersCollection(): Collection<StoredUserDoc> {

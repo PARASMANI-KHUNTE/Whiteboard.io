@@ -7,6 +7,7 @@ import {
   LogIn,
   Magnet,
   Menu,
+  Mic,
   PanelLeftClose,
   Radio,
   Redo2,
@@ -40,6 +41,7 @@ export type WhiteboardActionId =
   | 'aiChat'
   | 'voiceToggle'
   | 'voiceMute'
+  | 'recordings'
   | 'shortcuts'
   | 'theme'
   | 'snapGrid'
@@ -126,6 +128,7 @@ export interface UseWhiteboardActionsParams {
   onToggleSidebar: () => void;
   onToggleVoice: () => void;
   onToggleMute: () => void;
+  onOpenRecordings: () => void;
   onOpenShortcuts: () => void;
   onOpenProfile: () => void;
   onOpenAuth: () => void;
@@ -168,6 +171,7 @@ export function useWhiteboardActions({
   onToggleSidebar,
   onToggleVoice,
   onToggleMute,
+  onOpenRecordings,
   onOpenShortcuts,
   onOpenProfile,
   onOpenAuth,
@@ -393,6 +397,18 @@ export function useWhiteboardActions({
         disabled: voiceMuteMeta.disabled,
         handler: onToggleMute,
       },
+      recordings: {
+        id: 'recordings',
+        label: 'Recordings',
+        shortLabel: 'Recordings',
+        ariaLabel: 'Open voice recordings',
+        title: isSoloMode
+          ? 'Voice recordings are available in collaborative rooms'
+          : 'Browse and replay voice recordings saved to this room',
+        icon: Mic,
+        disabled: isSoloMode,
+        handler: onOpenRecordings,
+      },
       shortcuts: {
         id: 'shortcuts',
         label: 'Keyboard shortcuts',
@@ -483,6 +499,7 @@ export function useWhiteboardActions({
     onToggleSidebar,
     onToggleVoice,
     onToggleMute,
+    onOpenRecordings,
     onOpenShortcuts,
     onOpenProfile,
     onOpenAuth,

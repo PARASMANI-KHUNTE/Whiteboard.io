@@ -502,6 +502,7 @@ export default function Sidebar({
               actions.actions.aiChat,
               actions.actions.voiceToggle,
               ...(isVoiceConnected ? [actions.actions.voiceMute] : []),
+              actions.actions.recordings,
             ].map((action) => (
               <SidebarActionItem
                 key={action.id}
