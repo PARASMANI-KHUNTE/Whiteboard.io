@@ -68,6 +68,8 @@ Whiteboard.io is built as a real-time, distributed collaborative workspace consi
 │    - rooms: Room metadata, host identity, locked status                     │
 │    - elements: Batch-persisted canvas elements (strokes, sticky, shapes)    │
 │    - room_elements: Granular atomic document per element index              │
+│    - board_events: Append-only room change log with 30-day TTL               │
+│    - board_snapshots: Periodic board versions with 30-day TTL               │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 

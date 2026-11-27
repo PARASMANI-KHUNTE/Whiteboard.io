@@ -857,6 +857,27 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
       }
     });
 
+    // A host restored an earlier snapshot. Replace local optimistic state with
+    // the authoritative board so no pending edit can resurrect stale elements.
+    socket.on('board-restored', (info: {
+      elements: Record<string, CanvasElement>;
+      snapshot: { id: string; timestamp: number };
+      actor: { name?: string };
+    }) => {
+      pendingElementUpdatesRef.current.clear();
+      if (liveFlushRaf !== null) cancelAnimationFrame(liveFlushRaf);
+      liveFlushRaf = null;
+      pendingLivePoints.clear();
+      activeStrokeIdsRef.current.clear();
+      setElements(info.elements || {});
+      setLiveStrokes({});
+      addNotification(`${info.actor?.name || 'A collaborator'} restored an earlier version of the board`, 'info');
+    });
+
+    socket.on('snapshot-error', (info: { message?: string }) => {
+      addNotification(info?.message || 'That version is no longer available.', 'warning');
+    });
+
     return () => {
       // Flush queued element updates before tearing the old connection down,
       // then make sure nothing leaks into the next room.
@@ -1023,6 +1044,13 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
     });
   }, [roomId]);
 
+  /** Request a host-only restore; the authoritative board arrives via `board-restored`. */
+  const emitRestoreSnapshot = useCallback((snapshotId: string): boolean => {
+    if (!roomId || !socketRef.current?.connected) return false;
+    socketRef.current.emit('restore-snapshot', { snapshotId });
+    return true;
+  }, [roomId]);
+
   const updateUserName = useCallback((name: string) => {
     const trimmed = name.trim();
     if (!trimmed) return;
@@ -1179,6 +1207,7 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
     emitVoteClearCast,
     emitVoteClearCancel,
     emitClearBoardDirect,
+    emitRestoreSnapshot,
     setParticipantPermission,
     kickParticipant,
     toggleLockBoard,

@@ -22,7 +22,14 @@ import {
 } from "../socketPayload";
 import { stampElementAttribution } from "../attribution";
 import { clearStoredBoardContext } from "../ai/context";
-import { recordBoardEvent } from "../boardChangeLog";
+import { recordBoardEvent, type BoardActor, type BoardEventInput } from "../boardChangeLog";
+import {
+  beginRestore,
+  endRestore,
+  getBoardSnapshot,
+  isRoomRestoring,
+  maybeCaptureSnapshot,
+} from "../boardSnapshots";
 import { rooms } from "../roomStore";
 import type { CanvasElement, VoteState } from "../roomTypes";
 import type { SocketHandlerParams } from "./types";
@@ -32,9 +39,21 @@ export const LIVE_STROKE_TTL_MS = 30_000;
 /** Maximum simultaneous unfinished strokes per socket. */
 export const MAX_CONCURRENT_LIVE_STROKES = 8;
 export const VOTE_CLEAR_DURATION_MS = Number(process.env.VOTE_CLEAR_DURATION_MS) || 15000;
+const SAFE_SNAPSHOT_ID = /^[A-Za-z0-9_-]{2,128}$/;
 
 export function registerCanvasHandlers({ io, socket, state }: SocketHandlerParams): void {
   const { safeOn, checkCanWrite, pruneLiveStrokes, clearLiveStrokes } = state;
+
+  /** Record and broadcast a durable board event, then update the snapshot window. */
+  const broadcastBoardEvent = (input: BoardEventInput, actor: BoardActor): void => {
+    void recordBoardEvent(input).then((ev) => {
+      io.to(input.roomId).emit("board-event", ev);
+      // The restore handler emits its own event and must not trigger a snapshot.
+      if (input.type !== "restore") {
+        void maybeCaptureSnapshot(input.roomId, rooms.get(input.roomId)?.elements || {}, actor);
+      }
+    });
+  };
 
   // Real-time live stroke streaming (Guarded)
   safeOn("stroke-live-start", (payload: { strokeId: string; point: { x: number; y: number }; color: string; size: number; isHighlighter?: boolean }) => {
@@ -106,16 +125,14 @@ export function registerCanvasHandlers({ io, socket, state }: SocketHandlerParam
     saveRoomElementsDebounced(state.currentRoomId, room.elements, 400);
     socket.to(state.currentRoomId).emit("element-created", attributed);
 
-    void recordBoardEvent({
+    broadcastBoardEvent({
       roomId: state.currentRoomId,
       type: "create",
       actor,
       elementId: clean.id,
       elementType: clean.type,
       details: { x: clean.x, y: clean.y },
-    }).then((ev) => {
-      io.to(state.currentRoomId!).emit("board-event", ev);
-    });
+    }, actor);
   });
 
   // Batch element creation (e.g. converting solo canvas to multiplayer room, Guarded)
@@ -145,15 +162,13 @@ export function registerCanvasHandlers({ io, socket, state }: SocketHandlerParam
     saveRoomElementsDebounced(state.currentRoomId, room.elements, 400);
     socket.to(state.currentRoomId).emit("elements-batch-created", attributedBatch);
 
-    void recordBoardEvent({
+    broadcastBoardEvent({
       roomId: state.currentRoomId,
       type: "batch-create",
       actor,
       elementIds: clean.map((el) => el.id),
       details: { count: clean.length },
-    }).then((ev) => {
-      io.to(state.currentRoomId!).emit("board-event", ev);
-    });
+    }, actor);
   });
 
   // Element update (e.g. moving sticky note or updating text, Guarded)
@@ -183,16 +198,14 @@ export function registerCanvasHandlers({ io, socket, state }: SocketHandlerParam
     saveRoomElementsDebounced(state.currentRoomId, room.elements, 800);
     socket.to(state.currentRoomId).emit("element-updated", attributed);
 
-    void recordBoardEvent({
+    broadcastBoardEvent({
       roomId: state.currentRoomId,
       type: "update",
       actor,
       elementId: clean.id,
       elementType: clean.type,
       details: { x: clean.x, y: clean.y, text: clean.text },
-    }).then((ev) => {
-      io.to(state.currentRoomId!).emit("board-event", ev);
-    });
+    }, actor);
   });
 
   // Element delete (Guarded)
@@ -219,15 +232,13 @@ export function registerCanvasHandlers({ io, socket, state }: SocketHandlerParam
       name: state.currentUser?.name ?? "Unknown",
       color: state.currentUser?.color ?? "#6b7280",
     };
-    void recordBoardEvent({
+    broadcastBoardEvent({
       roomId: state.currentRoomId,
       type: "delete",
       actor,
       elementId,
       elementType: targetElement?.type,
-    }).then((ev) => {
-      io.to(state.currentRoomId!).emit("board-event", ev);
-    });
+    }, actor);
   });
 
   // Batch elements delete (e.g. eraser dragged across multiple strokes, Guarded)
@@ -256,15 +267,13 @@ export function registerCanvasHandlers({ io, socket, state }: SocketHandlerParam
       name: state.currentUser?.name ?? "Unknown",
       color: state.currentUser?.color ?? "#6b7280",
     };
-    void recordBoardEvent({
+    broadcastBoardEvent({
       roomId: state.currentRoomId,
       type: "batch-delete",
       actor,
       elementIds,
       details: { count: elementIds.length },
-    }).then((ev) => {
-      io.to(state.currentRoomId!).emit("board-event", ev);
-    });
+    }, actor);
   });
 
   // Multiplayer cursor movement
@@ -306,18 +315,17 @@ export function registerCanvasHandlers({ io, socket, state }: SocketHandlerParam
         wasVoted: false,
       });
 
-      void recordBoardEvent({
+      const actor = {
+        id: state.currentUser.id,
+        name: state.currentUser.name,
+        color: state.currentUser.color,
+      };
+      broadcastBoardEvent({
         roomId: targetRoomId,
         type: "clear",
-        actor: {
-          id: state.currentUser.id,
-          name: state.currentUser.name,
-          color: state.currentUser.color,
-        },
+        actor,
         details: { wasVoted: false, singleUser: true },
-      }).then((ev) => {
-        io.to(targetRoomId).emit("board-event", ev);
-      });
+      }, actor);
       return;
     }
 
@@ -368,18 +376,17 @@ export function registerCanvasHandlers({ io, socket, state }: SocketHandlerParam
           wasVoted: true,
         });
 
-        void recordBoardEvent({
+        const actor = {
+          id: currentRoom.voteToClear.initiatorId,
+          name: currentRoom.voteToClear.initiatorName,
+          color: currentRoom.users[currentRoom.voteToClear.initiatorId]?.color || "#6b7280",
+        };
+        broadcastBoardEvent({
           roomId: targetRoomId,
           type: "clear",
-          actor: {
-            id: currentRoom.voteToClear.initiatorId,
-            name: currentRoom.voteToClear.initiatorName,
-            color: currentRoom.users[currentRoom.voteToClear.initiatorId]?.color || "#6b7280",
-          },
+          actor,
           details: { wasVoted: true, reason: "timed_out" },
-        }).then((ev) => {
-          io.to(targetRoomId).emit("board-event", ev);
-        });
+        }, actor);
       }
 
       io.to(targetRoomId).emit("vote-clear-ended", {
@@ -426,18 +433,17 @@ export function registerCanvasHandlers({ io, socket, state }: SocketHandlerParam
         wasVoted: true,
       });
 
-      void recordBoardEvent({
+      const actor = {
+        id: room.voteToClear.initiatorId,
+        name: room.voteToClear.initiatorName,
+        color: room.users[room.voteToClear.initiatorId]?.color || "#6b7280",
+      };
+      broadcastBoardEvent({
         roomId: state.currentRoomId,
         type: "clear",
-        actor: {
-          id: room.voteToClear.initiatorId,
-          name: room.voteToClear.initiatorName,
-          color: room.users[room.voteToClear.initiatorId]?.color || "#6b7280",
-        },
+        actor,
         details: { wasVoted: true, reason: "majority_reached" },
-      }).then((ev) => {
-        io.to(state.currentRoomId!).emit("board-event", ev);
-      });
+      }, actor);
       io.to(state.currentRoomId).emit("vote-clear-ended", {
         passed: true,
         yesCount,
@@ -466,6 +472,58 @@ export function registerCanvasHandlers({ io, socket, state }: SocketHandlerParam
       totalEligible: getEligibleVoterIds(room).length,
       reason: "cancelled_by_initiator",
     });
+  });
+
+  // Restore a previous board version (#227). Host/admin only, and visible to
+  // everyone as a durable board event rather than a silent rewrite.
+  safeOn("restore-snapshot", async ({ snapshotId }: { snapshotId: string }) => {
+    if (!state.currentRoomId || !state.currentUser) return;
+    const roomId = state.currentRoomId;
+    const actor = state.currentUser;
+    const room = rooms.get(roomId);
+    if (!room) return;
+
+    const isHost = actor.id === room.creatorId;
+    const isAdmin = room.userPermissions[actor.id]?.role === "admin";
+    if (!isHost && !isAdmin) {
+      socket.emit("permission-denied", {
+        message: "Only the host can restore a previous version.",
+      });
+      return;
+    }
+    if (isRoomRestoring(roomId)) return;
+    if (typeof snapshotId !== "string" || !SAFE_SNAPSHOT_ID.test(snapshotId)) return;
+
+    beginRestore(roomId);
+    try {
+      const snapshot = await getBoardSnapshot(roomId, snapshotId);
+      if (!snapshot) {
+        socket.emit("snapshot-error", { message: "Version not found." });
+        return;
+      }
+
+      // Deep clone so mutating the live board cannot corrupt a stored version.
+      room.elements = JSON.parse(JSON.stringify(snapshot.elements)) as Record<string, CanvasElement>;
+      clearLiveStrokes();
+      // saveRoomElements cancels any pending debounce, so an in-flight save
+      // cannot overwrite the restored board afterwards.
+      await saveRoomElements(roomId, room.elements);
+
+      io.to(roomId).emit("board-restored", {
+        elements: room.elements,
+        snapshot: { id: snapshot.id, timestamp: snapshot.timestamp },
+        actor,
+      });
+
+      broadcastBoardEvent({
+        roomId,
+        type: "restore",
+        actor,
+        details: { snapshotId, snapshotTimestamp: snapshot.timestamp },
+      }, actor);
+    } finally {
+      endRestore(roomId);
+    }
   });
 
   // Direct clear: only the host, or the sole participant of a room, may
@@ -525,18 +583,17 @@ export function registerCanvasHandlers({ io, socket, state }: SocketHandlerParam
       wasVoted: false,
     });
 
-    void recordBoardEvent({
+    const actor = {
+      id: state.currentUser.id,
+      name: state.currentUser.name,
+      color: state.currentUser.color,
+    };
+    broadcastBoardEvent({
       roomId: state.currentRoomId,
       type: "clear",
-      actor: {
-        id: state.currentUser.id,
-        name: state.currentUser.name,
-        color: state.currentUser.color,
-      },
+      actor,
       details: { wasVoted: false, direct: true },
-    }).then((ev) => {
-      io.to(state.currentRoomId!).emit("board-event", ev);
-    });
+    }, actor);
     respond(true);
   });
 }

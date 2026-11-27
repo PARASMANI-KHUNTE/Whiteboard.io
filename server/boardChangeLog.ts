@@ -13,7 +13,8 @@ export type BoardEventType =
   | 'delete'
   | 'batch-create'
   | 'batch-delete'
-  | 'clear';
+  | 'clear'
+  | 'restore';
 
 export interface BoardEventInput {
   roomId: string;

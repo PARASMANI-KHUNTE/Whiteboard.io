@@ -5,6 +5,7 @@ import type { SocketState } from "./types";
 import { registerRoomHandlers, joinSocketLimiter, joinIpLimiter } from "./roomHandler";
 import { registerCanvasHandlers } from "./canvasHandler";
 import { registerVoiceHandlers, signalingLimiter } from "./voiceHandler";
+import { isRoomRestoring } from "../boardSnapshots";
 
 export { joinSocketLimiter, joinIpLimiter, signalingLimiter };
 
@@ -41,6 +42,12 @@ export function registerSocketHandlers(io: SocketIOServer): void {
     // Helper: Guard write operations
     const checkCanWrite = (): boolean => {
       if (!currentUser) return false;
+      // A restore replaces the whole element map; reject writes until it finishes
+      // so a pending mutation cannot be applied to or persisted over it (#227).
+      if (currentRoomId && isRoomRestoring(currentRoomId)) {
+        socket.emit("permission-denied", { message: "Board restore in progress" });
+        return false;
+      }
       if (currentUser.isHost) return true;
       if (currentUser.canWrite) return true;
       socket.emit("permission-denied", {

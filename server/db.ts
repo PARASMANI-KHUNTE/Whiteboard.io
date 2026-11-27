@@ -1,4 +1,5 @@
 import { MongoClient, Db, Collection } from 'mongodb';
+import type { BoardSnapshotDoc } from './boardSnapshots';
 
 export interface StoredUserDoc {
   id: string;
@@ -61,7 +62,7 @@ export interface RateLimitDoc {
 export interface BoardEventDoc {
   id: string;
   roomId: string;
-  type: 'create' | 'update' | 'delete' | 'batch-create' | 'batch-delete' | 'clear';
+  type: 'create' | 'update' | 'delete' | 'batch-create' | 'batch-delete' | 'clear' | 'restore';
   actor: {
     id: string;
     name: string;
@@ -121,6 +122,7 @@ export async function connectDb(): Promise<Db> {
       const individualElements = connectedDb.collection<IndividualElementDoc>('room_elements');
       const rateLimits = connectedDb.collection<RateLimitDoc>('rate_limits');
       const boardEvents = connectedDb.collection<BoardEventDoc>('board_events');
+      const boardSnapshots = connectedDb.collection<BoardSnapshotDoc>('board_snapshots');
 
       const indexSpecs: Array<[string, Promise<string>]> = [
         ['users.id', users.createIndex({ id: 1 }, { unique: true })],
@@ -148,6 +150,11 @@ export async function connectDb(): Promise<Db> {
         ['rate_limits.expiresAt', rateLimits.createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 })],
         ['board_events.roomId_timestamp', boardEvents.createIndex({ roomId: 1, timestamp: -1 })],
         ['board_events.createdAt', boardEvents.createIndex({ createdAt: 1 }, { expireAfterSeconds: 30 * 24 * 60 * 60 })],
+        ['board_snapshots.roomId_timestamp', boardSnapshots.createIndex({ roomId: 1, timestamp: -1 })],
+        [
+          'board_snapshots.createdAt',
+          boardSnapshots.createIndex({ createdAt: 1 }, { expireAfterSeconds: 30 * 24 * 60 * 60 }),
+        ],
       ];
 
       const results = await Promise.allSettled(indexSpecs.map(([, promise]) => promise));
@@ -208,6 +215,11 @@ export function getRateLimitsCollection(): Collection<RateLimitDoc> | null {
 export function getBoardEventsCollection(): Collection<BoardEventDoc> | null {
   if (!db) return null;
   return db.collection<BoardEventDoc>('board_events');
+}
+
+export function getBoardSnapshotsCollection(): Collection<BoardSnapshotDoc> | null {
+  if (!db) return null;
+  return db.collection<BoardSnapshotDoc>('board_snapshots');
 }
 
 export async function checkDbHealth(): Promise<{ connected: boolean; latencyMs?: number; error?: string }> {
