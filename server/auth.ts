@@ -10,6 +10,7 @@ import {
   SessionRoomDoc,
 } from './db';
 import type { VoiceRecordingMeta } from './voiceRecordings';
+import type { DiagramRevision } from './roomTypes';
 
 export interface StoredUser {
   id: string;
@@ -64,6 +65,8 @@ export interface SessionRoomMeta {
   userPermissions?: Record<string, RoomPermission>;
   /** Capped, retention-bounded voice recording history for async replay. */
   recordings?: VoiceRecordingMeta[];
+  /** Capped AI diagram revision history for the room. */
+  diagramHistory?: DiagramRevision[];
 }
 
 function pbkdf2Async(password: string, salt: string, iterations: number, keylen: number): Promise<Buffer> {
@@ -497,6 +500,7 @@ export async function getRoomMeta(roomId: string): Promise<SessionRoomMeta | nul
     kickedUserIds: Array.isArray(doc.kickedUserIds) ? doc.kickedUserIds : [],
     userPermissions: doc.userPermissions || {},
     recordings: Array.isArray(doc.recordings) ? doc.recordings : [],
+    diagramHistory: Array.isArray(doc.diagramHistory) ? doc.diagramHistory : [],
   };
 }
 

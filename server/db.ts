@@ -1,6 +1,7 @@
 import { MongoClient, Db, Collection } from 'mongodb';
 import type { BoardSnapshotDoc } from './boardSnapshots';
 import type { VoiceRecordingMeta } from './voiceRecordings';
+import type { DiagramRevision } from './roomTypes';
 
 export interface StoredUserDoc {
   id: string;
@@ -41,6 +42,8 @@ export interface SessionRoomDoc {
   userPermissions?: Record<string, { canWrite: boolean; role: 'admin' | 'editor' | 'viewer' }>;
   /** Capped, retention-bounded voice recording history for async replay. */
   recordings?: VoiceRecordingMeta[];
+  /** Capped AI diagram revision history for the room. */
+  diagramHistory?: DiagramRevision[];
 }
 
 export interface RoomElementsDoc {

@@ -25,6 +25,20 @@ export interface UserSession {
   voiceConnected?: boolean;
 }
 
+/** Capped AI diagram revision stored with a room and restorable for everyone. */
+export interface DiagramRevision {
+  id: string;
+  roomId: string;
+  sessionId: string;
+  prompt: string;
+  title?: string;
+  author?: { id: string; name: string; color: string };
+  /** Only the AI-owned element group for this session, not the whole board. */
+  elements: CanvasElement[];
+  timestamp: number;
+  createdAt: number | Date | string;
+}
+
 export interface VoteState {
   active: boolean;
   initiatorId: string;
@@ -48,4 +62,5 @@ export interface RoomData {
   users: Record<string, UserSession>;
   voteToClear: VoteState | null;
   voteTimer?: NodeJS.Timeout | null;
+  diagramHistory?: DiagramRevision[];
 }

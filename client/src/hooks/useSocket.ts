@@ -139,6 +139,9 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
   // Monotonic counter so consumers can react to an explicit board clear
   // (including remote/voted clears) without watching the element map.
   const [boardClearCount, setBoardClearCount] = useState(0);
+  // Bumped when another participant records an AI revision so open panels can
+  // refetch without polling.
+  const [aiRevisionRefreshToken, setAiRevisionRefreshToken] = useState(0);
 
   const socketRef = useRef<Socket | null>(null);
   const roomIdRef = useRef(roomId);
@@ -878,6 +881,50 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
       addNotification(info?.message || 'That version is no longer available.', 'warning');
     });
 
+    // A saved revision is metadata-only; panels refetch their list on this token.
+    socket.on('ai-revision-recorded', (info: { sessionId?: string }) => {
+      setAiRevisionRefreshToken((token) => token + 1);
+      if (info?.sessionId) {
+        addNotification('AI revision saved to room history', 'info');
+      }
+    });
+
+    // Restoring an AI revision replaces only that session's element group, so
+    // manual work from other users stays on the board.
+    const onAiRevisionRestored = (info: {
+      elements: CanvasElement[];
+      sessionId: string;
+      revision?: { prompt?: string };
+      actor?: { name?: string };
+    }) => {
+      pendingElementUpdatesRef.current.clear();
+      if (liveFlushRaf !== null) cancelAnimationFrame(liveFlushRaf);
+      liveFlushRaf = null;
+      pendingLivePoints.clear();
+      activeStrokeIdsRef.current.clear();
+
+      const prefix = `ai_${info.sessionId}_`;
+      const next = { ...elementsRef.current };
+      Object.keys(next).forEach((id) => {
+        if (id.startsWith(prefix)) delete next[id];
+      });
+      for (const element of info.elements || []) {
+        if (element?.id?.startsWith(prefix)) next[element.id] = element;
+      }
+      setElements(next);
+      setLiveStrokes({});
+      addNotification(
+        `${info.actor?.name || 'A collaborator'} restored an AI revision (${info.revision?.prompt || 'previous diagram'})`,
+        'info'
+      );
+    };
+    socket.on('ai-revision-restored', onAiRevisionRestored);
+    socket.on('ai_revision_restored', onAiRevisionRestored);
+
+    socket.on('ai-revision-error', (info: { message?: string }) => {
+      addNotification(info?.message || 'That AI revision is no longer available.', 'warning');
+    });
+
     return () => {
       // Flush queued element updates before tearing the old connection down,
       // then make sure nothing leaks into the next room.
@@ -890,6 +937,8 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
         clearTimeout(elementUpdateTimerRef.current);
         elementUpdateTimerRef.current = null;
       }
+      socket.off('ai-revision-restored', onAiRevisionRestored);
+      socket.off('ai_revision_restored', onAiRevisionRestored);
       socket.disconnect();
       socketRef.current = null;
     };
@@ -1051,6 +1100,25 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
     return true;
   }, [roomId]);
 
+  /** Persist one applied AI turn as a capped revision on the room document. */
+  const emitRecordAiRevision = useCallback((
+    sessionId: string,
+    prompt: string,
+    elements: CanvasElement[],
+    title?: string
+  ): boolean => {
+    if (!roomId || !socketRef.current?.connected || !sessionId || !prompt) return false;
+    socketRef.current.emit('record-ai-revision', { sessionId, prompt, title, elements });
+    return true;
+  }, [roomId]);
+
+  /** Restore only an AI session's element group for every room participant. */
+  const emitRestoreAiRevision = useCallback((revisionId: string): boolean => {
+    if (!roomId || !socketRef.current?.connected || !revisionId) return false;
+    socketRef.current.emit('restore-ai-revision', { revisionId });
+    return true;
+  }, [roomId]);
+
   const updateUserName = useCallback((name: string) => {
     const trimmed = name.trim();
     if (!trimmed) return;
@@ -1193,6 +1261,7 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
     voteToClear,
     notifications,
     boardClearCount,
+    aiRevisionRefreshToken,
     socket: socketRef.current,
     emitStrokeLiveStart,
     emitStrokeLivePoint,
@@ -1208,6 +1277,8 @@ export function useSocket(initialRoomId?: string | null, authUser?: AuthUser | n
     emitVoteClearCancel,
     emitClearBoardDirect,
     emitRestoreSnapshot,
+    emitRecordAiRevision,
+    emitRestoreAiRevision,
     setParticipantPermission,
     kickParticipant,
     toggleLockBoard,

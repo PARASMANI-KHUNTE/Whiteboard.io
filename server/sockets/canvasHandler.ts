@@ -22,6 +22,7 @@ import {
 } from "../socketPayload";
 import { stampElementAttribution } from "../attribution";
 import { clearStoredBoardContext } from "../ai/context";
+import { getDiagramRevision, recordDiagramRevision } from "../aiRevisionHistory";
 import { recordBoardEvent, type BoardActor, type BoardEventInput } from "../boardChangeLog";
 import {
   beginRestore,
@@ -525,6 +526,116 @@ export function registerCanvasHandlers({ io, socket, state }: SocketHandlerParam
       endRestore(roomId);
     }
   });
+
+  // Every applied AI turn becomes a capped, room-scoped revision (#241). The
+  // client sends the AI element group after it has been committed through the
+  // normal canvas mutations, so the snapshot matches what everyone sees.
+  safeOn("record-ai-revision", async (payload: {
+    sessionId?: string;
+    prompt?: string;
+    title?: string;
+    elements?: unknown;
+  }) => {
+    if (!state.currentRoomId || !state.currentUser || !checkCanWrite()) return;
+    if (!isRecord(payload)) return;
+
+    const sessionId = readId(payload.sessionId, 128);
+    const prompt = readString(payload.prompt, 1200);
+    if (!sessionId || !prompt || !Array.isArray(payload.elements)) return;
+
+    const revision = await recordDiagramRevision(state.currentRoomId, {
+      sessionId,
+      prompt,
+      title: readString(payload.title, 160) || undefined,
+      author: {
+        id: state.currentUser.id,
+        name: state.currentUser.name,
+        color: state.currentUser.color,
+      },
+      elements: payload.elements,
+    });
+    if (!revision) return;
+
+    io.to(state.currentRoomId).emit("ai-revision-recorded", {
+      id: revision.id,
+      roomId: revision.roomId,
+      sessionId: revision.sessionId,
+      prompt: revision.prompt,
+      timestamp: revision.timestamp,
+      elementCount: revision.elements.length,
+    });
+  });
+
+  // Restore only the AI-owned element group so manual work outside that group
+  // is never lost. Both spellings are accepted because the feature request used
+  // `restore_ai_revision` while the socket protocol is otherwise hyphenated.
+  const restoreAiRevision = async (payload: { revisionId?: string }) => {
+    if (!state.currentRoomId || !state.currentUser) return;
+    const roomId = state.currentRoomId;
+    const actor = state.currentUser;
+    const room = rooms.get(roomId);
+    if (!room) return;
+
+    const isHost = actor.id === room.creatorId;
+    const isAdmin = room.userPermissions[actor.id]?.role === "admin";
+    if (!isHost && !isAdmin) {
+      socket.emit("permission-denied", {
+        message: "Only the host or an admin can restore an AI revision.",
+      });
+      return;
+    }
+    if (isRoomRestoring(roomId)) return;
+
+    const revisionId = isRecord(payload) ? readId(payload.revisionId, 128) : null;
+    if (!revisionId || !SAFE_SNAPSHOT_ID.test(revisionId)) return;
+
+    beginRestore(roomId);
+    try {
+      const revision = await getDiagramRevision(roomId, revisionId);
+      if (!revision) {
+        socket.emit("ai-revision-error", { message: "AI revision not found." });
+        return;
+      }
+
+      const prefix = `ai_${revision.sessionId}_`;
+      const nextElements: Record<string, CanvasElement> = {};
+      for (const [id, element] of Object.entries(room.elements)) {
+        if (!id.startsWith(prefix)) nextElements[id] = element;
+      }
+      for (const element of sanitizeElementBatch(revision.elements)) {
+        if (element.id.startsWith(prefix)) {
+          nextElements[element.id] = element as CanvasElement;
+        }
+      }
+      room.elements = nextElements;
+      clearLiveStrokes();
+      await saveRoomElements(roomId, room.elements);
+
+      const restored = {
+        elements: revision.elements,
+        sessionId: revision.sessionId,
+        revision: { id: revision.id, prompt: revision.prompt, timestamp: revision.timestamp },
+        actor,
+      };
+      io.to(roomId).emit("ai-revision-restored", restored);
+      io.to(roomId).emit("ai_revision_restored", restored);
+
+      broadcastBoardEvent({
+        roomId,
+        type: "restore",
+        actor,
+        details: {
+          revisionId,
+          sessionId: revision.sessionId,
+          prompt: revision.prompt,
+        },
+      }, actor);
+    } finally {
+      endRestore(roomId);
+    }
+  };
+  safeOn("restore-ai-revision", restoreAiRevision);
+  safeOn("restore_ai_revision", restoreAiRevision);
 
   // Direct clear: only the host, or the sole participant of a room, may
   // bypass the vote-to-clear flow. Editors must use the vote instead.

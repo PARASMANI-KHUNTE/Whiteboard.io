@@ -25,6 +25,7 @@ import { EmptyCanvasGuide } from './components/ui/EmptyCanvasGuide';
 import { CommandPaletteModal, type CommandPaletteItem } from './components/CommandPaletteModal';
 import { ActivityTimelineDrawer } from './components/ActivityTimelineDrawer';
 import { VersionHistoryPanel } from './components/VersionHistoryPanel';
+import { AiRevisionHistoryPanel } from './components/AiRevisionHistoryPanel';
 import { RecordingsPanel } from './components/RecordingsPanel';
 import {
   appendActivityEntry,
@@ -34,6 +35,7 @@ import {
   type ActivityEntry,
 } from './utils/activityFeed';
 import type { BoardSnapshotDetail, BoardSnapshotMeta } from './utils/boardSnapshots';
+import type { AiRevisionDetail, AiRevisionMeta } from './utils/aiRevisionHistory';
 import type { VoiceRecordingMeta, VoiceRecordingState } from './utils/voiceRecordings';
 import { apiFetchJson } from './utils/apiFetch';
 import { Header } from './components/Header';
@@ -95,6 +97,8 @@ type HistoryOperation =
       before: CanvasElement[];
       after: CanvasElement[];
       at: number;
+      /** Human-readable AI prompt for the revision history/undo controls. */
+      prompt?: string;
     };
 
 /** Wires attached to a created element that a cascading undo must remove. */
@@ -114,6 +118,7 @@ function collectCascadeWires(
 }
 
 const HISTORY_LIMIT = 100;
+type AiBatchOperation = Extract<HistoryOperation, { kind: 'batch' }>;
 
 export default function App() {
   // Theme hook
@@ -141,6 +146,11 @@ export default function App() {
   const [selectedSnapshot, setSelectedSnapshot] = useState<BoardSnapshotDetail | null>(null);
   const [isLoadingSnapshots, setIsLoadingSnapshots] = useState<boolean>(false);
   const [isRestoringSnapshot, setIsRestoringSnapshot] = useState<boolean>(false);
+  const [showAiRevisionHistory, setShowAiRevisionHistory] = useState<boolean>(false);
+  const [aiRevisions, setAiRevisions] = useState<AiRevisionMeta[]>([]);
+  const [selectedAiRevision, setSelectedAiRevision] = useState<AiRevisionDetail | null>(null);
+  const [isLoadingAiRevisions, setIsLoadingAiRevisions] = useState<boolean>(false);
+  const [isRestoringAiRevision, setIsRestoringAiRevision] = useState<boolean>(false);
   const [showRecordings, setShowRecordings] = useState<boolean>(false);
   const [roomRecordings, setRoomRecordings] = useState<VoiceRecordingMeta[]>([]);
   const [isLoadingRecordings, setIsLoadingRecordings] = useState<boolean>(false);
@@ -237,6 +247,7 @@ export default function App() {
     voteToClear,
     notifications,
     boardClearCount,
+    aiRevisionRefreshToken,
     emitStrokeLiveStart,
     emitStrokeLivePoint,
     emitElementCreate,
@@ -251,6 +262,8 @@ export default function App() {
     emitVoteClearCancel,
     emitClearBoardDirect,
     emitRestoreSnapshot,
+    emitRecordAiRevision,
+    emitRestoreAiRevision,
     setParticipantPermission,
     kickParticipant,
     toggleLockBoard,
@@ -457,6 +470,34 @@ export default function App() {
     };
   }, [showVersionHistory, roomId]);
 
+  // AI revisions are room-scoped; clear stale previews when the room changes.
+  useEffect(() => {
+    setAiRevisions([]);
+    setSelectedAiRevision(null);
+  }, [roomId, isSoloMode]);
+
+  // Load the revision timeline when it opens and whenever another participant
+  // saves a new revision.
+  useEffect(() => {
+    if (!showAiRevisionHistory || !roomId || isSoloMode) return;
+    let cancelled = false;
+    setIsLoadingAiRevisions(true);
+    apiFetchJson<{ success: boolean; revisions: AiRevisionMeta[] }>(
+      `/api/rooms/${encodeURIComponent(roomId)}/ai-revisions?limit=20`
+    )
+      .then((res) => {
+        if (cancelled || !res.success || !Array.isArray(res.revisions)) return;
+        setAiRevisions(res.revisions);
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setIsLoadingAiRevisions(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [showAiRevisionHistory, roomId, isSoloMode, aiRevisionRefreshToken]);
+
   // Voice recordings belong to a room; never show stale clips after a switch.
   useEffect(() => {
     setRoomRecordings([]);
@@ -576,6 +617,40 @@ export default function App() {
       });
     },
     [emitRestoreSnapshot, isHost, roomId]
+  );
+
+  const handlePreviewAiRevision = useCallback(
+    async (revisionId: string) => {
+      if (!roomId) return;
+      try {
+        const res = await apiFetchJson<{ success: boolean; revision: AiRevisionDetail }>(
+          `/api/rooms/${encodeURIComponent(roomId)}/ai-revisions/${encodeURIComponent(revisionId)}`
+        );
+        if (res.success && res.revision) setSelectedAiRevision(res.revision);
+      } catch {
+        // The hook's ai-revision-error notification covers user feedback.
+      }
+    },
+    [roomId]
+  );
+
+  const handleRequestRestoreAiRevision = useCallback(
+    (revision: AiRevisionMeta) => {
+      if ((!isHost && currentUser.role !== 'admin') || !roomId) return;
+      setConfirmModalState({
+        isOpen: true,
+        title: 'Restore this AI revision?',
+        message: `This replaces the AI diagram for everyone with “${revision.prompt}” from ${new Date(revision.timestamp).toLocaleString()}. Manual work outside that diagram is preserved, and the restore is recorded in the activity timeline.`,
+        confirmText: 'Restore for everyone',
+        cancelText: 'Cancel',
+        variant: 'warning',
+        onConfirm: () => {
+          if (emitRestoreAiRevision(revision.id)) setIsRestoringAiRevision(true);
+          setSelectedAiRevision(null);
+        },
+      });
+    },
+    [emitRestoreAiRevision, isHost, currentUser.role, roomId]
   );
 
   // Global Ctrl+K / Cmd+K launcher for Command Palette.
@@ -725,6 +800,11 @@ export default function App() {
   // Local undo / redo stacks (only edits initiated by this user are recorded)
   const historyPastRef = useRef<HistoryOperation[]>([]);
   const historyFutureRef = useRef<HistoryOperation[]>([]);
+  // AI turns live in their own stack so Ctrl+Z can revert one AI step without
+  // stepping through the individual mutations that applied it.
+  const aiHistoryPastRef = useRef<Extract<HistoryOperation, { kind: 'batch' }>[]>([]);
+  const aiHistoryFutureRef = useRef<Extract<HistoryOperation, { kind: 'batch' }>[]>([]);
+  const aiUndoNextRef = useRef(false);
   const [, setHistoryVersion] = useState(0);
 
   const bumpHistory = useCallback(() => {
@@ -734,8 +814,31 @@ export default function App() {
   const resetHistory = useCallback(() => {
     historyPastRef.current = [];
     historyFutureRef.current = [];
+    aiHistoryPastRef.current = [];
+    aiHistoryFutureRef.current = [];
+    aiUndoNextRef.current = false;
     bumpHistory();
   }, [bumpHistory]);
+
+  // A remote AI restore replaces the authoritative element group. Clear the
+  // local busy flag and any undo steps that could resurrect pre-restore work.
+  useEffect(() => {
+    if (!socket) return;
+    const onAiRestored = () => {
+      setIsRestoringAiRevision(false);
+      setSelectedAiRevision(null);
+      resetHistory();
+    };
+    const onAiError = () => setIsRestoringAiRevision(false);
+    socket.on('ai-revision-restored', onAiRestored);
+    socket.on('ai_revision_restored', onAiRestored);
+    socket.on('ai-revision-error', onAiError);
+    return () => {
+      socket.off('ai-revision-restored', onAiRestored);
+      socket.off('ai_revision_restored', onAiRestored);
+      socket.off('ai-revision-error', onAiError);
+    };
+  }, [socket, resetHistory]);
 
   /**
    * Prevents the next edit from being coalesced into the previous one. Used for
@@ -765,6 +868,8 @@ export default function App() {
         last.elements = last.elements.map((element) => afterMap.get(element.id) ?? element);
         last.at = operation.at;
         historyFutureRef.current = [];
+        aiHistoryFutureRef.current = [];
+        aiUndoNextRef.current = false;
         bumpHistory();
         return;
       }
@@ -790,8 +895,11 @@ export default function App() {
         if (past.length > HISTORY_LIMIT) past.shift();
       }
 
-      // Any new edit invalidates the redo branch.
+      // Any new manual edit invalidates both redo branches and makes the next
+      // Ctrl+Z target the manual edit rather than the most recent AI turn.
       historyFutureRef.current = [];
+      aiHistoryFutureRef.current = [];
+      aiUndoNextRef.current = false;
       bumpHistory();
     },
     [bumpHistory]
@@ -1118,7 +1226,11 @@ export default function App() {
    * left untouched, and the whole turn becomes a single undo step.
    */
   const applyAiElements = useCallback(
-    (sessionId: string, nextElements: CanvasElement[]): AiElementDiffResult => {
+    (
+      sessionId: string,
+      nextElements: CanvasElement[],
+      revision?: { prompt: string; title?: string }
+    ): AiElementDiffResult => {
       const prefix = `ai_${sessionId}_`;
       const current = (Object.values(elementsRef.current) as CanvasElement[]).filter(
         (element) => element && element.id.startsWith(prefix)
@@ -1139,18 +1251,33 @@ export default function App() {
       }
       diff.updated.forEach((element) => emitElementUpdate(element));
 
-      pushHistory({
+      aiHistoryPastRef.current.push({
         kind: 'batch',
         created: diff.created,
         deleted: diff.deleted,
         before: diff.updatedBefore,
         after: diff.updated,
         at: Date.now(),
+        prompt: revision?.prompt,
       });
+      if (aiHistoryPastRef.current.length > HISTORY_LIMIT) aiHistoryPastRef.current.shift();
+      aiHistoryFutureRef.current = [];
+      aiUndoNextRef.current = true;
+      bumpHistory();
+
+      if (revision?.prompt) {
+        emitRecordAiRevision(sessionId, revision.prompt, nextElements, revision.title);
+      }
 
       return diff;
     },
-    [emitElementsBatchCreate, emitElementsBatchDelete, emitElementUpdate, pushHistory]
+    [
+      bumpHistory,
+      emitElementsBatchCreate,
+      emitElementsBatchDelete,
+      emitElementUpdate,
+      emitRecordAiRevision,
+    ]
   );
 
   const handleAiGenerated = useCallback(
@@ -1191,7 +1318,10 @@ export default function App() {
         }
       }
 
-      const diff = applyAiElements(payload.sessionId, payload.elements);
+      const diff = applyAiElements(payload.sessionId, payload.elements, {
+        prompt: context.prompt || payload.title || 'AI diagram',
+        title: payload.title,
+      });
       const focusElements = diff.focusElements.length > 0 ? diff.focusElements : payload.elements;
 
       const now = Date.now();
@@ -1281,7 +1411,10 @@ export default function App() {
         return;
       }
 
-      const diff = applyAiElements(currentSession.sessionId, payload.elements);
+      const diff = applyAiElements(currentSession.sessionId, payload.elements, {
+        prompt: instruction,
+        title: payload.title,
+      });
       const focusElements = diff.focusElements.length > 0 ? diff.focusElements : payload.elements;
 
       const now = Date.now();
@@ -1387,9 +1520,45 @@ export default function App() {
     rememberRecentRoom(roomId, roomName || `Room ${roomId}`);
   }, [roomId, roomName]);
 
-  // Undo / redo the last locally initiated edit
+  /** Shared batch reversal used by both the manual stack and the AI stack. */
+  const undoBatchOperation = useCallback((operation: AiBatchOperation) => {
+    const cascadeDeleted = collectCascadeWires(elementsRef.current, operation.created, [
+      ...operation.created,
+      ...operation.deleted,
+    ]);
+    operation.cascadeDeleted = cascadeDeleted;
+    const ids = new Set([
+      ...operation.created.map((element) => element.id),
+      ...cascadeDeleted.map((element) => element.id),
+    ]);
+    if (ids.size > 0) emitElementsBatchDelete(Array.from(ids));
+    if (operation.deleted.length > 0) emitElementsBatchCreate(operation.deleted);
+    operation.before.forEach((element) => emitElementUpdate(element));
+  }, [emitElementsBatchDelete, emitElementsBatchCreate, emitElementUpdate]);
+
+  const redoBatchOperation = useCallback((operation: AiBatchOperation) => {
+    if (operation.created.length > 0) emitElementsBatchCreate(operation.created);
+    if (operation.cascadeDeleted?.length) emitElementsBatchCreate(operation.cascadeDeleted);
+    if (operation.deleted.length > 0) {
+      emitElementsBatchDelete(operation.deleted.map((element) => element.id));
+    }
+    operation.after.forEach((element) => emitElementUpdate(element));
+  }, [emitElementsBatchCreate, emitElementsBatchDelete, emitElementUpdate]);
+
+  // Undo / redo the last locally initiated edit. A fresh AI turn takes priority
+  // for the next Ctrl+Z; afterwards normal manual edits are undone first.
   const handleUndo = useCallback(() => {
     if (!canWrite) return;
+    if (aiUndoNextRef.current && aiHistoryPastRef.current.length > 0) {
+      const aiOperation = aiHistoryPastRef.current.pop();
+      if (aiOperation) {
+        undoBatchOperation(aiOperation);
+        aiHistoryFutureRef.current.push(aiOperation);
+        aiUndoNextRef.current = false;
+        bumpHistory();
+        return;
+      }
+    }
     const operation = historyPastRef.current.pop();
     if (!operation) return;
 
@@ -1402,27 +1571,27 @@ export default function App() {
     } else if (operation.kind === 'delete') {
       emitElementsBatchCreate(operation.elements);
     } else if (operation.kind === 'batch') {
-      // Drop the turn's creations (plus any connectors now dangling off them),
-      // restore anything it removed, then roll updates back.
-      const cascadeDeleted = collectCascadeWires(elementsRef.current, operation.created, [
-        ...operation.created,
-        ...operation.deleted,
-      ]);
-      operation.cascadeDeleted = cascadeDeleted;
-      const ids = new Set([...operation.created.map((element) => element.id), ...cascadeDeleted.map((element) => element.id)]);
-      if (ids.size > 0) emitElementsBatchDelete(Array.from(ids));
-      if (operation.deleted.length > 0) emitElementsBatchCreate(operation.deleted);
-      operation.before.forEach((element) => emitElementUpdate(element));
+      undoBatchOperation(operation);
     } else {
       operation.before.forEach((element) => emitElementUpdate(element));
     }
 
     historyFutureRef.current.push(operation);
     bumpHistory();
-  }, [canWrite, emitElementsBatchDelete, emitElementsBatchCreate, emitElementUpdate, bumpHistory]);
+  }, [canWrite, undoBatchOperation, bumpHistory, emitElementsBatchDelete, emitElementsBatchCreate, emitElementUpdate]);
 
   const handleRedo = useCallback(() => {
     if (!canWrite) return;
+    if (aiHistoryFutureRef.current.length > 0) {
+      const aiOperation = aiHistoryFutureRef.current.pop();
+      if (aiOperation) {
+        redoBatchOperation(aiOperation);
+        aiHistoryPastRef.current.push(aiOperation);
+        aiUndoNextRef.current = true;
+        bumpHistory();
+        return;
+      }
+    }
     const operation = historyFutureRef.current.pop();
     if (!operation) return;
 
@@ -1432,22 +1601,39 @@ export default function App() {
     } else if (operation.kind === 'delete') {
       emitElementsBatchDelete(operation.elements.map((element) => element.id));
     } else if (operation.kind === 'batch') {
-      if (operation.created.length > 0) emitElementsBatchCreate(operation.created);
-      if (operation.cascadeDeleted?.length) emitElementsBatchCreate(operation.cascadeDeleted);
-      if (operation.deleted.length > 0) {
-        emitElementsBatchDelete(operation.deleted.map((element) => element.id));
-      }
-      operation.after.forEach((element) => emitElementUpdate(element));
+      redoBatchOperation(operation);
     } else {
       operation.after.forEach((element) => emitElementUpdate(element));
     }
 
     historyPastRef.current.push(operation);
     bumpHistory();
-  }, [canWrite, emitElementsBatchCreate, emitElementsBatchDelete, emitElementUpdate, bumpHistory]);
+  }, [canWrite, redoBatchOperation, bumpHistory, emitElementsBatchCreate, emitElementsBatchDelete, emitElementUpdate]);
+
+  const handleUndoAi = useCallback(() => {
+    if (!canWrite) return;
+    const operation = aiHistoryPastRef.current.pop();
+    if (!operation) return;
+    undoBatchOperation(operation);
+    aiHistoryFutureRef.current.push(operation);
+    aiUndoNextRef.current = false;
+    bumpHistory();
+  }, [canWrite, undoBatchOperation, bumpHistory]);
+
+  const handleRedoAi = useCallback(() => {
+    if (!canWrite) return;
+    const operation = aiHistoryFutureRef.current.pop();
+    if (!operation) return;
+    redoBatchOperation(operation);
+    aiHistoryPastRef.current.push(operation);
+    aiUndoNextRef.current = true;
+    bumpHistory();
+  }, [canWrite, redoBatchOperation, bumpHistory]);
 
   const canUndo = historyPastRef.current.length > 0;
   const canRedo = historyFutureRef.current.length > 0;
+  const canUndoAi = aiHistoryPastRef.current.length > 0;
+  const canRedoAi = aiHistoryFutureRef.current.length > 0;
 
   // Request clear board
   const handleRequestClear = useCallback(() => {
@@ -1517,6 +1703,8 @@ export default function App() {
     canWrite,
     canUndo,
     canRedo,
+    canUndoAi,
+    canRedoAi,
     isMultiplayer,
     isSoloMode,
     isHost,
@@ -1540,6 +1728,14 @@ export default function App() {
     onOpenAdmin: () => setShowAdminModal(true),
     onOpenAiDiagram: openAiDiagram,
     onToggleAiChat: toggleAiChat,
+    onOpenAiRevisions: () => {
+      setShowAiRevisionHistory(true);
+      setShowVersionHistory(false);
+      setShowActivityTimeline(false);
+      setShowRecordings(false);
+    },
+    onUndoAi: handleUndoAi,
+    onRedoAi: handleRedoAi,
     onToggleSidebar: () => setIsSidebarOpen((open) => !open),
     onToggleVoice: handleToggleVoice,
     onToggleMute: toggleMute,
@@ -1547,6 +1743,7 @@ export default function App() {
       setShowRecordings(true);
       setShowVersionHistory(false);
       setShowActivityTimeline(false);
+      setShowAiRevisionHistory(false);
     },
     onOpenShortcuts: () => setShowShortcutsModal(true),
     onOpenProfile: () => setShowProfileModal(true),
@@ -1606,6 +1803,7 @@ export default function App() {
           setShowActivityTimeline((prev) => !prev);
           setShowVersionHistory(false);
           setShowRecordings(false);
+          setShowAiRevisionHistory(false);
         },
       },
       {
@@ -1616,6 +1814,20 @@ export default function App() {
         disabled: isSoloMode,
         onSelect: () => {
           setShowVersionHistory((prev) => !prev);
+          setShowActivityTimeline(false);
+          setShowRecordings(false);
+          setShowAiRevisionHistory(false);
+        },
+      },
+      {
+        id: 'cmd-ai-revisions',
+        label: showAiRevisionHistory ? 'Hide AI Revisions' : 'Open AI Revisions',
+        category: 'Attribution',
+        icon: History,
+        disabled: isSoloMode,
+        onSelect: () => {
+          setShowAiRevisionHistory((prev) => !prev);
+          setShowVersionHistory(false);
           setShowActivityTimeline(false);
           setShowRecordings(false);
         },
@@ -1630,6 +1842,7 @@ export default function App() {
           setShowRecordings((prev) => !prev);
           setShowVersionHistory(false);
           setShowActivityTimeline(false);
+          setShowAiRevisionHistory(false);
         },
       },
       ...toolItems,
@@ -1926,6 +2139,23 @@ export default function App() {
         canRestore={isHost && !isSoloMode}
         onPreview={handlePreviewSnapshot}
         onRestore={handleRequestRestoreSnapshot}
+      />
+
+      {/* Capped room-scoped AI diagram revisions with explicit restore */}
+      <AiRevisionHistoryPanel
+        isOpen={showAiRevisionHistory}
+        onClose={() => setShowAiRevisionHistory(false)}
+        revisions={aiRevisions}
+        selectedRevision={selectedAiRevision}
+        isLoading={isLoadingAiRevisions}
+        isRestoring={isRestoringAiRevision}
+        canRestore={(isHost || currentUser.role === 'admin') && !isSoloMode}
+        canUndo={canUndoAi}
+        canRedo={canRedoAi}
+        onPreview={handlePreviewAiRevision}
+        onRestore={handleRequestRestoreAiRevision}
+        onUndo={handleUndoAi}
+        onRedo={handleRedoAi}
       />
 
       {/* Voice sessions saved to the room, with read-only board snapshots */}

@@ -53,6 +53,7 @@ export async function buildRoom(roomId: string): Promise<RoomData> {
     users: {},
     voteToClear: null,
     voteTimer: null,
+    diagramHistory: meta?.diagramHistory || [],
   };
 }
 
