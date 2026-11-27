@@ -21,6 +21,9 @@ import {
   ROOM_CAPACITY_ERROR,
 } from "../roomStore";
 import { getBoardEvents } from "../boardChangeLog";
+import { getBoardSnapshot, listBoardSnapshots } from "../boardSnapshots";
+
+const SAFE_SNAPSHOT_ID = /^[A-Za-z0-9_-]{2,128}$/;
 
 export interface RoomsRoutesOptions {
   io: SocketIOServer;
@@ -137,6 +140,53 @@ export function setupRoomsRoutes(app: express.Express, options: RoomsRoutesOptio
       res.json({ success: true, events });
     } catch (err: any) {
       res.status(500).json({ success: false, error: err.message || "Could not retrieve board events" });
+    }
+  });
+
+  // Board snapshot history endpoints (#227). Metadata only in the list view so
+  // clients can show a version timeline without downloading every element map.
+  app.get("/api/rooms/:roomId/snapshots", async (req, res) => {
+    try {
+      const roomId = req.params.roomId;
+      if (!SAFE_SNAPSHOT_ID.test(roomId)) {
+        res.status(400).json({ success: false, error: "Invalid room id" });
+        return;
+      }
+      const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 20;
+      const snapshots = await listBoardSnapshots(roomId, limit);
+      res.json({
+        success: true,
+        snapshots: snapshots.map(({ id, roomId, actor, eventCount, timestamp, createdAt, elements }) => ({
+          id,
+          roomId,
+          actor,
+          eventCount,
+          timestamp,
+          createdAt,
+          elementCount: Object.keys(elements || {}).length,
+        })),
+      });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message || "Could not retrieve board snapshots" });
+    }
+  });
+
+  app.get("/api/rooms/:roomId/snapshots/:snapshotId", async (req, res) => {
+    try {
+      const roomId = req.params.roomId;
+      const snapshotId = req.params.snapshotId;
+      if (!SAFE_SNAPSHOT_ID.test(roomId) || !SAFE_SNAPSHOT_ID.test(snapshotId)) {
+        res.status(400).json({ success: false, error: "Invalid snapshot id" });
+        return;
+      }
+      const snapshot = await getBoardSnapshot(roomId, snapshotId);
+      if (!snapshot) {
+        res.status(404).json({ success: false, error: "Version not found." });
+        return;
+      }
+      res.json({ success: true, snapshot });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message || "Could not retrieve board snapshot" });
     }
   });
 

@@ -237,6 +237,22 @@ Returns status, participant count, and metadata for a specific room.
   }
   ```
 
+#### `GET /api/rooms/:roomId/events`
+Returns the durable, room-scoped board change log, newest first.
+* **Query**: `limit` (1–200, default 50), `before` (exclusive timestamp cursor).
+* **Response (`200 OK`)**: `{ "success": true, "events": BoardEventDoc[] }`
+
+#### `GET /api/rooms/:roomId/snapshots`
+Lists automatic board snapshots (metadata only) for version history.
+* **Query**: `limit` (default 20).
+* **Response (`200 OK`)**: `{ "success": true, "snapshots": BoardSnapshotMeta[] }`
+
+#### `GET /api/rooms/:roomId/snapshots/:snapshotId`
+Returns one snapshot including its full `elements` dictionary for preview.
+* **Response (`200 OK`)**: `{ "success": true, "snapshot": BoardSnapshotDoc }`
+
+> **Restore policy (#227):** Restores are host/admin-only. While a restore is in progress the room briefly rejects canvas mutations with `permission-denied`. The restored board is broadcast with `board-restored`, and the restore is appended to the change log as a new `restore` event so history is never silently rewritten.
+
 #### `DELETE /api/rooms/:roomId`
 Permanently deletes a room, notifies connected clients, and purges database state.
 * **Headers**: `Authorization: Bearer <token>`
@@ -423,6 +439,7 @@ Clients establish a connection to `/socket.io/` using WebSocket with HTTP long-p
 | `vote-clear-cast` | `{ vote: boolean }` | Casts a YES or NO vote. |
 | `vote-clear-cancel` | *None* | Cancels the active clear vote (initiator only). |
 | `clear-board-direct` | *None* | Instantly wipes the whiteboard (solo mode or host action). |
+| `restore-snapshot` | `{ snapshotId }` | Host/admin-only restore of an earlier board version for everyone. |
 | `admin-set-permission` | `{ targetUserId, canWrite }` | Grants or revokes participant drawing privileges. |
 | `admin-kick-user` | `{ targetUserId, reason }` | Ejects a participant from the room. |
 | `admin-toggle-lock` | `{ isLocked }` | Locks whiteboard into read-only mode for non-hosts. |
@@ -462,4 +479,7 @@ Clients establish a connection to `/socket.io/` using WebSocket with HTTP long-p
 | `vote-clear-updated` | `VoteToClearState` | Live progress of current votes tally. |
 | `vote-clear-ended` | `{ passed, yesCount, totalEligible, reason }` | Concludes vote and announces result. |
 | `board-cleared` | `{ initiatorName, wasVoted }` | Clears all canvas elements from local memory. |
-| `permission-denied` | `{ message }` | Warns client when attempting a restricted operation. |
+| `board-event` | `BoardEventDoc` | Streams a durable change-log event (including `restore`) to every participant. |
+| `board-restored` | `{ elements, snapshot, actor }` | Replaces local board state with an authoritative restored version. |
+| `snapshot-error` | `{ message }` | Restore failed because the requested version is unavailable. |
+| `permission-denied` | `{ message }` | Warns client when attempting a restricted operation (including restore lock). |

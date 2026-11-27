@@ -89,6 +89,23 @@ test("recordBoardEvent stores create, update, delete, batch, and clear events (#
   assert.equal(events[events.length - 1].type, "create");
 });
 
+test("restore events are recorded as their own durable event type (#227)", async () => {
+  const roomId = "test-room-restore-event";
+  clearMemoryEvents(roomId);
+
+  const ev = await recordBoardEvent({
+    roomId,
+    type: "restore",
+    actor: { id: "host-1", name: "Host", color: "#ef4444" },
+    details: { snapshotId: "snapshot-1", snapshotTimestamp: 1234 },
+    timestamp: 5000,
+  });
+
+  assert.equal(ev.type, "restore");
+  assert.equal(ev.details?.snapshotId, "snapshot-1");
+  assert.equal((await getBoardEvents(roomId))[0].type, "restore");
+});
+
 test("coalesces rapid typing / drag updates for same element and actor (#225)", async () => {
   const roomId = "test-room-coalesce";
   clearMemoryEvents(roomId);

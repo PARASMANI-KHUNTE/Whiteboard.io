@@ -24,6 +24,7 @@ import { FloatingToolDock } from './components/ui/FloatingToolDock';
 import { EmptyCanvasGuide } from './components/ui/EmptyCanvasGuide';
 import { CommandPaletteModal, type CommandPaletteItem } from './components/CommandPaletteModal';
 import { ActivityTimelineDrawer } from './components/ActivityTimelineDrawer';
+import { VersionHistoryPanel } from './components/VersionHistoryPanel';
 import {
   appendActivityEntry,
   buildInitialActivityFromElements,
@@ -31,6 +32,7 @@ import {
   boardEventToActivityEntry,
   type ActivityEntry,
 } from './utils/activityFeed';
+import type { BoardSnapshotDetail, BoardSnapshotMeta } from './utils/boardSnapshots';
 import { apiFetchJson } from './utils/apiFetch';
 import { Header } from './components/Header';
 import Sidebar from './components/Sidebar';
@@ -55,7 +57,7 @@ import { formatAiEngineDisplay } from './ai/providerLabels';
 import { buildGlobalAiContext } from './ai/sessionContext';
 import { diffAiElements, type AiElementDiffResult } from './ai/elementDiff';
 import { ErrorBoundary } from './components/ErrorBoundary';
-import { Info, AlertCircle, CheckCircle2, UserX, X, History } from 'lucide-react';
+import { Info, AlertCircle, CheckCircle2, UserX, X, History, Clock } from 'lucide-react';
 import { isColorBlack, isColorWhite } from './utils/themeColors';
 import { shouldRecolorBoardOnThemeToggle } from './utils/themeBoardEdit';
 import type { ExportViewportInfo } from './utils/exportTypes';
@@ -132,6 +134,11 @@ export default function App() {
   const [showActivityTimeline, setShowActivityTimeline] = useState<boolean>(false);
   const [activityEntries, setActivityEntries] = useState<ActivityEntry[]>([]);
   const [isLoadingActivity, setIsLoadingActivity] = useState<boolean>(false);
+  const [showVersionHistory, setShowVersionHistory] = useState<boolean>(false);
+  const [boardSnapshots, setBoardSnapshots] = useState<BoardSnapshotMeta[]>([]);
+  const [selectedSnapshot, setSelectedSnapshot] = useState<BoardSnapshotDetail | null>(null);
+  const [isLoadingSnapshots, setIsLoadingSnapshots] = useState<boolean>(false);
+  const [isRestoringSnapshot, setIsRestoringSnapshot] = useState<boolean>(false);
   const [hasChosenSessionMode, setHasChosenSessionMode] = useState<boolean>(false);
 
   const [showAuthModal, setShowAuthModal] = useState<boolean>(false);
@@ -235,6 +242,7 @@ export default function App() {
     emitVoteClearCast,
     emitVoteClearCancel,
     emitClearBoardDirect,
+    emitRestoreSnapshot,
     setParticipantPermission,
     kickParticipant,
     toggleLockBoard,
@@ -419,6 +427,74 @@ export default function App() {
       cancelled = true;
     };
   }, [showActivityTimeline, roomId]);
+
+  // Load durable snapshots when the version history panel opens.
+  useEffect(() => {
+    if (!showVersionHistory || !roomId) return;
+    let cancelled = false;
+    setIsLoadingSnapshots(true);
+    apiFetchJson<{ success: boolean; snapshots: BoardSnapshotMeta[] }>(
+      `/api/rooms/${encodeURIComponent(roomId)}/snapshots?limit=20`
+    )
+      .then((res) => {
+        if (cancelled || !res.success || !Array.isArray(res.snapshots)) return;
+        setBoardSnapshots(res.snapshots);
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setIsLoadingSnapshots(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [showVersionHistory, roomId]);
+
+  // A restore completes (or fails) asynchronously; always clear the local busy flag.
+  useEffect(() => {
+    if (!socket) return;
+    const onRestored = () => setIsRestoringSnapshot(false);
+    const onError = () => setIsRestoringSnapshot(false);
+    socket.on('board-restored', onRestored);
+    socket.on('snapshot-error', onError);
+    return () => {
+      socket.off('board-restored', onRestored);
+      socket.off('snapshot-error', onError);
+    };
+  }, [socket]);
+
+  const handlePreviewSnapshot = useCallback(
+    async (snapshotId: string) => {
+      if (!roomId) return;
+      try {
+        const res = await apiFetchJson<{ success: boolean; snapshot: BoardSnapshotDetail }>(
+          `/api/rooms/${encodeURIComponent(roomId)}/snapshots/${encodeURIComponent(snapshotId)}`
+        );
+        if (res.success && res.snapshot) setSelectedSnapshot(res.snapshot);
+      } catch {
+        // The hook's snapshot-error/session handling covers user feedback.
+      }
+    },
+    [roomId]
+  );
+
+  const handleRequestRestoreSnapshot = useCallback(
+    (snapshot: BoardSnapshotMeta) => {
+      if (!isHost || !roomId) return;
+      setConfirmModalState({
+        isOpen: true,
+        title: 'Restore this version?',
+        message: `This replaces the board for everyone with the version saved at ${new Date(snapshot.timestamp).toLocaleString()}. The restore is recorded in the activity timeline.`,
+        confirmText: 'Restore for everyone',
+        cancelText: 'Cancel',
+        variant: 'warning',
+        onConfirm: () => {
+          if (emitRestoreSnapshot(snapshot.id)) setIsRestoringSnapshot(true);
+          setSelectedSnapshot(null);
+        },
+      });
+    },
+    [emitRestoreSnapshot, isHost, roomId]
+  );
 
   // Global Ctrl+K / Cmd+K launcher for Command Palette.
   useEffect(() => {
@@ -1435,11 +1511,25 @@ export default function App() {
         label: showActivityTimeline ? 'Hide Activity Timeline' : 'Open Activity Timeline',
         category: 'Attribution',
         icon: History,
-        onSelect: () => setShowActivityTimeline((prev) => !prev),
+        onSelect: () => {
+          setShowActivityTimeline((prev) => !prev);
+          setShowVersionHistory(false);
+        },
+      },
+      {
+        id: 'cmd-version-history',
+        label: showVersionHistory ? 'Hide Version History' : 'Open Version History',
+        category: 'Attribution',
+        icon: Clock,
+        disabled: isSoloMode,
+        onSelect: () => {
+          setShowVersionHistory((prev) => !prev);
+          setShowActivityTimeline(false);
+        },
       },
       ...toolItems,
     ];
-  }, [whiteboardActions, blameMode, toggleBlameMode, showActivityTimeline]);
+  }, [whiteboardActions, blameMode, toggleBlameMode, showActivityTimeline, showVersionHistory, isSoloMode]);
 
   useModalA11y({
     isOpen: isKicked,
@@ -1643,12 +1733,36 @@ export default function App() {
 
       {/* Attribution: Activity Timeline Toggle */}
       <button
+        id="version-history-btn"
+        type="button"
+        aria-pressed={showVersionHistory}
+        aria-label={showVersionHistory ? 'Close version history' : 'Open board version history'}
+        title="Version history & restore"
+        disabled={isSoloMode}
+        onClick={() => {
+          setShowVersionHistory((prev) => !prev);
+          setShowActivityTimeline(false);
+        }}
+        className={`fixed right-3 sm:right-4 bottom-[calc(env(safe-area-inset-bottom,0px)+9.75rem)] sm:bottom-[158px] wb-right-chat-aware z-40 flex items-center gap-1.5 px-2.5 sm:px-3 py-2 rounded-2xl backdrop-blur-md border shadow-lg text-xs font-semibold transition-all cursor-pointer select-none disabled:opacity-40 disabled:cursor-not-allowed ${
+          showVersionHistory
+            ? 'bg-blue-600/95 border-blue-400 text-white shadow-blue-500/30 ring-2 ring-blue-400/40'
+            : 'bg-white/95 dark:bg-slate-900/95 border-slate-200/90 dark:border-slate-800 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800'
+        }`}
+      >
+        <Clock className="w-3.5 h-3.5 shrink-0" aria-hidden />
+        <span className="hidden sm:inline">Versions</span>
+      </button>
+
+      <button
         id="activity-timeline-btn"
         type="button"
         aria-pressed={showActivityTimeline}
         aria-label={showActivityTimeline ? 'Close activity timeline' : 'Open room activity timeline'}
         title="Activity Timeline & Command Palette (Ctrl+K)"
-        onClick={() => setShowActivityTimeline((prev) => !prev)}
+        onClick={() => {
+          setShowActivityTimeline((prev) => !prev);
+          setShowVersionHistory(false);
+        }}
         className={`fixed right-3 sm:right-4 bottom-[calc(env(safe-area-inset-bottom,0px)+7.25rem)] sm:bottom-[112px] wb-right-chat-aware z-40 flex items-center gap-1.5 px-2.5 sm:px-3 py-2 rounded-2xl backdrop-blur-md border shadow-lg text-xs font-semibold transition-all cursor-pointer select-none ${
           showActivityTimeline
             ? 'bg-blue-600/95 border-blue-400 text-white shadow-blue-500/30 ring-2 ring-blue-400/40'
@@ -1676,6 +1790,19 @@ export default function App() {
             badgeLabel: 'Focused',
           });
         }}
+      />
+
+      {/* Durable board versions with explicit restore confirmation */}
+      <VersionHistoryPanel
+        isOpen={showVersionHistory}
+        onClose={() => setShowVersionHistory(false)}
+        snapshots={boardSnapshots}
+        selectedSnapshot={selectedSnapshot}
+        isLoading={isLoadingSnapshots}
+        isRestoring={isRestoringSnapshot}
+        canRestore={isHost && !isSoloMode}
+        onPreview={handlePreviewSnapshot}
+        onRestore={handleRequestRestoreSnapshot}
       />
 
       {/* Fuzzy Command Palette (Ctrl+K / Cmd+K) */}
