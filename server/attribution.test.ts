@@ -195,7 +195,7 @@ test('findHoveredElementAtPoint respects z-order, strokes, wires, and empty canv
 });
 
 test('server board-cleared includes clearedBy metadata and App wires blame UI (#214)', () => {
-  const serverSource = readFileSync(new URL('./index.ts', import.meta.url), 'utf8');
+  const serverSource = readFileSync(new URL('./sockets/canvasHandler.ts', import.meta.url), 'utf8');
   assert.match(serverSource, /stampElementAttribution/);
   assert.match(serverSource, /clearedBy:\s*\{/);
 
