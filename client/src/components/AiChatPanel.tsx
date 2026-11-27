@@ -587,7 +587,7 @@ export const AiChatPanel: React.FC<AiChatPanelProps> = ({
             </form>
 
             <p className="mt-1.5 mb-0.5 text-[10px] text-slate-400 dark:text-slate-500 text-center">
-              Changes apply instantly · Ctrl+Z undoes one AI turn
+              Changes apply instantly · Ctrl+Z or Undo AI reverses one AI turn
             </p>
           </div>
         )}

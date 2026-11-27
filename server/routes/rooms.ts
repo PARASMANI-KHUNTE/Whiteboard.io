@@ -22,6 +22,7 @@ import {
 } from "../roomStore";
 import { getBoardEvents } from "../boardChangeLog";
 import { getBoardSnapshot, listBoardSnapshots } from "../boardSnapshots";
+import { getDiagramRevision, listDiagramRevisions } from "../aiRevisionHistory";
 import {
   MAX_UPLOAD_BYTES,
   addRoomRecording,
@@ -202,6 +203,54 @@ export function setupRoomsRoutes(app: express.Express, options: RoomsRoutesOptio
       res.json({ success: true, snapshot });
     } catch (err: any) {
       res.status(500).json({ success: false, error: err.message || "Could not retrieve board snapshot" });
+    }
+  });
+
+  // AI diagram revision history (#241). Metadata only in the list view, with
+  // the full AI element group available from the detail endpoint.
+  app.get("/api/rooms/:roomId/ai-revisions", async (req, res) => {
+    try {
+      const roomId = req.params.roomId;
+      if (!SAFE_SNAPSHOT_ID.test(roomId)) {
+        res.status(400).json({ success: false, error: "Invalid room id" });
+        return;
+      }
+      const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 20;
+      const revisions = await listDiagramRevisions(roomId, limit);
+      res.json({
+        success: true,
+        revisions: revisions.map(({ id, roomId, sessionId, prompt, title, author, timestamp, elements }) => ({
+          id,
+          roomId,
+          sessionId,
+          prompt,
+          title,
+          author,
+          timestamp,
+          elementCount: elements.length,
+        })),
+      });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message || "Could not retrieve AI revisions" });
+    }
+  });
+
+  app.get("/api/rooms/:roomId/ai-revisions/:revisionId", async (req, res) => {
+    try {
+      const roomId = req.params.roomId;
+      const revisionId = req.params.revisionId;
+      if (!SAFE_SNAPSHOT_ID.test(roomId) || !SAFE_SNAPSHOT_ID.test(revisionId)) {
+        res.status(400).json({ success: false, error: "Invalid revision id" });
+        return;
+      }
+      const revision = await getDiagramRevision(roomId, revisionId);
+      if (!revision) {
+        res.status(404).json({ success: false, error: "AI revision not found." });
+        return;
+      }
+      res.json({ success: true, revision });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message || "Could not retrieve AI revision" });
     }
   });
 

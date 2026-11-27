@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import {
   CheckSquare,
   Download,
+  History,
   Info,
   Keyboard,
   LogIn,
@@ -39,6 +40,9 @@ export type WhiteboardActionId =
   | 'admin'
   | 'aiDiagram'
   | 'aiChat'
+  | 'aiRevisions'
+  | 'aiUndo'
+  | 'aiRedo'
   | 'voiceToggle'
   | 'voiceMute'
   | 'recordings'
@@ -102,6 +106,8 @@ export interface UseWhiteboardActionsParams {
   canWrite: boolean;
   canUndo: boolean;
   canRedo: boolean;
+  canUndoAi: boolean;
+  canRedoAi: boolean;
   isMultiplayer: boolean;
   isSoloMode: boolean;
   isHost: boolean;
@@ -125,6 +131,9 @@ export interface UseWhiteboardActionsParams {
   onOpenAdmin: () => void;
   onOpenAiDiagram: () => void;
   onToggleAiChat: () => void;
+  onOpenAiRevisions: () => void;
+  onUndoAi: () => void;
+  onRedoAi: () => void;
   onToggleSidebar: () => void;
   onToggleVoice: () => void;
   onToggleMute: () => void;
@@ -145,6 +154,8 @@ export function useWhiteboardActions({
   canWrite,
   canUndo,
   canRedo,
+  canUndoAi,
+  canRedoAi,
   isMultiplayer,
   isSoloMode,
   isHost,
@@ -168,6 +179,9 @@ export function useWhiteboardActions({
   onOpenAdmin,
   onOpenAiDiagram,
   onToggleAiChat,
+  onOpenAiRevisions,
+  onUndoAi,
+  onRedoAi,
   onToggleSidebar,
   onToggleVoice,
   onToggleMute,
@@ -373,6 +387,36 @@ export function useWhiteboardActions({
         disabled: false,
         handler: onToggleAiChat,
       },
+      aiRevisions: {
+        id: 'aiRevisions',
+        label: 'AI Revisions',
+        shortLabel: 'AI Revisions',
+        ariaLabel: 'Open AI diagram revision history',
+        title: 'Browse AI diagram revisions saved in this room',
+        icon: History,
+        disabled: isSoloMode,
+        handler: onOpenAiRevisions,
+      },
+      aiUndo: {
+        id: 'aiUndo',
+        label: 'Undo AI Revision',
+        shortLabel: 'Undo AI',
+        ariaLabel: 'Undo the last AI revision',
+        title: 'Undo the last AI diagram change without touching manual edits',
+        icon: Undo2,
+        disabled: !canUndoAi || !canWrite,
+        handler: onUndoAi,
+      },
+      aiRedo: {
+        id: 'aiRedo',
+        label: 'Redo AI Revision',
+        shortLabel: 'Redo AI',
+        ariaLabel: 'Redo the last AI revision',
+        title: 'Redo the last AI diagram change',
+        icon: Redo2,
+        disabled: !canRedoAi || !canWrite,
+        handler: onRedoAi,
+      },
       voiceToggle: {
         id: 'voiceToggle',
         label: voiceConnectionMeta.label,
@@ -473,6 +517,8 @@ export function useWhiteboardActions({
     canWrite,
     canUndo,
     canRedo,
+    canUndoAi,
+    canRedoAi,
     isMultiplayer,
     isSoloMode,
     isHost,
@@ -496,6 +542,9 @@ export function useWhiteboardActions({
     onOpenAdmin,
     onOpenAiDiagram,
     onToggleAiChat,
+    onOpenAiRevisions,
+    onUndoAi,
+    onRedoAi,
     onToggleSidebar,
     onToggleVoice,
     onToggleMute,
