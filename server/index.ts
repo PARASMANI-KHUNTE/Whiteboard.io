@@ -27,7 +27,12 @@ import {
   hasPendingElementSave,
   type RoomPermission,
 } from "./auth";
-import { connectDb, checkDbHealth, disconnectDb } from "./db";
+import { connectDb, checkDbHealth, disconnectDb, getRateLimitsCollection } from "./db";
+import {
+  MemoryRateLimitStore,
+  DistributedRateLimitStore,
+  createAuthRateLimiter,
+} from "./authRateLimiter";
 import { resolveSocketIdentity } from "./socketIdentity";
 import { chooseReplacementHost } from "./roomHost";
 import { canDirectClearBoard } from "./boardClear";
@@ -441,56 +446,24 @@ function clearAuthCookie(req: express.Request, res: express.Response): void {
   });
 }
 
-// In-memory rate limiter to protect against credential stuffing / brute-force.
-// Buckets are namespaced per endpoint so exhausting one limit cannot block others.
-const authRateLimitMap = new Map<string, { count: number; resetTime: number }>();
-const MAX_AUTH_RATE_LIMIT_KEYS = 10_000;
+// Distributed rate limiter backed by MongoDB (with bounded in-memory fallback)
+// so multi-process/clustered deployments share counters (#236).
+const memoryRateLimitStore = new MemoryRateLimitStore(10_000);
+const distributedRateLimitStore = new DistributedRateLimitStore(
+  () => getRateLimitsCollection(),
+  memoryRateLimitStore
+);
+const authRateLimiter = createAuthRateLimiter(distributedRateLimitStore);
 
-/** Bound limiter keys so random tokens cannot turn the map into a memory leak. */
-function rememberRateLimitBucket(key: string, record: { count: number; resetTime: number }): void {
-  if (!authRateLimitMap.has(key) && authRateLimitMap.size >= MAX_AUTH_RATE_LIMIT_KEYS) {
-    const oldest = authRateLimitMap.keys().next().value;
-    if (oldest !== undefined) authRateLimitMap.delete(oldest);
-  }
-  authRateLimitMap.set(key, record);
-}
-
-// Periodic pruning of expired rate-limit records
-setInterval(() => {
-  const now = Date.now();
-  for (const [key, record] of authRateLimitMap.entries()) {
-    if (now > record.resetTime) {
-      authRateLimitMap.delete(key);
-    }
-  }
+// Periodic pruning of expired in-memory rate-limit records; unref'd so it
+// never keeps the Node.js event loop alive during shutdown or tests.
+const rateLimitPruneTimer = setInterval(() => {
+  memoryRateLimitStore.prune();
   joinSocketLimiter.prune();
   joinIpLimiter.prune();
   signalingLimiter.prune();
 }, 10 * 60 * 1000);
-
-function authRateLimiter(maxRequests = 30, windowMs = 60000, bucket = "default") {
-  return (req: express.Request, res: express.Response, next: express.NextFunction) => {
-    const ip = req.ip || req.socket.remoteAddress || "unknown_ip";
-    const key = `${bucket}:${ip}`;
-    const now = Date.now();
-    const record = authRateLimitMap.get(key);
-
-    if (!record || now > record.resetTime) {
-      rememberRateLimitBucket(key, { count: 1, resetTime: now + windowMs });
-      return next();
-    }
-
-    record.count++;
-    if (record.count > maxRequests) {
-      res.status(429).json({
-        success: false,
-        error: "Too many requests. Please slow down and try again shortly.",
-      });
-      return;
-    }
-    next();
-  };
-}
+rateLimitPruneTimer.unref();
 
 async function startServer() {
   await connectDb();

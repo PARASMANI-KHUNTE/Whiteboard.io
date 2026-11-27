@@ -52,6 +52,12 @@ export interface IndividualElementDoc {
   updatedAt: number;
 }
 
+export interface RateLimitDoc {
+  key: string;
+  count: number;
+  expiresAt: Date;
+}
+
 let client: MongoClient | null = null;
 let db: Db | null = null;
 let connectPromise: Promise<Db> | null = null;
@@ -96,6 +102,7 @@ export async function connectDb(): Promise<Db> {
       const rooms = connectedDb.collection<SessionRoomDoc>('rooms');
       const elements = connectedDb.collection<RoomElementsDoc>('elements');
       const individualElements = connectedDb.collection<IndividualElementDoc>('room_elements');
+      const rateLimits = connectedDb.collection<RateLimitDoc>('rate_limits');
 
       const indexSpecs: Array<[string, Promise<string>]> = [
         ['users.id', users.createIndex({ id: 1 }, { unique: true })],
@@ -119,6 +126,8 @@ export async function connectDb(): Promise<Db> {
           individualElements.createIndex({ roomId: 1, elementId: 1 }, { unique: true }),
         ],
         ['room_elements.roomId', individualElements.createIndex({ roomId: 1 })],
+        ['rate_limits.key', rateLimits.createIndex({ key: 1 }, { unique: true })],
+        ['rate_limits.expiresAt', rateLimits.createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 })],
       ];
 
       const results = await Promise.allSettled(indexSpecs.map(([, promise]) => promise));
@@ -169,6 +178,11 @@ export function getElementsCollection(): Collection<RoomElementsDoc> {
 
 export function getIndividualElementsCollection(): Collection<IndividualElementDoc> {
   return getDb().collection<IndividualElementDoc>('room_elements');
+}
+
+export function getRateLimitsCollection(): Collection<RateLimitDoc> | null {
+  if (!db) return null;
+  return db.collection<RateLimitDoc>('rate_limits');
 }
 
 export async function checkDbHealth(): Promise<{ connected: boolean; latencyMs?: number; error?: string }> {
