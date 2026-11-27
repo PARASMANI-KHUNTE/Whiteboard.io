@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import { X } from 'lucide-react';
-import type { CanvasElement } from '../../types';
+import type { CanvasElement, RemoteUser } from '../../types';
 import { computeMinimapScene, minimapPointToWorldPan } from '../../utils/minimapGeometry';
 
 interface CanvasMinimapProps {
@@ -10,9 +10,15 @@ interface CanvasMinimapProps {
   zoom: number;
   viewportWidth: number;
   viewportHeight: number;
+  /** Live collaborator state from the shared cursor-moved socket subscription. */
+  collaborators?: Record<string, RemoteUser>;
+  currentUserId?: string;
   onPanTo: (nextPan: { x: number; y: number }) => void;
   onClose: () => void;
 }
+
+const MINIMAP_WIDTH = 176;
+const MINIMAP_HEIGHT = 112;
 
 /**
  * Collapsible corner minimap displaying element distribution and the current
@@ -25,12 +31,28 @@ export const CanvasMinimap: React.FC<CanvasMinimapProps> = ({
   zoom,
   viewportWidth,
   viewportHeight,
+  collaborators,
+  currentUserId,
   onPanTo,
   onClose,
 }) => {
+  const remoteCollaborators = useMemo(
+    () => Object.values(collaborators ?? {}).filter((user) => user.id !== currentUserId),
+    [collaborators, currentUserId]
+  );
+
   const scene = useMemo(
-    () => computeMinimapScene(elements, pan, zoom, viewportWidth, viewportHeight),
-    [elements, pan, zoom, viewportWidth, viewportHeight]
+    () => computeMinimapScene(
+      elements,
+      pan,
+      zoom,
+      viewportWidth,
+      viewportHeight,
+      MINIMAP_WIDTH,
+      MINIMAP_HEIGHT,
+      remoteCollaborators
+    ),
+    [elements, pan, zoom, viewportWidth, viewportHeight, remoteCollaborators]
   );
 
   if (!visible) return null;
@@ -91,6 +113,20 @@ export const CanvasMinimap: React.FC<CanvasMinimapProps> = ({
           stroke="#3b82f6"
           strokeWidth={1.5}
         />
+        {scene.cursors.map((cursor) => (
+          <circle
+            key={`minimap-cursor-${cursor.id}`}
+            data-collaborator-id={cursor.id}
+            cx={cursor.x}
+            cy={cursor.y}
+            r={cursor.isDrawing ? 3.5 : 2.75}
+            fill={cursor.color}
+            stroke="#ffffff"
+            strokeWidth={1.25}
+          >
+            <title>{cursor.name}</title>
+          </circle>
+        ))}
       </svg>
     </div>
   );

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
-import { computeMinimapScene, minimapPointToWorldPan } from '../client/src/utils/minimapGeometry';
+import { computeMinimapScene, minimapPointToWorldPan, projectMinimapCursors } from '../client/src/utils/minimapGeometry';
 import type { ShapeElement } from '../client/src/types';
 
 test('minimap geometry projects elements and maps clicks back to camera pan (#223)', () => {
@@ -34,6 +34,35 @@ test('minimap geometry projects elements and maps clicks back to camera pan (#22
   assert.ok(Math.abs(pan.y - (300 - 340)) < 2);
 });
 
+test('minimap geometry projects live collaborator cursors into the minimap box (#240)', () => {
+  const collaborators = [
+    { id: 'u2', name: 'Mina', color: '#f97316', cursor: { x: 1600, y: 900, isDrawing: true } },
+    { id: 'u3', name: 'Sam', color: '#22c55e' },
+  ];
+
+  const scene = computeMinimapScene(
+    {},
+    { x: 0, y: 0 },
+    1,
+    1000,
+    600,
+    176,
+    112,
+    collaborators
+  );
+
+  assert.equal(scene.cursors.length, 1);
+  assert.equal(scene.cursors[0].id, 'u2');
+  assert.equal(scene.cursors[0].name, 'Mina');
+  assert.equal(scene.cursors[0].color, '#f97316');
+  assert.equal(scene.cursors[0].isDrawing, true);
+  assert.ok(scene.cursors[0].x >= 0 && scene.cursors[0].x <= 176);
+  assert.ok(scene.cursors[0].y >= 0 && scene.cursors[0].y <= 112);
+
+  const projected = projectMinimapCursors(collaborators, scene);
+  assert.deepEqual(projected, scene.cursors);
+});
+
 test('ZoomControls, Header, and Canvas wire Fit All, Minimap, and Follow Collaborator (#223)', () => {
   const zoomControls = readFileSync(
     new URL('../client/src/components/ZoomControls.tsx', import.meta.url),
@@ -55,4 +84,23 @@ test('ZoomControls, Header, and Canvas wire Fit All, Minimap, and Follow Collabo
   assert.match(canvas, /fitAllToScreen/);
   assert.match(canvas, /<CanvasMinimap/);
   assert.match(canvas, /followingUserId/);
+});
+
+test('CanvasMinimap renders live collaborator dots with name tooltips (#240)', () => {
+  const minimap = readFileSync(
+    new URL('../client/src/components/ui/CanvasMinimap.tsx', import.meta.url),
+    'utf8'
+  );
+  assert.match(minimap, /collaborators\?: Record<string, RemoteUser>/);
+  assert.match(minimap, /currentUserId\?: string/);
+  assert.match(minimap, /scene\.cursors\.map/);
+  assert.match(minimap, /<circle/);
+  assert.match(minimap, /<title>\{cursor\.name\}<\/title>/);
+
+  const canvas = readFileSync(
+    new URL('../client/src/components/Canvas.tsx', import.meta.url),
+    'utf8'
+  );
+  assert.match(canvas, /collaborators=\{remoteUsers\}/);
+  assert.match(canvas, /currentUserId=\{currentUserId\}/);
 });
