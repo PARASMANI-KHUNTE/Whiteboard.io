@@ -5,9 +5,13 @@ import {
   verifyOAuthState,
   readCookie,
   oauthCookieOptions,
+  authCookieOptions,
+  extractAuthToken,
   OAUTH_NONCE_COOKIE,
+  AUTH_COOKIE_NAME,
   OAUTH_STATE_TTL_MS,
 } from './oauthState';
+import { TOKEN_TTL_MS } from './tokenExpiry';
 
 const NOW = 1_700_000_000_000;
 const NONCE = 'a-random-nonce-value';
@@ -91,4 +95,29 @@ test('keeps a Lax cookie for cross-origin local HTTP development', () => {
 test('falls back to Lax for missing or malformed origins', () => {
   assert.equal(oauthCookieOptions({}).sameSite, 'lax');
   assert.equal(oauthCookieOptions({ frontendOrigin: 'not a url' }).sameSite, 'lax');
+});
+
+test('authCookieOptions configures httpOnly cookie with full session TTL', () => {
+  const options = authCookieOptions({
+    frontendOrigin: 'https://app.example.com',
+    serverOrigin: 'https://app.example.com',
+    secure: true,
+  });
+  assert.equal(options.httpOnly, true);
+  assert.equal(options.sameSite, 'lax');
+  assert.equal(options.secure, true);
+  assert.equal(options.maxAge, TOKEN_TTL_MS);
+  assert.equal(options.path, '/');
+});
+
+test('extractAuthToken prefers Bearer header and falls back to httpOnly auth cookie', () => {
+  assert.equal(
+    extractAuthToken('Bearer header-tok', `${AUTH_COOKIE_NAME}=cookie-tok`),
+    'header-tok'
+  );
+  assert.equal(
+    extractAuthToken(undefined, `other=1; ${AUTH_COOKIE_NAME}=cookie-tok`),
+    'cookie-tok'
+  );
+  assert.equal(extractAuthToken(undefined, 'other=1'), null);
 });

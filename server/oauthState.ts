@@ -1,6 +1,8 @@
 import crypto from 'crypto';
+import { TOKEN_TTL_MS } from './tokenExpiry';
 
 export const OAUTH_NONCE_COOKIE = 'wb_oauth_nonce';
+export const AUTH_COOKIE_NAME = 'whiteboard_auth';
 export const OAUTH_STATE_TTL_MS = 10 * 60 * 1000;
 const MAX_CLOCK_SKEW_MS = 60 * 1000;
 
@@ -46,6 +48,35 @@ export function oauthCookieOptions({
     maxAge: OAUTH_STATE_TTL_MS,
     path: "/",
   };
+}
+
+/**
+ * Cookie attributes for the persistent `httpOnly` auth session cookie.
+ */
+export function authCookieOptions(params: {
+  frontendOrigin?: string;
+  serverOrigin?: string;
+  secure?: boolean;
+}): OAuthCookieOptions {
+  return {
+    ...oauthCookieOptions(params),
+    maxAge: TOKEN_TTL_MS,
+  };
+}
+
+/**
+ * Resolve a session token from either an `Authorization: Bearer ...` header
+ * or the `httpOnly` `whiteboard_auth` cookie.
+ */
+export function extractAuthToken(
+  authHeader: string | undefined,
+  cookieHeader: string | undefined
+): string | null {
+  if (typeof authHeader === "string" && authHeader.trim()) {
+    const bearer = authHeader.replace(/^Bearer\s+/i, "").trim();
+    if (bearer) return bearer;
+  }
+  return readCookie(cookieHeader, AUTH_COOKIE_NAME);
 }
 
 export interface OAuthStatePayload {
